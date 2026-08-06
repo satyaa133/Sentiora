@@ -5,13 +5,13 @@
   "description": "Sentiora Chrome Extension scaffold.",
   "action": {
     "default_title": "Sentiora",
-    "default_popup": "popup/index.html"
+    "default_popup": "src/popup/index.html"
   },
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "content_scripts": [
     {

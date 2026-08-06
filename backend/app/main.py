@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.auth_routes import router as auth_router
 from app.api.v1.health_routes import router as health_router
+from app.api.v1.memory_routes import router as memory_router
 from app.api.v1.user_routes import router as user_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -35,6 +36,7 @@ if settings.cors_origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
+        allow_origin_regex=r"chrome-extension://.*",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -43,8 +45,10 @@ if settings.cors_origins:
 
 def _meta(request: Request) -> dict:
     return {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "request_id": getattr(request.state, "request_id", f"req_{uuid.uuid4().hex[:8]}"),
+        "timestamp": datetime.now(UTC).isoformat(),
+        "request_id": getattr(
+            request.state, "request_id", f"req_{uuid.uuid4().hex[:8]}"
+        ),
     }
 
 
@@ -69,7 +73,9 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def validation_exception_handler(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
     details = []
     for error in exc.errors():
         field = ".".join(str(loc) for loc in error["loc"] if loc != "body")
@@ -108,3 +114,4 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 app.include_router(health_router)
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(user_router, prefix=settings.api_v1_prefix)
+app.include_router(memory_router, prefix=settings.api_v1_prefix)

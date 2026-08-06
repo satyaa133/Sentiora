@@ -27,6 +27,10 @@ def _get_session_factory() -> sessionmaker[Session]:
     )
 
 
+def SessionLocal() -> Session:  # noqa: N802
+    return _get_session_factory()()
+
+
 class Base(DeclarativeBase):
     pass
 

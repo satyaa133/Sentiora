@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
@@ -7,7 +7,7 @@ T = TypeVar("T")
 
 
 def current_utc_timestamp() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class ResponseMeta(BaseModel):

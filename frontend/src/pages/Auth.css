@@ -1,100 +1,96 @@
 /* ============================================================
-   Auth.css — Authentication pages styling (Login, SignUp)
-   Follows the Figma Design: warm cream background, white card,
-   dark green CTA button, serif logo, clean typography
+   Auth.css — Sentiora Figma Authentication Styling
+   Exact match for Design/Figma/Screenshots/Auth/Landing_Page.png & Sign_Up.png
    ============================================================ */
 
-/* ── Page Layout ── */
 .auth-page {
   min-height: 100vh;
-  background-color: #f0ede8;
+  background-color: #FFFDF7;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 2rem 1rem;
-  font-family: inherit;
+  padding: 2.5rem 1rem;
+  font-family: "Public Sans", Inter, system-ui, sans-serif;
+  color: #1F2421;
 }
 
-/* ── Logo + Tagline ── */
 .auth-header {
   text-align: center;
-  margin-bottom: 1.75rem;
+  margin-bottom: 2rem;
 }
 
 .auth-logo {
-  font-size: 2rem;
+  font-size: 2.25rem;
   font-weight: 700;
-  color: #1c1c1c;
+  color: #1F2421;
   letter-spacing: -0.02em;
-  margin: 0 0 0.25rem;
-  font-family: Georgia, "Times New Roman", serif;
+  margin: 0 0 0.35rem;
+  font-family: "Charter", "Source Serif 4", Georgia, serif;
 }
 
 .auth-tagline {
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.22em;
-  color: #5a7a5a;
+  color: #2C6F54;
   text-transform: uppercase;
   margin: 0;
 }
 
-/* ── Card ── */
 .auth-card {
-  background: #ffffff;
+  background: #FFFFFF;
+  border: 1px solid #E5DFD0;
   border-radius: 1rem;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 12px 32px rgba(31, 36, 33, 0.06);
   width: 100%;
-  max-width: 22rem;
+  max-width: 26rem;
 }
 
 .auth-card-inner {
-  padding: 2rem;
+  padding: 2.5rem;
 }
 
-/* ── Headings ── */
 .auth-title {
-  font-size: 1.375rem;
+  font-size: 1.5rem;
   font-weight: 700;
-  color: #1c1c1c;
-  margin: 0 0 0.375rem;
-  letter-spacing: -0.01em;
+  color: #1F2421;
+  margin: 0 0 0.35rem;
+  font-family: "Charter", "Source Serif 4", Georgia, serif;
 }
 
 .auth-subtitle {
   font-size: 0.875rem;
-  color: #6b6b6b;
-  margin: 0 0 1.5rem;
+  color: #60706A;
+  margin: 0 0 1.75rem;
   line-height: 1.5;
 }
 
-/* ── Error Banner ── */
 .auth-error-banner {
-  background: #fef2f2;
-  border: 1px solid #fca5a5;
-  color: #b91c1c;
-  border-radius: 0.5rem;
-  padding: 0.625rem 0.875rem;
+  background: #FDF2F2;
+  border: 1px solid #F87171;
+  color: #9E2F2F;
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
   font-size: 0.8125rem;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
+  font-weight: 500;
 }
 
-/* ── Fields ── */
 .auth-field {
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .auth-field--checkbox {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
 }
 
 .auth-label {
   display: block;
   font-size: 0.8125rem;
-  font-weight: 500;
-  color: #1c1c1c;
-  margin-bottom: 0.375rem;
+  font-weight: 600;
+  color: #1F2421;
+  margin-bottom: 0.4rem;
 }
 
 .auth-input-wrapper {
@@ -104,28 +100,29 @@
 .auth-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 0.625rem 0.75rem;
-  border: 1.5px solid #d6d3ce;
-  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid #E5DFD0;
+  border-radius: 0.75rem;
   font-size: 0.9rem;
-  color: #1c1c1c;
-  background: #fafaf9;
+  color: #1F2421;
+  background: #FFFDF7;
   outline: none;
-  transition: border-color 0.15s ease;
+  transition: all 0.15s ease;
 }
 
 .auth-input::placeholder {
-  color: #a8a29e;
+  color: #9CA3AF;
 }
 
 .auth-input:focus {
-  border-color: #4a7a4a;
-  background: #fff;
+  border-color: #2C6F54;
+  background: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(44, 111, 84, 0.12);
 }
 
 .auth-input--error {
-  border-color: #dc2626 !important;
-  background: #fff5f5;
+  border-color: #9E2F2F !important;
+  background: #FFF5F5;
 }
 
 .auth-input--with-action {
@@ -134,112 +131,75 @@
 
 .auth-input-action {
   position: absolute;
-  right: 0.75rem;
+  right: 0.875rem;
   top: 50%;
   transform: translateY(-50%);
   background: none;
   border: none;
   cursor: pointer;
   font-size: 0.8125rem;
-  color: #6b6b6b;
-  font-weight: 500;
+  color: #2C6F54;
+  font-weight: 600;
   padding: 0;
 }
 
 .auth-input-action:hover {
-  color: #1c1c1c;
+  color: #235943;
 }
 
 .auth-field-error {
   font-size: 0.78125rem;
-  color: #dc2626;
-  margin: 0.3rem 0 0;
+  color: #9E2F2F;
+  margin: 0.35rem 0 0;
 }
 
-/* ── Password Strength ── */
-.auth-password-strength {
-  margin-top: 0.5rem;
-}
-
-.auth-strength-bar {
-  display: flex;
-  gap: 0.25rem;
-  margin-bottom: 0.25rem;
-}
-
-.auth-strength-segment {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: #e5e2de;
-  transition: background 0.2s;
-}
-
-.auth-strength-segment--active[data-level="1"] { background: #ef4444; }
-.auth-strength-segment--active[data-level="2"] { background: #f97316; }
-.auth-strength-segment--active[data-level="3"] { background: #eab308; }
-.auth-strength-segment--active[data-level="4"] { background: #22c55e; }
-
-.auth-strength-label {
-  font-size: 0.75rem;
-  color: #6b6b6b;
-  margin: 0;
-}
-
-.auth-strength-label--strong {
-  color: #16a34a;
-  font-weight: 500;
-}
-
-/* ── Forgot Password ── */
 .auth-forgot-row {
   text-align: right;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
 }
 
 .auth-forgot-link {
   font-size: 0.8125rem;
-  color: #4a7a4a;
+  color: #2C6F54;
   text-decoration: none;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .auth-forgot-link:hover {
   text-decoration: underline;
 }
 
-/* ── Primary Button ── */
 .auth-btn-primary {
   width: 100%;
-  padding: 0.75rem;
-  background-color: #3d6142;
-  color: #ffffff;
+  padding: 0.875rem;
+  background-color: #2C6F54;
+  color: #FFFFFF;
   border: none;
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.15s ease, opacity 0.15s ease;
-  letter-spacing: 0.01em;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .auth-btn-primary:hover:not(:disabled) {
-  background-color: #2f4e35;
+  background-color: #235943;
+  box-shadow: 0 4px 12px rgba(44, 111, 84, 0.25);
 }
 
 .auth-btn-primary:disabled {
-  opacity: 0.65;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 
-/* ── Divider ── */
 .auth-divider {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin: 1.25rem 0;
-  color: #a8a29e;
+  margin: 1.5rem 0;
+  color: #9CA3AF;
   font-size: 0.8125rem;
+  font-weight: 500;
 }
 
 .auth-divider::before,
@@ -247,51 +207,41 @@
   content: "";
   flex: 1;
   height: 1px;
-  background: #e5e2de;
+  background: #E5DFD0;
 }
 
-/* ── Social Button ── */
 .auth-btn-social {
   width: 100%;
-  padding: 0.6875rem;
-  background: #fff;
-  border: 1.5px solid #d6d3ce;
-  border-radius: 0.5rem;
+  padding: 0.75rem;
+  background: #FFFFFF;
+  border: 1px solid #E5DFD0;
+  border-radius: 0.75rem;
   font-size: 0.875rem;
-  font-weight: 500;
-  color: #1c1c1c;
+  font-weight: 600;
+  color: #1F2421;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  transition: background 0.15s ease;
+  gap: 0.625rem;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .auth-btn-social:hover:not(:disabled) {
-  background: #f7f6f4;
+  background: #FAF8F1;
+  border-color: #2C6F54;
 }
 
-.auth-btn-social:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.auth-btn-social-icon {
-  font-size: 1rem;
-}
-
-/* ── Switch Link ── */
 .auth-switch {
   text-align: center;
-  margin: 1.25rem 0 0;
+  margin: 1.5rem 0 0;
   font-size: 0.8125rem;
-  color: #6b6b6b;
+  color: #60706A;
 }
 
 .auth-switch-link {
-  color: #3d6142;
-  font-weight: 600;
+  color: #2C6F54;
+  font-weight: 700;
   text-decoration: none;
 }
 
@@ -299,32 +249,30 @@
   text-decoration: underline;
 }
 
-/* ── Checkbox ── */
 .auth-checkbox-label {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: 0.625rem;
   font-size: 0.8125rem;
-  color: #4a4a4a;
+  color: #3F4A45;
   cursor: pointer;
   line-height: 1.5;
 }
 
 .auth-checkbox {
-  width: 1rem;
-  height: 1rem;
-  margin-top: 0.125rem;
-  accent-color: #3d6142;
-  flex-shrink: 0;
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.1rem;
+  accent-color: #2C6F54;
+  border-radius: 0.25rem;
   cursor: pointer;
 }
 
-/* ── Loading Spinner ── */
 .sentiora-spinner {
   width: 2rem;
   height: 2rem;
-  border: 3px solid #e5e2de;
-  border-top-color: #3d6142;
+  border: 3px solid #E5DFD0;
+  border-top-color: #2C6F54;
   border-radius: 50%;
   animation: spin 0.75s linear infinite;
 }

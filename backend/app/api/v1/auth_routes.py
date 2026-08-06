@@ -16,7 +16,10 @@ from app.schemas.auth import (
     RegisterResponseData,
     ResetPasswordRequest,
 )
-from app.schemas.envelope import APIErrorResponse, APIResponse, ErrorPayload, ResponseMeta
+from app.schemas.envelope import (
+    APIResponse,
+    ResponseMeta,
+)
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -134,7 +137,9 @@ def forgot_password(
     # TODO: Integrate email sending in a future phase
     return {
         "success": True,
-        "data": {"message": "If this email is registered, you will receive a reset link."},
+        "data": {
+            "message": "If this email is registered, you will receive a reset link."
+        },
         "meta": _meta(request).model_dump(),
     }
 

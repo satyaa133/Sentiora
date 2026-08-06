@@ -1,32 +1,83 @@
-# OS and editor files
+# OS and Editor files
 Thumbs.db
 Desktop.ini
 .DS_Store
 .vscode/
 .idea/
+*.swp
+*.swo
+*.user
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
 
-# Environment files
+# Secrets & Environment files
 .env
 .env.*
+*.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.secret
+*.token
+*.credentials
 !.env.example
 !backend/.env.example
 !frontend/.env.example
 !extension/.env.example
 
-# Node / frontend artifacts
+# Node / Frontend build artifacts
 node_modules/
 dist/
+build/
+out/
 coverage/
+.turbo/
+.npm/
+.yarn/
 *.tsbuildinfo
 vite.svg
 
-# Python artifacts
+# Extension build outputs
+extension/dist/
+
+# Python & Virtual environment artifacts
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .venv/
 venv/
-build/
+ENV/
 *.egg-info/
+.eggs/
+
+# Temporary & Backup files
+*.tmp
+*.bak
+*.orig
+*.rej
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Databases, Local Volumes & AI Logs
+*.log
+*.sqlite
+*.db
+postgres_data/
+redis_data/
+pgadmin_data/
+infrastructure/postgres_data/
+infrastructure/redis_data/
+infrastructure/pgadmin_data/
+brain/
+.gemini/
+.tempmediaStorage/

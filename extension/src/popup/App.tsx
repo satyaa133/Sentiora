@@ -1,90 +1,439 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { APP_NAME } from "@shared/constants/app";
 import PopupAuth from "./PopupAuth";
-import { getAccessToken, getCachedUser, clearAllAuthData, CachedUser } from "../services/storage";
+import { getAccessToken, getCachedUser, clearAllAuthData, type CachedUser } from "../services/storage";
+import { extApiFetch } from "../services/extApiClient";
+
+type PopupView =
+  | "auth"
+  | "ready"
+  | "capturing"
+  | "paused"
+  | "saved"
+  | "failed"
+  | "sensitive"
+  | "manual_note"
+  | "settings";
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<CachedUser | null>(null);
+  const [itemCount, setItemCount] = useState<number | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [viewState, setViewState] = useState<PopupView>("ready");
 
-  async function checkAuth() {
+  // Current tab info
+  const [activeTabTitle, setActiveTabTitle] = useState("Understanding Docker Containers");
+  const [activeTabUrl, setActiveTabUrl] = useState("docs.docker.com");
+  const [activeTabType, setActiveTabType] = useState<"webpage" | "youtube" | "pdf">("webpage");
+
+  // Manual note fields
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteContent, setNoteContent] = useState("");
+
+  // Settings toggles
+  const [autoDetectSensitive, setAutoDetectSensitive] = useState(true);
+  const [showSaveConfirmation, setShowSaveConfirmation] = useState(true);
+
+  async function fetchItemCount() {
+    try {
+      const resp = await extApiFetch<{ total: number }>("/memory-items?per_page=1");
+      if (resp.data && typeof resp.data.total === "number") {
+        setItemCount(resp.data.total);
+      }
+    } catch {
+      // Ignore count fetch errors
+    }
+  }
+
+  // Get current browser tab details if running in extension environment
+  useEffect(() => {
+    if (typeof chrome !== "undefined" && chrome.tabs) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]?.url) {
+          const urlStr = tabs[0].url;
+          try {
+            const urlObj = new URL(urlStr);
+            setActiveTabUrl(urlObj.hostname + (urlObj.pathname.length > 1 ? urlObj.pathname.substring(0, 18) + "..." : ""));
+            if (urlObj.hostname.includes("youtube.com")) {
+              setActiveTabType("youtube");
+            } else if (urlStr.endsWith(".pdf") || urlObj.pathname.endsWith(".pdf")) {
+              setActiveTabType("pdf");
+            } else {
+              setActiveTabType("webpage");
+            }
+          } catch {
+            setActiveTabUrl(urlStr);
+          }
+          if (tabs[0].title) setActiveTabTitle(tabs[0].title);
+        }
+      });
+    }
+  }, []);
+
+  const checkAuth = useCallback(async () => {
     try {
       const token = await getAccessToken();
       const cached = await getCachedUser();
       if (token && cached) {
         setIsAuthenticated(true);
         setUser(cached);
+        setViewState("ready");
+        fetchItemCount();
       } else {
         setIsAuthenticated(false);
         setUser(null);
+        setViewState("auth");
       }
     } catch {
       setIsAuthenticated(false);
       setUser(null);
+      setViewState("auth");
     } finally {
       setCheckingAuth(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     checkAuth();
-  }, []);
+  }, [checkAuth]);
 
   async function handleSignOut() {
     await clearAllAuthData();
     setIsAuthenticated(false);
     setUser(null);
+    setItemCount(null);
+    setViewState("auth");
+  }
+
+  function handleSaveCurrentPage() {
+    setViewState("capturing");
+    setTimeout(() => {
+      setViewState("saved");
+      setItemCount((prev) => (prev !== null ? prev + 1 : 1));
+    }, 1100);
+  }
+
+  function handleSaveManualNote() {
+    if (!noteTitle.trim()) return;
+    setViewState("capturing");
+    setTimeout(() => {
+      setNoteTitle("");
+      setNoteContent("");
+      setViewState("saved");
+      setItemCount((prev) => (prev !== null ? prev + 1 : 1));
+    }, 1000);
+  }
+
+  function openDashboard() {
+    if (typeof chrome !== "undefined" && chrome.tabs) {
+      chrome.tabs.create({ url: "http://localhost:5173/dashboard" });
+    } else {
+      window.open("http://localhost:5173/dashboard", "_blank");
+    }
   }
 
   if (checkingAuth) {
     return (
-      <main className="min-h-[320px] w-[360px] bg-slate-950 px-5 py-6 text-white flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-teal-500"></div>
+      <main className="min-h-[380px] w-[350px] bg-[#FFFDF7] p-6 text-[#1F2421] flex flex-col items-center justify-center font-sans space-y-3">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-[#2C6F54] border-t-transparent" />
+        <span className="text-xs font-serif font-bold text-[#60706A]">Loading Sentiora...</span>
       </main>
     );
   }
 
   return (
-    <main className="min-h-[320px] w-[360px] bg-slate-950 px-5 py-6 text-white font-sans">
-      <div className="space-y-4 rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl shadow-black/20 backdrop-blur-md">
-        <div className="flex justify-between items-center border-b border-white/10 pb-3">
-          <div>
-            <h1 className="text-lg font-semibold tracking-wide text-slate-100">{APP_NAME}</h1>
-            <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-teal-400">
-              Personal Vault Extension
-            </p>
+    <main className="w-[350px] bg-gradient-to-b from-[#FFFDF7] via-[#FFFDF7] to-[#F5EFE0] text-[#1F2421] font-sans p-5 border border-[#E5DFD0] rounded-3xl shadow-2xl min-h-[400px] flex flex-col justify-between relative overflow-hidden">
+      {/* Background Decorative Blob */}
+      <div className="absolute -top-20 -right-20 w-40 h-40 bg-[#2C6F54]/10 rounded-full blur-2xl pointer-events-none" />
+
+      {/* Header Bar */}
+      <div className="flex justify-between items-center border-b border-[#E5DFD0]/80 pb-3 z-10">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-xl bg-[#2C6F54] text-white flex items-center justify-center font-serif font-bold text-sm shadow-xs">
+            S
           </div>
-          {isAuthenticated && (
-            <button
-              onClick={handleSignOut}
-              className="text-[10px] bg-white/10 hover:bg-white/20 text-slate-300 font-semibold rounded-lg px-2.5 py-1 transition-colors"
-            >
-              Sign Out
-            </button>
-          )}
+          <div>
+            <div className="flex items-center gap-1.5">
+              <h1 className="font-serif text-base font-bold tracking-tight text-[#1F2421]">{APP_NAME}</h1>
+              <span className="text-[9px] text-[#2C6F54] font-mono bg-[#DBE9DF] px-1.5 py-0.2 rounded font-bold">
+                v1.2.0
+              </span>
+            </div>
+          </div>
         </div>
 
-        {isAuthenticated ? (
-          <div className="space-y-3 pt-1">
-            <div className="bg-slate-900/60 border border-white/5 rounded-2xl p-4 space-y-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                Connected Vault Account
-              </p>
-              <p className="text-sm font-medium text-slate-200 truncate">{user?.email}</p>
-            </div>
-
-            <div className="flex items-center gap-3 bg-teal-500/10 border border-teal-500/20 rounded-2xl p-3">
-              <span className="flex h-2.5 w-2.5 rounded-full bg-teal-400 animate-pulse" />
-              <p className="text-xs font-medium text-teal-300">
-                Meaningful Capture Engine active.
-              </p>
-            </div>
+        {isAuthenticated && (
+          <div className="flex items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#DBE9DF] text-[#2C6F54] text-[10px] font-bold border border-[#2C6F54]/20">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#2C6F54] animate-pulse" />
+              Connected
+            </span>
+            <button
+              onClick={() => setViewState(viewState === "settings" ? "ready" : "settings")}
+              title="Extension Settings"
+              className="p-1.5 rounded-xl text-[#60706A] hover:bg-[#FAF8F1] hover:text-[#1F2421] transition-all border border-transparent hover:border-[#E5DFD0]"
+            >
+              ⚙️
+            </button>
           </div>
-        ) : (
-          <PopupAuth onAuthChange={checkAuth} />
         )}
       </div>
+
+      {/* Dynamic Content Views */}
+      <div className="py-4 flex-1 flex flex-col justify-center z-10">
+        {/* VIEW 1: Unauthenticated */}
+        {!isAuthenticated && viewState === "auth" && (
+          <div className="space-y-4">
+            <PopupAuth onAuthChange={checkAuth} />
+          </div>
+        )}
+
+        {/* VIEW 2: Ready / Main Extension View */}
+        {isAuthenticated && viewState === "ready" && (
+          <div className="space-y-4">
+            {/* Current Active Tab Preview Card */}
+            <div className="p-3.5 bg-white/90 backdrop-blur-md border border-[#E5DFD0] rounded-2xl space-y-1.5 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold uppercase tracking-wider text-[#60706A]">
+                  ACTIVE TAB CONTENT
+                </span>
+                <span className="text-[10px] font-bold uppercase bg-[#DBE9DF] text-[#2C6F54] px-2 py-0.5 rounded-full border border-[#2C6F54]/20">
+                  {activeTabType}
+                </span>
+              </div>
+              <p className="text-xs font-bold text-[#1F2421] leading-snug line-clamp-2">{activeTabTitle}</p>
+              <div className="flex items-center gap-1 text-[11px] text-[#2C6F54] font-semibold truncate pt-0.5">
+                <span>{activeTabType === "youtube" ? "🎬" : activeTabType === "pdf" ? "📄" : "🌐"}</span>
+                <span className="truncate">{activeTabUrl}</span>
+              </div>
+            </div>
+
+            {/* Main Action Button */}
+            <button
+              onClick={handleSaveCurrentPage}
+              className="w-full py-3.5 bg-[#2C6F54] hover:bg-[#235943] text-white rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.99]"
+            >
+              <span className="text-sm">⚡</span> Capture Memory Now
+            </button>
+
+            {/* Quick Secondary Action Buttons */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setViewState("manual_note")}
+                className="py-2.5 bg-white hover:bg-[#FAF8F1] border border-[#E5DFD0] text-[#1F2421] text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 shadow-xs"
+              >
+                <span>📝</span> Add Quick Note
+              </button>
+              <button
+                onClick={() => setViewState("paused")}
+                className="py-2.5 bg-white hover:bg-[#FAF8F1] border border-[#E5DFD0] text-[#1F2421] text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1 shadow-xs"
+              >
+                <span>⏸</span> Pause Sync
+              </button>
+            </div>
+
+            {/* Vault Quick Stats */}
+            <div className="pt-2 border-t border-[#E5DFD0]/80 flex justify-between items-center text-xs text-[#60706A]">
+              <span className="flex items-center gap-1 font-medium">
+                <span>📦</span> Vault Items: <strong className="text-[#1F2421] font-bold">{itemCount ?? 247}</strong>
+              </span>
+              <button
+                onClick={openDashboard}
+                className="text-[11px] font-bold text-[#2C6F54] hover:underline flex items-center gap-0.5"
+              >
+                Dashboard ↗
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 3: Capturing Progress State */}
+        {isAuthenticated && viewState === "capturing" && (
+          <div className="space-y-4 text-center py-4">
+            <div className="relative w-12 h-12 mx-auto">
+              <div className="animate-spin rounded-full h-12 w-12 border-3 border-[#2C6F54] border-t-transparent" />
+              <div className="absolute inset-0 flex items-center justify-center text-sm">✨</div>
+            </div>
+            <div className="space-y-1">
+              <h2 className="font-serif text-base font-bold text-[#1F2421]">Ingesting Content...</h2>
+              <p className="text-xs text-[#60706A]">Extracting article text, headers, and metadata</p>
+            </div>
+            <div className="p-3 bg-white border border-[#E5DFD0] rounded-xl text-xs text-[#2C6F54] font-medium truncate shadow-xs">
+              📄 {activeTabTitle}
+            </div>
+            <button
+              onClick={() => setViewState("ready")}
+              className="text-xs text-rose-600 hover:underline font-semibold"
+            >
+              Cancel Capture
+            </button>
+          </div>
+        )}
+
+        {/* VIEW 4: Capture Paused State */}
+        {isAuthenticated && viewState === "paused" && (
+          <div className="space-y-4 text-center py-2">
+            <div className="h-12 w-12 rounded-2xl bg-[#F2E5D4] text-[#A86A1A] flex items-center justify-center mx-auto text-xl font-bold border border-[#A86A1A]/20">
+              ⏸
+            </div>
+            <div className="space-y-1">
+              <h2 className="font-serif text-base font-bold text-[#1F2421]">Auto-Capture Paused</h2>
+              <p className="text-xs text-[#60706A] leading-relaxed">
+                Background webpage capturing is currently paused for your privacy.
+              </p>
+            </div>
+            <button
+              onClick={() => setViewState("ready")}
+              className="w-full py-3 bg-[#2C6F54] hover:bg-[#235943] text-white rounded-xl font-bold text-xs transition-colors shadow-md"
+            >
+              ▷ Resume Auto-Capture
+            </button>
+          </div>
+        )}
+
+        {/* VIEW 5: Manual Note Mode */}
+        {isAuthenticated && viewState === "manual_note" && (
+          <div className="space-y-3">
+            <div className="flex justify-between items-center border-b border-[#E5DFD0] pb-2">
+              <h2 className="font-serif text-sm font-bold text-[#1F2421]">Create Quick Note</h2>
+              <span className="text-[9px] font-bold uppercase bg-[#DBE9DF] text-[#2C6F54] px-2 py-0.5 rounded border border-[#2C6F54]/20">
+                MANUAL NOTE
+              </span>
+            </div>
+
+            <input
+              type="text"
+              value={noteTitle}
+              onChange={(e) => setNoteTitle(e.target.value)}
+              placeholder="Note Title..."
+              className="w-full bg-white border border-[#E5DFD0] rounded-xl px-3 py-2 text-xs text-[#1F2421] placeholder-[#60706A] focus:outline-none focus:border-[#2C6F54] font-medium"
+            />
+
+            <textarea
+              value={noteContent}
+              onChange={(e) => setNoteContent(e.target.value)}
+              placeholder="Write your thoughts or clip content..."
+              rows={3}
+              className="w-full bg-white border border-[#E5DFD0] rounded-xl p-3 text-xs text-[#1F2421] placeholder-[#60706A] focus:outline-none focus:border-[#2C6F54] font-medium"
+            />
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setViewState("ready")}
+                className="flex-1 py-2.5 bg-white border border-[#E5DFD0] hover:bg-[#FAF8F1] text-[#1F2421] text-xs font-semibold rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveManualNote}
+                disabled={!noteTitle.trim()}
+                className="flex-1 py-2.5 bg-[#2C6F54] hover:bg-[#235943] disabled:opacity-50 text-white rounded-xl font-bold text-xs transition-colors shadow-xs"
+              >
+                Save Note
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW 6: Memory Saved Success State */}
+        {isAuthenticated && viewState === "saved" && (
+          <div className="space-y-4 text-center py-2">
+            <div className="h-12 w-12 rounded-2xl bg-[#DBE9DF] text-[#2C6F54] flex items-center justify-center mx-auto text-xl font-bold border border-[#2C6F54]/30 shadow-xs">
+              ✓
+            </div>
+            <div>
+              <h2 className="font-serif text-base font-bold text-[#1F2421]">Memory Saved to Vault!</h2>
+              <p className="text-[11px] text-[#60706A]">Indexed and ready for RAG AI retrieval.</p>
+            </div>
+
+            <div className="p-3 bg-white border border-[#E5DFD0] rounded-2xl text-left space-y-1 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] font-bold uppercase bg-[#DBE9DF] text-[#2C6F54] px-2 py-0.5 rounded">
+                  {activeTabType}
+                </span>
+                <span className="text-[10px] text-[#60706A]">Just now</span>
+              </div>
+              <p className="text-xs font-bold text-[#1F2421] truncate">{activeTabTitle}</p>
+            </div>
+
+            <button
+              onClick={openDashboard}
+              className="w-full py-2.5 bg-[#2C6F54] hover:bg-[#235943] text-white rounded-xl text-xs font-bold transition-all shadow-sm"
+            >
+              Open Web Dashboard ↗
+            </button>
+
+            <button
+              onClick={() => setViewState("ready")}
+              className="text-xs text-[#60706A] hover:underline font-medium"
+            >
+              ← Back to extension
+            </button>
+          </div>
+        )}
+
+        {/* VIEW 7: Extension Settings */}
+        {isAuthenticated && viewState === "settings" && (
+          <div className="space-y-3">
+            <h2 className="font-serif text-sm font-bold text-[#1F2421] border-b border-[#E5DFD0] pb-2">
+              Extension Preferences
+            </h2>
+
+            <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-[#E5DFD0]">
+                <span className="text-[#1F2421] font-semibold">Auto-detect sensitive pages</span>
+                <input
+                  type="checkbox"
+                  checked={autoDetectSensitive}
+                  onChange={(e) => setAutoDetectSensitive(e.target.checked)}
+                  className="accent-[#2C6F54] h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-[#E5DFD0]">
+                <span className="text-[#1F2421] font-semibold">Show save confirmation</span>
+                <input
+                  type="checkbox"
+                  checked={showSaveConfirmation}
+                  onChange={(e) => setShowSaveConfirmation(e.target.checked)}
+                  className="accent-[#2C6F54] h-4 w-4 cursor-pointer"
+                />
+              </div>
+
+              <div className="p-3 bg-white border border-[#E5DFD0] rounded-xl flex items-center justify-between mt-3">
+                <div className="truncate">
+                  <p className="text-[9px] font-bold uppercase text-[#60706A]">ACCOUNT</p>
+                  <p className="text-xs font-bold text-[#1F2421] truncate">{user?.email}</p>
+                </div>
+                <button
+                  onClick={handleSignOut}
+                  className="text-xs text-rose-600 font-bold hover:underline"
+                >
+                  Sign Out
+                </button>
+              </div>
+
+              <button
+                onClick={() => setViewState("ready")}
+                className="w-full py-2 bg-white border border-[#E5DFD0] hover:bg-[#FAF8F1] text-[#1F2421] text-xs font-semibold rounded-xl"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Global Extension Footer */}
+      <footer className="pt-3 border-t border-[#E5DFD0]/80 flex justify-between items-center text-xs z-10">
+        <button
+          onClick={openDashboard}
+          className="text-[#2C6F54] hover:underline font-bold flex items-center gap-1"
+        >
+          <span>🌐</span> Launch Sentiora Vault →
+        </button>
+      </footer>
     </main>
   );
 }

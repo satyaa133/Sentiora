@@ -12,8 +12,8 @@ import {
   setRefreshToken,
 } from "./storage";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-const API_PREFIX = `${API_BASE_URL}/api/v1`;
+const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+const API_PREFIX = rawBaseUrl.endsWith("/api/v1") ? rawBaseUrl : `${rawBaseUrl}/api/v1`;
 
 interface ApiResponse<T = unknown> {
   success: boolean;
@@ -52,7 +52,7 @@ async function attemptTokenRefresh(): Promise<string | null> {
 
 export async function extApiFetch<T = unknown>(
   path: string,
-  init: RequestInit = {},
+  init: Parameters<typeof fetch>[1] = {},
 ): Promise<ApiResponse<T>> {
   const accessToken = await getAccessToken();
 
@@ -87,10 +87,13 @@ export async function extApiFetch<T = unknown>(
   const json: ApiResponse<T> = await resp.json();
 
   if (!resp.ok) {
+    const errorDetails = (json.error as unknown as { details?: { issue: string }[] })?.details;
+    const detailMsg = errorDetails ? errorDetails.map((d) => d.issue).join(" ") : null;
     throw new ExtApiError(
-      json.error?.message ?? "Request failed",
+      detailMsg || json.error?.message || "Request failed",
       json.error?.code ?? "UNKNOWN_ERROR",
       resp.status,
+      errorDetails,
     );
   }
 
@@ -102,6 +105,7 @@ export class ExtApiError extends Error {
     message: string,
     public readonly code: string,
     public readonly status: number,
+    public readonly details?: unknown,
   ) {
     super(message);
     this.name = "ExtApiError";

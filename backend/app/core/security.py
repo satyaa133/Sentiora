@@ -1,10 +1,10 @@
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 import jwt
-from passlib.context import CryptContext
+from passlib.context import CryptContext  # type: ignore[import-untyped]
 
 from app.core.config import get_settings
 
@@ -26,7 +26,7 @@ def hash_refresh_token(token: str) -> str:
 
 
 def create_access_token(user_id: str, expires_delta: timedelta | None = None) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if expires_delta:
         expire = now + expires_delta
     else:
@@ -39,11 +39,13 @@ def create_access_token(user_id: str, expires_delta: timedelta | None = None) ->
         "exp": expire,
         "jti": uuid.uuid4().hex,
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
+    )
 
 
 def create_refresh_token(user_id: str, expires_delta: timedelta | None = None) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if expires_delta:
         expire = now + expires_delta
     else:
@@ -56,7 +58,9 @@ def create_refresh_token(user_id: str, expires_delta: timedelta | None = None) -
         "exp": expire,
         "jti": uuid.uuid4().hex,
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
+    )
 
 
 def decode_jwt_token(token: str) -> dict[str, Any]:

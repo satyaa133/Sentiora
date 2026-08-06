@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
 from app.models.user import User, UserProfile
+from datetime import UTC
 
 
 class UserRepository:
@@ -48,9 +49,9 @@ class UserRepository:
         return user
 
     def update_last_login(self, user: User) -> None:
-        from datetime import datetime, timezone
+        from datetime import datetime
 
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.now(UTC)
         self.db.commit()
 
     def update_password(self, user: User, password_hash: str) -> None:

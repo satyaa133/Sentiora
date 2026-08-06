@@ -20,6 +20,7 @@ function copyManifestPlugin() {
 
 export default defineConfig({
   plugins: [react(), copyManifestPlugin()],
+  envDir: resolve(rootDirectory, ".."),
   test: {
     environment: "jsdom",
     setupFiles: [resolve(rootDirectory, "src/test/setup.ts")],

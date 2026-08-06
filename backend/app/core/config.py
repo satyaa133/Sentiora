@@ -12,7 +12,7 @@ DEFAULT_DATABASE_URL = (
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -43,12 +43,14 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_non_development_secrets(self) -> Self:
-        if self.app_environment != "development":
-            if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
-                raise ValueError(
-                    "jwt_secret_key must be set via JWT_SECRET_KEY when "
-                    "app_environment is not 'development'"
-                )
+        if (
+            self.app_environment != "development"
+            and self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY
+        ):
+            raise ValueError(
+                "jwt_secret_key must be set via JWT_SECRET_KEY when "
+                "app_environment is not 'development'"
+            )
         return self
 
 

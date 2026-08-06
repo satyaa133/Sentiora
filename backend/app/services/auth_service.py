@@ -1,5 +1,4 @@
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from datetime import datetime, timedelta, UTC
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -66,7 +65,11 @@ class AuthService:
         user_agent: str | None = None,
     ) -> AuthTokenData:
         user = self.user_repo.get_by_email(req.email)
-        if not user or not user.password_hash or not verify_password(req.password, user.password_hash):
+        if (
+            not user
+            or not user.password_hash
+            or not verify_password(req.password, user.password_hash)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={
@@ -84,7 +87,9 @@ class AuthService:
                 },
             )
 
-        session_expires = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+        session_expires = datetime.now(UTC) + timedelta(
+            days=settings.refresh_token_expire_days
+        )
         session = self.auth_repo.create_session(
             user_id=user.id,
             expires_at=session_expires,
@@ -151,7 +156,7 @@ class AuthService:
                 },
             )
 
-        if token_record.expires_at < datetime.now(timezone.utc):
+        if token_record.expires_at < datetime.now(UTC):
             self.auth_repo.revoke_refresh_token(token_record)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -168,7 +173,9 @@ class AuthService:
         new_refresh_token = create_refresh_token(user_id=str(user_id))
         new_token_hash = hash_refresh_token(new_refresh_token)
 
-        expires_at = datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days)
+        expires_at = datetime.now(UTC) + timedelta(
+            days=settings.refresh_token_expire_days
+        )
         self.auth_repo.create_refresh_token(
             user_id=user_id,
             session_id=token_record.session_id,
@@ -187,7 +194,11 @@ class AuthService:
 
     def change_password(self, user_id: UUID, req: ChangePasswordRequest) -> None:
         user = self.user_repo.get_by_id(user_id)
-        if not user or not user.password_hash or not verify_password(req.current_password, user.password_hash):
+        if (
+            not user
+            or not user.password_hash
+            or not verify_password(req.current_password, user.password_hash)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={
