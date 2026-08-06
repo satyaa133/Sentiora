@@ -10,6 +10,21 @@ jobs:
   validate:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: Sentiora
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: CHANGE_ME_LOCAL_DEV
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -34,6 +49,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e "./backend[dev]"
 
+      - name: Run Database Migrations
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
+        run: |
+          cd backend && python -m alembic upgrade head
+
       - name: Lint
         run: npm run lint
 
@@ -41,6 +62,8 @@ jobs:
         run: npm run typecheck
 
       - name: Test
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
         run: npm run test
 
       - name: Build
