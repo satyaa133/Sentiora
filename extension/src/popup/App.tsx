@@ -106,23 +106,86 @@ export default function App() {
     setViewState("auth");
   }
 
-  function handleSaveCurrentPage() {
-    setViewState("capturing");
-    setTimeout(() => {
-      setViewState("saved");
-      setItemCount((prev) => (prev !== null ? prev + 1 : 1));
-    }, 1100);
+  async function performFallbackCapture(tab: chrome.tabs.Tab) {
+    if (!tab.url || !tab.title) return;
+    const urlStr = tab.url;
+    let sourceType: "webpage" | "youtube" | "pdf" = "webpage";
+    let thumbnailUrl: string | undefined;
+
+    if (urlStr.includes("youtube.com")) {
+      sourceType = "youtube";
+      try {
+        const urlParams = new URL(urlStr).searchParams;
+        const v = urlParams.get("v");
+        if (v) {
+          thumbnailUrl = `https://img.youtube.com/vi/${v}/hqdefault.jpg`;
+        }
+      } catch {
+        // Ignore URL parse
+      }
+    } else if (urlStr.endsWith(".pdf") || urlStr.includes(".pdf")) {
+      sourceType = "pdf";
+    }
+
+    try {
+      await extApiFetch("/memory-items", {
+        method: "POST",
+        body: JSON.stringify({
+          source_type: sourceType,
+          url: urlStr,
+          title: tab.title,
+          content: `Captured ${sourceType} content: ${tab.title} (${urlStr})`,
+          thumbnail_url: thumbnailUrl,
+        }),
+      });
+    } catch (err) {
+      console.warn("Direct capture post failed:", err);
+    }
   }
 
-  function handleSaveManualNote() {
+  function handleSaveCurrentPage() {
+    setViewState("capturing");
+    if (typeof chrome !== "undefined" && chrome.tabs) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const activeTab = tabs[0];
+        if (activeTab?.id) {
+          chrome.tabs.sendMessage(activeTab.id, { type: "FORCE_CAPTURE" }, async (response) => {
+            if (chrome.runtime.lastError || !response?.success) {
+              await performFallbackCapture(activeTab);
+            }
+            setViewState("saved");
+            fetchItemCount();
+          });
+        } else {
+          setViewState("saved");
+        }
+      });
+    } else {
+      setTimeout(() => setViewState("saved"), 1000);
+    }
+  }
+
+  async function handleSaveManualNote() {
     if (!noteTitle.trim()) return;
     setViewState("capturing");
-    setTimeout(() => {
+    try {
+      await extApiFetch("/memory-items", {
+        method: "POST",
+        body: JSON.stringify({
+          source_type: "webpage",
+          title: noteTitle.trim(),
+          url: activeTabUrl || "https://sentiora.app/notes",
+          content: noteContent.trim() || noteTitle.trim(),
+        }),
+      });
       setNoteTitle("");
       setNoteContent("");
       setViewState("saved");
-      setItemCount((prev) => (prev !== null ? prev + 1 : 1));
-    }, 1000);
+      fetchItemCount();
+    } catch (err) {
+      console.error("Failed to save manual note:", err);
+      setViewState("ready");
+    }
   }
 
   function openDashboard() {

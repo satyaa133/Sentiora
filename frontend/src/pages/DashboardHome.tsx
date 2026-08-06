@@ -67,12 +67,20 @@ export default function DashboardHome() {
   useEffect(() => {
     loadMemoryFeed();
 
-    // Silent background poll every 15 seconds for new captures
+    // Fast 5-second background poll for real-time extension captures
     const interval = setInterval(() => {
       loadMemoryFeed(true);
-    }, 15000);
+    }, 5000);
 
-    return () => clearInterval(interval);
+    const handleFocus = () => loadMemoryFeed(true);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
   }, [loadMemoryFeed]);
 
   const handleDeleteItem = async (id: string) => {
@@ -90,10 +98,12 @@ export default function DashboardHome() {
   };
 
   // Filter and search logic for dashboard home
-  // Filter and search logic for dashboard home
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
-      if (selectedFilter !== "all" && item.source_type !== selectedFilter) {
+      if (
+        selectedFilter !== "all" &&
+        item.source_type?.toLowerCase() !== selectedFilter.toLowerCase()
+      ) {
         return false;
       }
       if (searchQuery.trim()) {
@@ -108,10 +118,19 @@ export default function DashboardHome() {
     });
   }, [items, selectedFilter, searchQuery]);
 
-  // Dynamic source type counts
-  const webpageCount = useMemo(() => items.filter((i) => i.source_type === "webpage").length, [items]);
-  const pdfCount = useMemo(() => items.filter((i) => i.source_type === "pdf").length, [items]);
-  const youtubeCount = useMemo(() => items.filter((i) => i.source_type === "youtube").length, [items]);
+  // Dynamic source type counts (case-insensitive)
+  const webpageCount = useMemo(
+    () => items.filter((i) => i.source_type?.toLowerCase() === "webpage").length,
+    [items],
+  );
+  const pdfCount = useMemo(
+    () => items.filter((i) => i.source_type?.toLowerCase() === "pdf").length,
+    [items],
+  );
+  const youtubeCount = useMemo(
+    () => items.filter((i) => i.source_type?.toLowerCase() === "youtube").length,
+    [items],
+  );
 
   // Active source channels count
   const activeSourcesCount = useMemo(() => {
@@ -308,7 +327,9 @@ export default function DashboardHome() {
                 {/* RECENT CAPTURE Card (Category-Aware) */}
                 {(() => {
                   const categoryRecentItem = items.find((item) =>
-                    selectedFilter === "all" ? true : item.source_type === selectedFilter
+                    selectedFilter === "all"
+                      ? true
+                      : item.source_type?.toLowerCase() === selectedFilter.toLowerCase(),
                   );
 
                   const headingTitle =

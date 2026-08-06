@@ -114,6 +114,33 @@ if (document.readyState === "complete") {
   window.addEventListener("load", () => setTimeout(runCapturePipeline, 1000));
 }
 
+// ── Listen for FORCE_CAPTURE request from popup ──
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === "FORCE_CAPTURE") {
+    runCapturePipeline()
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }));
+    return true;
+  }
+});
+
+// ── YouTube SPA Navigation Listener ──
+let lastCapturedUrl = window.location.href;
+function checkYoutubeUrlChange(): void {
+  if (window.location.href !== lastCapturedUrl) {
+    lastCapturedUrl = window.location.href;
+    if (isYoutubeWatchPage()) {
+      setTimeout(runCapturePipeline, 1500);
+    }
+  }
+}
+
+if (window.location.hostname.includes("youtube.com")) {
+  window.addEventListener("yt-navigate-finish", () => setTimeout(runCapturePipeline, 1500));
+  window.addEventListener("popstate", checkYoutubeUrlChange);
+  setInterval(checkYoutubeUrlChange, 2500);
+}
+
 // ── Dashboard Auth Sync Bridge ──
 function initDashboardAuthSync(): void {
   const isDashboardHost =
