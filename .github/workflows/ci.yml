@@ -53,7 +53,7 @@ jobs:
         env:
           DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
         run: |
-          cd backend && python -m alembic upgrade head
+          cd backend && alembic upgrade head
 
       - name: Lint
         run: npm run lint
