@@ -40,6 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSession = useCallback(() => {
     sessionStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
+    localStorage.removeItem("sentiora_auth_session");
+    window.postMessage({ type: "SENTIORA_AUTH_LOGOUT" }, "*");
     setUser(null);
   }, []);
 
@@ -48,7 +50,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await apiClient.get<{ success: boolean; data: AuthUser }>(
         "/users/me",
       );
-      setUser(response.data.data);
+      const currentUser = response.data.data;
+      setUser(currentUser);
+
+      const accessToken = sessionStorage.getItem("access_token");
+      const refreshToken = localStorage.getItem("refresh_token");
+      if (accessToken && refreshToken && currentUser) {
+        const sessionData = {
+          accessToken,
+          refreshToken,
+          user: {
+            id: currentUser.id,
+            email: currentUser.email,
+            is_email_verified: currentUser.is_email_verified,
+          },
+        };
+        localStorage.setItem("sentiora_auth_session", JSON.stringify(sessionData));
+        window.postMessage({ type: "SENTIORA_AUTH_SYNC", ...sessionData }, "*");
+      }
     } catch {
       clearSession();
     }

@@ -1,4 +1,5 @@
 import { extApiFetch } from "../services/extApiClient";
+import { setAccessToken, setRefreshToken, setCachedUser, clearAllAuthData } from "../services/storage";
 import type { ExtensionMessage, CapturePayload } from "../shared/types";
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -47,6 +48,37 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       });
 
     return true; // Keep message channel open for async response
+  }
+
+  if (message.type === "SYNC_AUTH_TOKENS") {
+    const { accessToken, refreshToken, user } = message.payload;
+    Promise.all([
+      setAccessToken(accessToken),
+      setRefreshToken(refreshToken),
+      setCachedUser(user),
+    ])
+      .then(() => {
+        console.info("[Sentiora Background] Authentication tokens synchronized from Dashboard.");
+        sendResponse({ success: true });
+      })
+      .catch((err) => {
+        console.error("[Sentiora Background] Token sync error:", err);
+        sendResponse({ success: false, error: String(err) });
+      });
+    return true;
+  }
+
+  if (message.type === "CLEAR_AUTH_TOKENS") {
+    clearAllAuthData()
+      .then(() => {
+        console.info("[Sentiora Background] Auth tokens cleared via Dashboard logout.");
+        sendResponse({ success: true });
+      })
+      .catch((err) => {
+        console.error("[Sentiora Background] Auth clear error:", err);
+        sendResponse({ success: false, error: String(err) });
+      });
+    return true;
   }
 });
 

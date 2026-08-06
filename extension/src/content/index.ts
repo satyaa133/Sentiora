@@ -113,3 +113,50 @@ if (document.readyState === "complete") {
 } else {
   window.addEventListener("load", () => setTimeout(runCapturePipeline, 1000));
 }
+
+// ── Dashboard Auth Sync Bridge ──
+function initDashboardAuthSync(): void {
+  const isDashboardHost =
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1" ||
+    window.location.hostname.includes("sentiora");
+
+  if (!isDashboardHost) return;
+
+  // 1. Listen for real-time postMessage auth events from Dashboard
+  window.addEventListener("message", (event) => {
+    if (event.data?.type === "SENTIORA_AUTH_SYNC") {
+      const { accessToken, refreshToken, user } = event.data;
+      if (accessToken && refreshToken && user) {
+        chrome.runtime.sendMessage({
+          type: "SYNC_AUTH_TOKENS",
+          payload: { accessToken, refreshToken, user },
+        });
+      }
+    } else if (event.data?.type === "SENTIORA_AUTH_LOGOUT") {
+      chrome.runtime.sendMessage({ type: "CLEAR_AUTH_TOKENS" });
+    }
+  });
+
+  // 2. Check localStorage on page load
+  try {
+    const rawSession = localStorage.getItem("sentiora_auth_session");
+    if (rawSession) {
+      const parsed = JSON.parse(rawSession);
+      if (parsed.accessToken && parsed.refreshToken && parsed.user) {
+        chrome.runtime.sendMessage({
+          type: "SYNC_AUTH_TOKENS",
+          payload: {
+            accessToken: parsed.accessToken,
+            refreshToken: parsed.refreshToken,
+            user: parsed.user,
+          },
+        });
+      }
+    }
+  } catch {
+    // Ignore storage parse errors
+  }
+}
+
+initDashboardAuthSync();

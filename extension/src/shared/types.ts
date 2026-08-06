@@ -29,11 +29,19 @@ export interface PdfCapturePayload {
 
 export type CapturePayload = WebpageCapturePayload | YoutubeCapturePayload | PdfCapturePayload;
 
+export interface AuthSyncPayload {
+  accessToken: string;
+  refreshToken: string;
+  user: { id: string; email: string; is_email_verified: boolean };
+}
+
 export type ExtensionMessage =
   | { type: "CAPTURE_WEBPAGE"; payload: WebpageCapturePayload }
   | { type: "CAPTURE_YOUTUBE"; payload: YoutubeCapturePayload }
   | { type: "CAPTURE_PDF"; payload: PdfCapturePayload }
-  | { type: "CAPTURE_RESULT"; success: boolean; error?: string };
+  | { type: "CAPTURE_RESULT"; success: boolean; error?: string }
+  | { type: "SYNC_AUTH_TOKENS"; payload: AuthSyncPayload }
+  | { type: "CLEAR_AUTH_TOKENS" };
 
 export interface ExtensionState {
   readonly isReady: boolean;
