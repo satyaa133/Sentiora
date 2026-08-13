@@ -5,12 +5,14 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.models.memory_item import ItemStatus, MemoryItem
+from app.repositories.chunk_repository import ChunkRepository
 from app.repositories.memory_repository import MemoryRepository
 from app.schemas.memory_item import (
     MemoryItemCreate,
     MemoryItemListResponse,
     MemoryItemResponse,
 )
+from app.services.content_normalizer import extract_domain
 from app.workers.queue import create_queues
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,7 @@ class MemoryService:
     def __init__(self, db: DBSession) -> None:
         self.db = db
         self.repo = MemoryRepository(db)
+        self.chunk_repo = ChunkRepository(db)
 
     def create_item(
         self, user_id: UUID, payload: MemoryItemCreate
@@ -33,6 +36,7 @@ class MemoryService:
             author=payload.author,
             favicon_url=payload.favicon_url,
             thumbnail_url=payload.thumbnail_url,
+            domain=extract_domain(payload.url),
             status=ItemStatus.pending,
         )
         item = self.repo.create(item)
@@ -88,4 +92,5 @@ class MemoryService:
                     "message": "Memory item not found or you do not have access.",
                 },
             )
+        self.chunk_repo.delete_for_memory(item.id, user_id)
         self.repo.soft_delete(item)

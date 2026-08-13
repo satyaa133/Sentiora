@@ -5,7 +5,14 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.core.db import Base
-from app.models import RefreshToken, Session, User, UserProfile  # noqa: F401
+from app.models import (  # noqa: F401
+    MemoryChunk,
+    MemoryItem,
+    RefreshToken,
+    Session,
+    User,
+    UserProfile,
+)
 
 config = context.config
 

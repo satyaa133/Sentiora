@@ -6,6 +6,13 @@ import {
 } from "./captureUtils";
 
 describe("capture content limits", () => {
+  it("preserves paragraph breaks for later chunking", () => {
+    const raw = "Introduction\n\nBinary search reduces the interval.\n\n\nHow it works";
+    expect(normalizeExtractedText(raw)).toBe(
+      "Introduction\n\nBinary search reduces the interval.\n\nHow it works",
+    );
+  });
+
   it("does not truncate a normal article", () => {
     const article = normalizeExtractedText("This is a normal article about Docker containers. ".repeat(40));
     expect(capExtractedContent(article)).toBe(article);

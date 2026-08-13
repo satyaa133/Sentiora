@@ -12,6 +12,7 @@ from app.api.v1.memory_routes import router as memory_router
 from app.api.v1.user_routes import router as user_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.models import MemoryChunk, MemoryItem  # noqa: F401
 
 configure_logging()
 settings = get_settings()

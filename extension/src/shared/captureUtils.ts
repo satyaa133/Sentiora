@@ -8,7 +8,11 @@ export const MAX_CONTENT_LENGTH = 80_000;
 
 export function normalizeExtractedText(rawText: string): string {
   if (!rawText) return "";
-  return rawText.replace(/\s+/g, " ").trim();
+  return rawText
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export function capExtractedContent(text: string, maxLength = MAX_CONTENT_LENGTH): string {

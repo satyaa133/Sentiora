@@ -12,6 +12,9 @@ export interface MemoryItem {
   author: string | null;
   favicon_url: string | null;
   thumbnail_url: string | null;
+  domain: string | null;
+  language: string | null;
+  content_length: number;
   word_count: number;
   reading_time_seconds: number;
   status: ItemStatus;

@@ -31,6 +31,9 @@ class MemoryItemResponse(BaseModel):
     author: str | None
     favicon_url: str | None
     thumbnail_url: str | None
+    domain: str | None = None
+    language: str | None = None
+    content_length: int = 0
     word_count: int
     reading_time_seconds: int
     status: ItemStatus

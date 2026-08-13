@@ -2,11 +2,16 @@ import enum
 import uuid
 from datetime import datetime, UTC
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, Text
+from typing import TYPE_CHECKING
+
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
+
+if TYPE_CHECKING:
+    from app.models.memory_chunk import MemoryChunk
 
 
 def _utc_now() -> datetime:
@@ -48,6 +53,9 @@ class MemoryItem(Base):
     author: Mapped[str | None] = mapped_column(Text, nullable=True)
     favicon_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     thumbnail_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    content_length: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     word_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reading_time_seconds: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False
@@ -69,4 +77,12 @@ class MemoryItem(Base):
     )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
+    )
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    chunks: Mapped[list["MemoryChunk"]] = relationship(
+        "MemoryChunk",
+        back_populates="memory_item",
+        cascade="all, delete-orphan",
+        order_by="MemoryChunk.chunk_index",
     )

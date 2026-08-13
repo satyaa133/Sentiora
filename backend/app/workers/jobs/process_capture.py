@@ -1,55 +1,24 @@
 import logging
-import re
 from uuid import UUID
 
 from app.core.db import SessionLocal
+from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem
+from app.repositories.chunk_repository import ChunkRepository
+from app.services.chunking import chunk_content
+from app.services.content_normalizer import (
+    calculate_reading_time,
+    calculate_word_count,
+    detect_language,
+    extract_domain,
+    normalize_content,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def clean_text(text: str | None) -> str:
-    if not text:
-        return ""
-    # Strip HTML tags if any residual tags exist
-    cleaned = re.sub(r"<[^>]+>", " ", text)
-    # Normalise whitespace
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-
-    # Filter out repetitive metric badge noise (e.g., "3k 1.6m 3.2k 1.4m 2.4k 1.6m...")
-    words = cleaned.split(" ")
-    cleaned_words: list[str] = []
-    stat_streak = 0
-    metric_pattern = re.compile(r"^\d+(\.\d+)?[kmKMbB]?$", re.IGNORECASE)
-
-    for word in words:
-        clean_word = word.replace(",", "")
-        if metric_pattern.match(clean_word):
-            stat_streak += 1
-            if stat_streak <= 2:
-                cleaned_words.append(word)
-        else:
-            stat_streak = 0
-            cleaned_words.append(word)
-
-    return " ".join(cleaned_words).strip()
-
-
-def calculate_word_count(text: str) -> int:
-    if not text:
-        return 0
-    return len(text.split())
-
-
-def calculate_reading_time(word_count: int) -> int:
-    # Standard average reading speed ~200 wpm
-    wpm = 200
-    minutes = word_count / wpm
-    return max(1, int(minutes * 60)) if word_count > 0 else 0
-
-
 def process_capture(memory_item_id_str: str) -> None:
-    """RQ background job to clean text, compute word count & reading time, and mark item ready."""
+    """Normalize captured content, store searchable chunks, then mark the memory ready."""
     logger.info("Starting processing job for MemoryItem: %s", memory_item_id_str)
     db = SessionLocal()
     try:
@@ -60,22 +29,42 @@ def process_capture(memory_item_id_str: str) -> None:
             return
 
         item.status = ItemStatus.processing
+        item.processing_error = None
         db.commit()
 
-        # Clean content
-        cleaned_content = clean_text(item.content)
-        item.content = cleaned_content
-        word_count = calculate_word_count(cleaned_content)
-        item.word_count = word_count
-        item.reading_time_seconds = calculate_reading_time(word_count)
+        normalized = normalize_content(item.content, item.source_type)
+        if not normalized and item.content:
+            normalized = item.content.strip()
+        drafts = chunk_content(normalized, item.source_type, title=item.title)
+
+        item.content = normalized
+        item.domain = extract_domain(item.url) or item.domain
+        item.language = detect_language(normalized)
+        item.content_length = len(normalized)
+        item.word_count = calculate_word_count(normalized)
+        item.reading_time_seconds = calculate_reading_time(item.word_count)
+
+        chunks = [
+            MemoryChunk(
+                memory_id=item.id,
+                user_id=item.user_id,
+                chunk_index=draft.chunk_index,
+                content=draft.content,
+                heading=draft.heading,
+                page_number=draft.page_number,
+                source_type=item.source_type,
+            )
+            for draft in drafts
+        ]
+        ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
 
         item.status = ItemStatus.ready
         db.commit()
         logger.info(
-            "Successfully processed MemoryItem %s (words: %d, reading time: %ds)",
+            "Processed MemoryItem %s (words=%d chunks=%d)",
             memory_item_id_str,
-            word_count,
-            item.reading_time_seconds,
+            item.word_count,
+            len(chunks),
         )
     except Exception as exc:
         db.rollback()
@@ -85,8 +74,9 @@ def process_capture(memory_item_id_str: str) -> None:
             item = db.query(MemoryItem).filter(MemoryItem.id == item_id).first()
             if item:
                 item.status = ItemStatus.failed
+                item.processing_error = type(exc).__name__
                 db.commit()
         except Exception:
-            pass
+            db.rollback()
     finally:
         db.close()
