@@ -3,7 +3,7 @@ from datetime import datetime, UTC
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -75,6 +75,12 @@ class UserProfile(Base):
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
     timezone: Mapped[str] = mapped_column(String(100), default="UTC", nullable=False)
     locale: Mapped[str] = mapped_column(String(20), default="en-US", nullable=False)
+    onboarding_completed: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    source_preferences: Mapped[dict] = mapped_column(
+        JSONB, default=dict, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )
