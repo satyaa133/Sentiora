@@ -132,14 +132,7 @@ function sendCapture(message: ExtensionMessage): Promise<boolean> {
   });
 }
 
-// Run capture on document load
-if (document.readyState === "complete") {
-  setTimeout(() => runCapturePipeline(false), 1000);
-} else {
-  window.addEventListener("load", () => setTimeout(() => runCapturePipeline(false), 1000));
-}
-
-// ── Listen for FORCE_CAPTURE request from popup ──
+// ── Listen for explicit FORCE_CAPTURE request from popup button click ──
 try {
   if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -153,23 +146,6 @@ try {
   }
 } catch {
   // Ignore runtime listener attachment errors if context invalidated
-}
-
-// ── YouTube SPA Navigation Listener ──
-let lastCapturedUrl = window.location.href;
-function checkYoutubeUrlChange(): void {
-  if (window.location.href !== lastCapturedUrl) {
-    lastCapturedUrl = window.location.href;
-    if (isYoutubeWatchPage()) {
-      setTimeout(() => runCapturePipeline(false), 1500);
-    }
-  }
-}
-
-if (window.location.hostname.includes("youtube.com")) {
-  window.addEventListener("yt-navigate-finish", () => setTimeout(() => runCapturePipeline(false), 1500));
-  window.addEventListener("popstate", checkYoutubeUrlChange);
-  setInterval(checkYoutubeUrlChange, 2500);
 }
 
 // ── Dashboard Auth Sync Bridge ──
