@@ -1,6 +1,6 @@
 /**
  * Default domain and pattern blocklist for excluding sensitive sites
- * (banking, medical, adult, private portals, internal local URLs).
+ * (banking, medical, adult, private portals, internal browser URLs).
  */
 export const DEFAULT_BLOCKED_DOMAINS = [
   "chase.com",
@@ -27,24 +27,47 @@ export const BLOCKED_URL_PREFIXES = [
   "about:",
   "view-source:",
   "file://",
-  "http://localhost",
-  "http://127.0.0.1",
-  "https://localhost",
 ];
+
+/** Sentiora app URLs should never be captured as memories. */
+export function isSentioraAppUrl(urlStr: string): boolean {
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    const port = parsed.port;
+
+    if (host.includes("sentiora")) {
+      return true;
+    }
+
+    if (
+      (host === "localhost" || host === "127.0.0.1") &&
+      (port === "5173" || port === "8000" || port === "5050")
+    ) {
+      return true;
+    }
+  } catch {
+    return false;
+  }
+
+  return false;
+}
 
 export function isUrlBlocked(urlStr: string): boolean {
   if (!urlStr) return true;
 
   const lowerUrl = urlStr.toLowerCase();
 
-  // 1. Check protocol / prefix blocklist
+  if (isSentioraAppUrl(urlStr)) {
+    return true;
+  }
+
   for (const prefix of BLOCKED_URL_PREFIXES) {
     if (lowerUrl.startsWith(prefix)) {
       return true;
     }
   }
 
-  // 2. Check hostname blocklist
   try {
     const parsed = new URL(urlStr);
     const hostname = parsed.hostname.toLowerCase();
@@ -55,7 +78,7 @@ export function isUrlBlocked(urlStr: string): boolean {
       }
     }
   } catch {
-    return true; // Invalid URL
+    return true;
   }
 
   return false;

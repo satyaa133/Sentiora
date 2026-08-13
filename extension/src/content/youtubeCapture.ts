@@ -1,3 +1,4 @@
+import { capExtractedContent, normalizeExtractedText } from "../shared/captureUtils";
 import type { YoutubeCapturePayload } from "../shared/types";
 
 export function isYoutubeWatchPage(): boolean {
@@ -33,15 +34,17 @@ export async function captureYoutube(): Promise<YoutubeCapturePayload | null> {
   // Extract thumbnail
   const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
 
-  // Attempt to fetch transcript via public timedtext endpoint
   let content = "";
   try {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 2500);
     const transcriptResp = await fetch(
-      `https://www.youtube.com/api/timedtext?lang=en&v=${videoId}`
+      `https://www.youtube.com/api/timedtext?lang=en&v=${videoId}`,
+      { signal: controller.signal },
     );
+    window.clearTimeout(timeoutId);
     if (transcriptResp.ok) {
       const xmlText = await transcriptResp.text();
-      // Parse XML text nodes
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(xmlText, "text/xml");
       const textNodes = xmlDoc.getElementsByTagName("text");
@@ -55,8 +58,8 @@ export async function captureYoutube(): Promise<YoutubeCapturePayload | null> {
       }
       content = lines.join(" ");
     }
-  } catch (err) {
-    console.warn("Could not fetch YouTube transcript via timedtext:", err);
+  } catch {
+    // Timedtext is optional; fall back to the visible description.
   }
 
   // Fallback to description if no transcript available
@@ -82,7 +85,7 @@ export async function captureYoutube(): Promise<YoutubeCapturePayload | null> {
     source_type: "youtube",
     url: window.location.href,
     title: title.trim(),
-    content: content.trim(),
+    content: capExtractedContent(normalizeExtractedText(content)),
     author,
     thumbnail_url: thumbnailUrl,
   };

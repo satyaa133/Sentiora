@@ -11,7 +11,10 @@ DEFAULT_QUEUE_NAME = "sentiora.default"
 
 def create_redis_connection() -> Redis:
     settings = get_settings()
-    return Redis.from_url(settings.redis_url)
+    return Redis.from_url(
+        settings.redis_url,
+        socket_connect_timeout=1,
+    )
 
 
 def create_queues(connection: Redis | None = None) -> list[Queue]:

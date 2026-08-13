@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { APP_NAME } from "@shared/constants/app";
 import PopupAuth from "./PopupAuth";
-import { getAccessToken, getCachedUser, clearAllAuthData, type CachedUser } from "../services/storage";
-import { extApiFetch } from "../services/extApiClient";
+import { getAccessToken, getRefreshToken, getCachedUser, clearAllAuthData, type CachedUser } from "../services/storage";
+import { extApiFetch, ExtApiError } from "../services/extApiClient";
+import { postCapturePayload, sanitizeCapturePayload } from "../shared/captureUtils";
+import type { CapturePayload } from "../shared/types";
 
 type PopupView =
   | "auth"
@@ -15,12 +17,67 @@ type PopupView =
   | "manual_note"
   | "settings";
 
+const EXTRACT_TIMEOUT_MS = 8_000;
+const SAVE_TIMEOUT_MS = 8_000;
+const PING_TIMEOUT_MS = 400;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        window.clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+function pingTab(tabId: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => resolve(false), PING_TIMEOUT_MS);
+    chrome.tabs.sendMessage(tabId, { type: "PING" }, () => {
+      window.clearTimeout(timer);
+      resolve(!chrome.runtime.lastError);
+    });
+  });
+}
+
+interface ForceCaptureResponse {
+  success?: boolean;
+  payload?: CapturePayload;
+  skipped?: boolean;
+  reason?: string;
+  error?: string;
+  extractionMs?: number;
+}
+
+function requestForceCapture(tabId: number): Promise<ForceCaptureResponse> {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(tabId, { type: "FORCE_CAPTURE" }, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve((response ?? {}) as ForceCaptureResponse);
+    });
+  });
+}
+
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState<CachedUser | null>(null);
   const [itemCount, setItemCount] = useState<number | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [viewState, setViewState] = useState<PopupView>("ready");
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [capturePhase, setCapturePhase] = useState<"extracting" | "saving">("extracting");
+  const captureGenerationRef = useRef(0);
 
   // Current tab info
   const [activeTabTitle, setActiveTabTitle] = useState("Understanding Docker Containers");
@@ -35,6 +92,52 @@ export default function App() {
   const [autoDetectSensitive, setAutoDetectSensitive] = useState(true);
   const [showSaveConfirmation, setShowSaveConfirmation] = useState(true);
 
+  async function syncAuthToBackground() {
+    const token = await getAccessToken();
+    const refreshToken = await getRefreshToken();
+    const cached = await getCachedUser();
+    if (token && refreshToken && cached && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: "SYNC_AUTH_TOKENS",
+        payload: {
+          accessToken: token,
+          refreshToken,
+          user: cached,
+        },
+      });
+    }
+  }
+
+  async function postCaptureFromPopup(payload: CapturePayload): Promise<boolean> {
+    const result = await postCapturePayload(
+      async (capturePayload) => {
+        await extApiFetch("/memory-items", {
+          method: "POST",
+          body: JSON.stringify(sanitizeCapturePayload(capturePayload)),
+        });
+      },
+      payload,
+    );
+
+    if (!result.success) {
+      setCaptureError(result.error ?? "Capture request failed.");
+      return false;
+    }
+    return true;
+  }
+
+  async function ensureContentScript(tabId: number): Promise<void> {
+    const alreadyInjected = await pingTab(tabId);
+    if (alreadyInjected) {
+      return;
+    }
+
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    } catch {
+      // Restricted pages cannot receive content scripts; caller may use fallback.
+    }
+  }
   async function fetchItemCount() {
     try {
       const resp = await extApiFetch<{ total: number }>("/memory-items?per_page=1");
@@ -79,6 +182,7 @@ export default function App() {
         setIsAuthenticated(true);
         setUser(cached);
         setViewState("ready");
+        await syncAuthToBackground();
         fetchItemCount();
       } else {
         setIsAuthenticated(false);
@@ -106,8 +210,12 @@ export default function App() {
     setViewState("auth");
   }
 
-  async function performFallbackCapture(tab: chrome.tabs.Tab) {
-    if (!tab.url || !tab.title) return;
+  async function performFallbackCapture(tab: chrome.tabs.Tab): Promise<boolean> {
+    if (!tab.url || !tab.title) {
+      setCaptureError("Unable to read the active tab URL or title.");
+      return false;
+    }
+
     const urlStr = tab.url;
     let sourceType: "webpage" | "youtube" | "pdf" = "webpage";
     let thumbnailUrl: string | undefined;
@@ -134,39 +242,141 @@ export default function App() {
           source_type: sourceType,
           url: urlStr,
           title: tab.title,
-          content: `Captured ${sourceType} content: ${tab.title} (${urlStr})`,
+          content: `Captured ${sourceType} page: ${tab.title}. Open the dashboard to view full extracted content when available.`,
           thumbnail_url: thumbnailUrl,
         }),
       });
+      return true;
     } catch (err) {
+      const message =
+        err instanceof ExtApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Capture request failed.";
+      setCaptureError(message);
       console.warn("Direct capture post failed:", err);
+      return false;
     }
   }
 
-  function handleSaveCurrentPage() {
+  async function handleSaveCurrentPage() {
+    if (isCapturing) return;
+
+    const generation = ++captureGenerationRef.current;
+    setIsCapturing(true);
+    setCaptureError(null);
+    setCapturePhase("extracting");
     setViewState("capturing");
-    if (typeof chrome !== "undefined" && chrome.tabs) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const activeTab = tabs[0];
-        if (activeTab?.id) {
-          chrome.tabs.sendMessage(activeTab.id, { type: "FORCE_CAPTURE" }, async (response) => {
-            if (chrome.runtime.lastError || !response?.success) {
-              await performFallbackCapture(activeTab);
-            }
-            setViewState("saved");
-            fetchItemCount();
-          });
-        } else {
-          setViewState("saved");
+
+    const isCurrentCapture = () => captureGenerationRef.current === generation;
+
+    const fail = (message: string) => {
+      if (!isCurrentCapture()) return;
+      setCaptureError(message);
+      setViewState("failed");
+      setIsCapturing(false);
+    };
+
+    if (typeof chrome === "undefined" || !chrome.tabs) {
+      fail("Extension environment is unavailable.");
+      return;
+    }
+
+    void syncAuthToBackground();
+
+    const extractStarted = performance.now();
+
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const activeTab = tabs[0];
+      if (!activeTab?.id) {
+        fail("No active tab found.");
+        return;
+      }
+
+      await ensureContentScript(activeTab.id);
+      if (!isCurrentCapture()) return;
+
+      let response: ForceCaptureResponse | null = null;
+      let usedFallback = false;
+
+      try {
+        response = await withTimeout(
+          requestForceCapture(activeTab.id),
+          EXTRACT_TIMEOUT_MS,
+          "Extraction timed out. The page is too large or still loading.",
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Extraction failed.";
+        const noReceiver = message.includes("Receiving end does not exist");
+        if (!noReceiver) {
+          fail(message);
+          return;
         }
-      });
-    } else {
-      setTimeout(() => setViewState("saved"), 1000);
+        usedFallback = true;
+      }
+
+      if (!isCurrentCapture()) return;
+
+      if (response?.skipped && response.reason === "sensitive") {
+        setCaptureError("This page is protected and cannot be captured.");
+        setViewState("sensitive");
+        setIsCapturing(false);
+        return;
+      }
+
+      const extractionMs = response?.extractionMs ?? Math.round(performance.now() - extractStarted);
+      setCapturePhase("saving");
+      const saveStarted = performance.now();
+
+      let saved = false;
+      if (response?.payload) {
+        saved = await withTimeout(
+          postCaptureFromPopup(response.payload),
+          SAVE_TIMEOUT_MS,
+          "Saving timed out. The vault did not confirm this memory.",
+        );
+      } else if (usedFallback) {
+        saved = await withTimeout(
+          performFallbackCapture(activeTab),
+          SAVE_TIMEOUT_MS,
+          "Saving timed out. The vault did not confirm this memory.",
+        );
+      } else {
+        fail(response?.error ? String(response.error) : "Could not extract readable content from this page.");
+        return;
+      }
+
+      if (!isCurrentCapture()) return;
+
+      const saveMs = Math.round(performance.now() - saveStarted);
+      console.info(
+        `[Sentiora Capture] Extraction: ${extractionMs} ms | API: ${saveMs} ms | Total: ${extractionMs + saveMs} ms`,
+      );
+
+      if (saved) {
+        setViewState("saved");
+        fetchItemCount();
+      } else {
+        setCaptureError((prev) => prev ?? "Capture failed. Sign in with the same account as the dashboard.");
+        setViewState("failed");
+      }
+    } catch (err) {
+      if (!isCurrentCapture()) return;
+      fail(err instanceof Error ? err.message : "Capture failed.");
+      return;
+    }
+
+    if (isCurrentCapture()) {
+      setIsCapturing(false);
     }
   }
 
   async function handleSaveManualNote() {
-    if (!noteTitle.trim()) return;
+    if (!noteTitle.trim() || isCapturing) return;
+    setIsCapturing(true);
+    setCaptureError(null);
     setViewState("capturing");
     try {
       await extApiFetch("/memory-items", {
@@ -183,8 +393,12 @@ export default function App() {
       setViewState("saved");
       fetchItemCount();
     } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save note.";
+      setCaptureError(message);
       console.error("Failed to save manual note:", err);
-      setViewState("ready");
+      setViewState("failed");
+    } finally {
+      setIsCapturing(false);
     }
   }
 
@@ -275,7 +489,8 @@ export default function App() {
             {/* Main Action Button */}
             <button
               onClick={handleSaveCurrentPage}
-              className="w-full py-3.5 bg-[#2C6F54] hover:bg-[#235943] text-white rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.99]"
+              disabled={isCapturing}
+              className="w-full py-3.5 bg-[#2C6F54] hover:bg-[#235943] disabled:opacity-50 text-white rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg active:scale-[0.99]"
             >
               <span className="text-sm">⚡</span> Capture Memory Now
             </button>
@@ -299,7 +514,7 @@ export default function App() {
             {/* Vault Quick Stats */}
             <div className="pt-2 border-t border-[#E5DFD0]/80 flex justify-between items-center text-xs text-[#60706A]">
               <span className="flex items-center gap-1 font-medium">
-                <span>📦</span> Vault Items: <strong className="text-[#1F2421] font-bold">{itemCount ?? 247}</strong>
+                <span>📦</span> Vault Items: <strong className="text-[#1F2421] font-bold">{itemCount ?? 0}</strong>
               </span>
               <button
                 onClick={openDashboard}
@@ -319,14 +534,24 @@ export default function App() {
               <div className="absolute inset-0 flex items-center justify-center text-sm">✨</div>
             </div>
             <div className="space-y-1">
-              <h2 className="font-serif text-base font-bold text-[#1F2421]">Ingesting Content...</h2>
-              <p className="text-xs text-[#60706A]">Extracting article text, headers, and metadata</p>
+              <h2 className="font-serif text-base font-bold text-[#1F2421]">
+                {capturePhase === "saving" ? "Saving Memory..." : "Extracting Content..."}
+              </h2>
+              <p className="text-xs text-[#60706A]">
+                {capturePhase === "saving"
+                  ? "Persisting this page to your vault"
+                  : "Extracting article text, headers, and metadata"}
+              </p>
             </div>
             <div className="p-3 bg-white border border-[#E5DFD0] rounded-xl text-xs text-[#2C6F54] font-medium truncate shadow-xs">
               📄 {activeTabTitle}
             </div>
             <button
-              onClick={() => setViewState("ready")}
+              onClick={() => {
+                captureGenerationRef.current += 1;
+                setIsCapturing(false);
+                setViewState("ready");
+              }}
               className="text-xs text-rose-600 hover:underline font-semibold"
             >
               Cancel Capture
@@ -432,6 +657,54 @@ export default function App() {
               className="text-xs text-[#60706A] hover:underline font-medium"
             >
               ← Back to extension
+            </button>
+          </div>
+        )}
+
+        {/* VIEW 6b: Capture Failed */}
+        {isAuthenticated && viewState === "failed" && (
+          <div className="space-y-4 text-center py-2">
+            <div className="h-12 w-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center mx-auto text-xl font-bold border border-rose-200">
+              ✕
+            </div>
+            <div>
+              <h2 className="font-serif text-base font-bold text-[#1F2421]">Capture Failed</h2>
+              <p className="text-[11px] text-rose-700 leading-relaxed px-2">
+                {captureError ?? "Unable to save this page to your vault."}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setCaptureError(null);
+                setViewState("ready");
+              }}
+              className="w-full py-2.5 bg-white border border-[#E5DFD0] hover:bg-[#FAF8F1] text-[#1F2421] rounded-xl text-xs font-bold"
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {/* VIEW 6c: Sensitive Page Blocked */}
+        {isAuthenticated && viewState === "sensitive" && (
+          <div className="space-y-4 text-center py-2">
+            <div className="h-12 w-12 rounded-2xl bg-[#F2E5D4] text-[#A86A1A] flex items-center justify-center mx-auto text-xl font-bold border border-[#A86A1A]/20">
+              🔒
+            </div>
+            <div>
+              <h2 className="font-serif text-base font-bold text-[#1F2421]">Page Protected</h2>
+              <p className="text-[11px] text-[#60706A] leading-relaxed px-2">
+                {captureError ?? "This page cannot be captured for privacy reasons."}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setCaptureError(null);
+                setViewState("ready");
+              }}
+              className="w-full py-2.5 bg-white border border-[#E5DFD0] hover:bg-[#FAF8F1] text-[#1F2421] rounded-xl text-xs font-bold"
+            >
+              Back
             </button>
           </div>
         )}

@@ -73,6 +73,21 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
         is_email_verified: user.is_email_verified ?? false,
       });
 
+      if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+        chrome.runtime.sendMessage({
+          type: "SYNC_AUTH_TOKENS",
+          payload: {
+            accessToken: access_token,
+            refreshToken: refresh_token,
+            user: {
+              id: user.id,
+              email: user.email,
+              is_email_verified: user.is_email_verified ?? false,
+            },
+          },
+        });
+      }
+
       onAuthChange(true);
     } catch (err) {
       if (err instanceof ExtApiError) {

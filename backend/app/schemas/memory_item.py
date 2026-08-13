@@ -12,7 +12,7 @@ class MemoryItemCreate(BaseModel):
     source_type: SourceType
     url: str = Field(..., min_length=1, max_length=2048)
     title: str = Field(..., min_length=1, max_length=1024)
-    content: str | None = Field(default=None)
+    content: str | None = Field(default=None, max_length=100_000)
     author: str | None = Field(default=None, max_length=512)
     favicon_url: str | None = Field(default=None, max_length=2048)
     thumbnail_url: str | None = Field(default=None, max_length=2048)
