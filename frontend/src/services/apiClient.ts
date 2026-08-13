@@ -10,7 +10,7 @@ const apiClient = axios.create({
 
 // Attach access token on every request
 apiClient.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem("access_token");
+  const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -72,6 +72,7 @@ apiClient.interceptors.response.use(
         });
         const { access_token, refresh_token: newRefreshToken } = response.data.data;
         sessionStorage.setItem("access_token", access_token);
+        localStorage.setItem("access_token", access_token);
         localStorage.setItem("refresh_token", newRefreshToken);
 
         processQueue(null, access_token);
@@ -83,6 +84,7 @@ apiClient.interceptors.response.use(
       } catch (refreshError) {
         processQueue(refreshError, null);
         sessionStorage.removeItem("access_token");
+        localStorage.removeItem("access_token");
         localStorage.removeItem("refresh_token");
         window.dispatchEvent(new Event("auth:logout"));
         return Promise.reject(refreshError);

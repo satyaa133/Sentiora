@@ -73,9 +73,9 @@ export default function SignUp() {
 
     try {
       await register(email, password, fullName.trim());
-      // Auto-login after registration
+      // Auto-login after registration and navigate to onboarding first
       await login(email, password);
-      navigate("/dashboard");
+      navigate("/onboarding");
     } catch (err) {
       const axiosErr = err as AxiosError<ApiErrorResponse>;
       const apiCode = axiosErr.response?.data?.error?.code;

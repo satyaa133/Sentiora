@@ -29,29 +29,29 @@ function cleanExtractedText(rawText: string): string {
   return cleanedWords.join(" ").replace(/\s+/g, " ").trim();
 }
 
-async function runCapturePipeline(): Promise<void> {
+async function runCapturePipeline(isForce = false): Promise<boolean> {
   // 1. Guard check
-  if (isCurrentPageSensitive()) {
+  if (isCurrentPageSensitive() && !isForce) {
     console.info("[Sentiora] Page capture skipped: page flagged as sensitive or blocked.");
-    return;
+    return false;
   }
 
   // 2. Check YouTube
   if (isYoutubeWatchPage()) {
-    const payload = await captureYoutube();
+    const payload = await captureYoutube(isForce);
     if (payload) {
-      sendCapture({ type: "CAPTURE_YOUTUBE", payload });
+      return await sendCapture({ type: "CAPTURE_YOUTUBE", payload });
     }
-    return;
+    return false;
   }
 
   // 3. Check PDF
   if (isPdfDocument()) {
-    const payload = capturePdf();
+    const payload = capturePdf(isForce);
     if (payload) {
-      sendCapture({ type: "CAPTURE_PDF", payload });
+      return await sendCapture({ type: "CAPTURE_PDF", payload });
     }
-    return;
+    return false;
   }
 
   // 4. General Webpage Capture via Readability
@@ -60,69 +60,100 @@ async function runCapturePipeline(): Promise<void> {
     const reader = new Readability(documentClone);
     const article = reader.parse();
 
-    const title = article?.title || document.title || "Untitled Page";
+    const rawTitle = article?.title || document.title || "Untitled Page";
+    const title = rawTitle.trim().slice(0, 1024);
+
     const rawContent = article?.textContent || document.body.innerText || "";
     const content = cleanExtractedText(rawContent);
 
-    // Skip pages with trivial content
-    if (!content || content.length < 50) {
+    // Skip pages with trivial content unless forced
+    if (!isForce && (!content || content.length < 50)) {
       console.info("[Sentiora] Page capture skipped: insufficient content length.");
-      return;
+      return false;
     }
 
     // Extract metadata
     const faviconEl = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
-    const faviconUrl = faviconEl ? faviconEl.href : undefined;
+    let faviconUrl = faviconEl ? faviconEl.href : undefined;
+    if (faviconUrl && (faviconUrl.startsWith("data:") || faviconUrl.length > 2048)) {
+      faviconUrl = undefined;
+    }
 
     const ogImageEl = document.querySelector<HTMLMetaElement>("meta[property='og:image']");
-    const thumbnailUrl = ogImageEl ? ogImageEl.content : undefined;
+    let thumbnailUrl = ogImageEl ? ogImageEl.content : undefined;
+    if (thumbnailUrl && (thumbnailUrl.startsWith("data:") || thumbnailUrl.length > 2048)) {
+      thumbnailUrl = undefined;
+    }
 
-    const author = article?.byline || undefined;
+    const rawAuthor = article?.byline || undefined;
+    const author = rawAuthor ? rawAuthor.trim().slice(0, 512) : undefined;
 
     const payload: WebpageCapturePayload = {
       source_type: "webpage",
-      url: window.location.href,
-      title: title.trim(),
+      url: window.location.href.slice(0, 2048),
+      title,
       content,
       author,
       favicon_url: faviconUrl,
       thumbnail_url: thumbnailUrl,
+      is_force: isForce,
     };
 
-    sendCapture({ type: "CAPTURE_WEBPAGE", payload });
+    return await sendCapture({ type: "CAPTURE_WEBPAGE", payload });
   } catch (err) {
     console.error("[Sentiora] Webpage capture error:", err);
+    return false;
   }
 }
 
-function sendCapture(message: ExtensionMessage): void {
-  chrome.runtime.sendMessage(message, (response) => {
-    if (chrome.runtime.lastError) {
-      // Background worker might be sleeping or unregistered
-      return;
-    }
-    if (response?.success) {
-      console.info("[Sentiora] Content successfully captured and queued.");
+function sendCapture(message: ExtensionMessage): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime?.id) {
+        resolve(false);
+        return;
+      }
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          console.warn("[Sentiora] Runtime send message error:", chrome.runtime.lastError.message);
+          resolve(false);
+          return;
+        }
+        if (response?.success) {
+          console.info("[Sentiora] Content successfully captured and queued.");
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      });
+    } catch {
+      resolve(false);
     }
   });
 }
 
 // Run capture on document load
 if (document.readyState === "complete") {
-  setTimeout(runCapturePipeline, 1000);
+  setTimeout(() => runCapturePipeline(false), 1000);
 } else {
-  window.addEventListener("load", () => setTimeout(runCapturePipeline, 1000));
+  window.addEventListener("load", () => setTimeout(() => runCapturePipeline(false), 1000));
 }
 
 // ── Listen for FORCE_CAPTURE request from popup ──
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === "FORCE_CAPTURE") {
-    runCapturePipeline()
-      .then(() => sendResponse({ success: true }))
-      .catch((err) => sendResponse({ success: false, error: String(err) }));
-    return true;
+try {
+  if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message?.type === "FORCE_CAPTURE") {
+        runCapturePipeline(true)
+          .then((success) => sendResponse({ success }))
+          .catch((err) => sendResponse({ success: false, error: String(err) }));
+        return true;
+      }
+    });
   }
-});
+} catch {
+  // Ignore runtime listener attachment errors if context invalidated
+}
 
 // ── YouTube SPA Navigation Listener ──
 let lastCapturedUrl = window.location.href;
@@ -130,13 +161,13 @@ function checkYoutubeUrlChange(): void {
   if (window.location.href !== lastCapturedUrl) {
     lastCapturedUrl = window.location.href;
     if (isYoutubeWatchPage()) {
-      setTimeout(runCapturePipeline, 1500);
+      setTimeout(() => runCapturePipeline(false), 1500);
     }
   }
 }
 
 if (window.location.hostname.includes("youtube.com")) {
-  window.addEventListener("yt-navigate-finish", () => setTimeout(runCapturePipeline, 1500));
+  window.addEventListener("yt-navigate-finish", () => setTimeout(() => runCapturePipeline(false), 1500));
   window.addEventListener("popstate", checkYoutubeUrlChange);
   setInterval(checkYoutubeUrlChange, 2500);
 }
@@ -150,18 +181,54 @@ function initDashboardAuthSync(): void {
 
   if (!isDashboardHost) return;
 
-  // 1. Listen for real-time postMessage auth events from Dashboard
+  const syncAuth = (session: { accessToken?: string; refreshToken?: string; user?: unknown }) => {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime?.id) return;
+      if (session?.accessToken && session?.refreshToken && session?.user) {
+        chrome.runtime.sendMessage(
+          {
+            type: "SYNC_AUTH_TOKENS",
+            payload: {
+              accessToken: session.accessToken,
+              refreshToken: session.refreshToken,
+              user: session.user,
+            },
+          },
+          () => {
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          },
+        );
+      }
+    } catch {
+      /* ignore context invalidated */
+    }
+  };
+
+  // 1. Listen for real-time postMessage & custom DOM auth events from Dashboard
   window.addEventListener("message", (event) => {
     if (event.data?.type === "SENTIORA_AUTH_SYNC") {
-      const { accessToken, refreshToken, user } = event.data;
-      if (accessToken && refreshToken && user) {
-        chrome.runtime.sendMessage({
-          type: "SYNC_AUTH_TOKENS",
-          payload: { accessToken, refreshToken, user },
-        });
-      }
+      syncAuth(event.data);
     } else if (event.data?.type === "SENTIORA_AUTH_LOGOUT") {
-      chrome.runtime.sendMessage({ type: "CLEAR_AUTH_TOKENS" });
+      try {
+        if (typeof chrome !== "undefined" && chrome.runtime?.id) {
+          chrome.runtime.sendMessage({ type: "CLEAR_AUTH_TOKENS" }, () => {
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  window.addEventListener("sentiora_auth_sync", (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    if (detail) {
+      syncAuth(detail);
     }
   });
 
@@ -170,16 +237,7 @@ function initDashboardAuthSync(): void {
     const rawSession = localStorage.getItem("sentiora_auth_session");
     if (rawSession) {
       const parsed = JSON.parse(rawSession);
-      if (parsed.accessToken && parsed.refreshToken && parsed.user) {
-        chrome.runtime.sendMessage({
-          type: "SYNC_AUTH_TOKENS",
-          payload: {
-            accessToken: parsed.accessToken,
-            refreshToken: parsed.refreshToken,
-            user: parsed.user,
-          },
-        });
-      }
+      syncAuth(parsed);
     }
   } catch {
     // Ignore storage parse errors

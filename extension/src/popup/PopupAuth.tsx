@@ -74,6 +74,14 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
       });
 
       onAuthChange(true);
+
+      if (mode === "register") {
+        if (typeof chrome !== "undefined" && chrome.tabs) {
+          chrome.tabs.create({ url: "http://localhost:5173/onboarding" });
+        } else {
+          window.open("http://localhost:5173/onboarding", "_blank");
+        }
+      }
     } catch (err) {
       if (err instanceof ExtApiError) {
         if (err.code === "AUTH_INVALID_CREDENTIALS") {

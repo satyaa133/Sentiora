@@ -2,14 +2,26 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { APP_NAME } from "@shared/constants/app";
 import { useAuth } from "../context/AuthContext";
+import { createMemoryItem } from "../services/memoryService";
 
 export default function Onboarding() {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
 
-  function handleComplete() {
+  async function handleComplete() {
     if (isAuthenticated) {
+      try {
+        await createMemoryItem({
+          source_type: "webpage",
+          title: "Getting Started with Your Sentiora Memory Vault",
+          url: "https://sentiora.app/welcome",
+          content:
+            "Welcome to Sentiora! Every piece of knowledge you capture using the browser extension or uploader is securely parsed, indexed, and preserved here in your private vault. Sentiora extracts primary core ideas, stores high-fidelity text copies, and connects historical concepts automatically so you can search using natural phrases and ask questions anytime.",
+        });
+      } catch {
+        // Ignore if welcome memory already exists
+      }
       navigate("/dashboard");
     } else {
       navigate("/signup");

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { APP_NAME } from "@shared/constants/app";
 import PopupAuth from "./PopupAuth";
-import { getAccessToken, getCachedUser, clearAllAuthData, type CachedUser } from "../services/storage";
-import { extApiFetch } from "../services/extApiClient";
+import { getAccessToken, getRefreshToken, getCachedUser, setCachedUser, clearAllAuthData, type CachedUser } from "../services/storage";
+import { extApiFetch, attemptTokenRefresh } from "../services/extApiClient";
 
 type PopupView =
   | "auth"
@@ -73,8 +73,36 @@ export default function App() {
 
   const checkAuth = useCallback(async () => {
     try {
-      const token = await getAccessToken();
-      const cached = await getCachedUser();
+      let token = await getAccessToken();
+      let cached = await getCachedUser();
+
+      if (!token) {
+        const refreshToken = await getRefreshToken();
+        if (refreshToken) {
+          const newToken = await attemptTokenRefresh();
+          if (newToken) {
+            token = newToken;
+            cached = await getCachedUser();
+          }
+        }
+      }
+
+      if (token && !cached) {
+        try {
+          const meResp = await extApiFetch<{ id: string; email: string; is_email_verified?: boolean }>("/auth/me");
+          if (meResp.data) {
+            cached = {
+              id: meResp.data.id,
+              email: meResp.data.email,
+              is_email_verified: meResp.data.is_email_verified ?? false,
+            };
+            await setCachedUser(cached);
+          }
+        } catch {
+          // Ignore me error
+        }
+      }
+
       if (token && cached) {
         setIsAuthenticated(true);
         setUser(cached);
@@ -106,9 +134,10 @@ export default function App() {
     setViewState("auth");
   }
 
-  async function performFallbackCapture(tab: chrome.tabs.Tab) {
-    if (!tab.url || !tab.title) return;
-    const urlStr = tab.url;
+  async function performFallbackCapture(tab: chrome.tabs.Tab): Promise<boolean> {
+    if (!tab.url || !tab.title) return false;
+    const urlStr = tab.url.slice(0, 2048);
+    const titleStr = tab.title.trim().slice(0, 1024);
     let sourceType: "webpage" | "youtube" | "pdf" = "webpage";
     let thumbnailUrl: string | undefined;
 
@@ -133,13 +162,15 @@ export default function App() {
         body: JSON.stringify({
           source_type: sourceType,
           url: urlStr,
-          title: tab.title,
-          content: `Captured ${sourceType} content: ${tab.title} (${urlStr})`,
+          title: titleStr,
+          content: `Captured ${sourceType} content: ${titleStr} (${urlStr})`,
           thumbnail_url: thumbnailUrl,
         }),
       });
+      return true;
     } catch (err) {
       console.warn("Direct capture post failed:", err);
+      return false;
     }
   }
 
@@ -150,11 +181,17 @@ export default function App() {
         const activeTab = tabs[0];
         if (activeTab?.id) {
           chrome.tabs.sendMessage(activeTab.id, { type: "FORCE_CAPTURE" }, async (response) => {
-            if (chrome.runtime.lastError || !response?.success) {
-              await performFallbackCapture(activeTab);
+            let success = response?.success ?? false;
+            if (chrome.runtime.lastError || !success) {
+              success = await performFallbackCapture(activeTab);
             }
-            setViewState("saved");
-            fetchItemCount();
+            if (success) {
+              setViewState("saved");
+              fetchItemCount();
+            } else {
+              setViewState("ready");
+              alert("Could not capture page. Make sure you are signed in and backend server is online.");
+            }
           });
         } else {
           setViewState("saved");

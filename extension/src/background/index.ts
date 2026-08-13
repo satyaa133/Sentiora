@@ -87,25 +87,56 @@ async function handleCaptureMessage(payload: CapturePayload): Promise<boolean> {
     return false;
   }
 
-  // Check rate limit / deduplication
-  const recent = await isUrlCapturedRecently(payload.url);
-  if (recent) {
-    console.info("[Sentiora Background] Skipping capture, URL captured recently:", payload.url);
-    return true;
+  // Check rate limit / deduplication unless user explicitly forced capture
+  if (!payload.is_force) {
+    const recent = await isUrlCapturedRecently(payload.url);
+    if (recent) {
+      console.info("[Sentiora Background] Skipping automatic capture, URL captured recently:", payload.url);
+      return true;
+    }
   }
+
+  // Strip non-backend fields from API request payload
+  const { is_force: _isForce, ...apiPayload } = payload;
 
   try {
     await extApiFetch("/memory-items", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(apiPayload),
     });
 
     await markUrlCaptured(payload.url);
     showBadgeSuccess();
+    notifyDashboardTabs();
     return true;
   } catch (err) {
     console.error("[Sentiora Background] API post memory-item error:", err);
     return false;
+  }
+}
+
+function notifyDashboardTabs(): void {
+  try {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (
+          tab.id &&
+          tab.url &&
+          (tab.url.includes("localhost") ||
+            tab.url.includes("127.0.0.1") ||
+            tab.url.includes("sentiora"))
+        ) {
+          chrome.tabs.sendMessage(tab.id, { type: "REFRESH_MEMORY_FEED" }, () => {
+            // Ignore tab send errors if script not listening
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          });
+        }
+      }
+    });
+  } catch {
+    // Ignore tab query errors
   }
 }
 

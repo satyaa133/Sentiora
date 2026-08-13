@@ -8,7 +8,7 @@ export function isYoutubeWatchPage(): boolean {
   );
 }
 
-export async function captureYoutube(): Promise<YoutubeCapturePayload | null> {
+export async function captureYoutube(isForce = false): Promise<YoutubeCapturePayload | null> {
   const urlParams = new URLSearchParams(window.location.search);
   const videoId = urlParams.get("v");
   if (!videoId) return null;
@@ -19,16 +19,19 @@ export async function captureYoutube(): Promise<YoutubeCapturePayload | null> {
     document.querySelector("h1.title ytd-formatted-string") ||
     document.querySelector("meta[name='title']");
 
-  const title = titleEl
+  const rawTitle = titleEl
     ? (titleEl as HTMLElement).innerText || (titleEl as HTMLMetaElement).content || "YouTube Video"
     : document.title;
+
+  const title = rawTitle.trim().slice(0, 1024);
 
   // Extract channel / author
   const authorEl =
     document.querySelector("#owner #channel-name a") ||
     document.querySelector("ytd-channel-name a");
 
-  const author = authorEl ? (authorEl as HTMLElement).innerText.trim() : undefined;
+  const rawAuthor = authorEl ? (authorEl as HTMLElement).innerText.trim() : undefined;
+  const author = rawAuthor ? rawAuthor.slice(0, 512) : undefined;
 
   // Extract thumbnail
   const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
@@ -80,10 +83,11 @@ export async function captureYoutube(): Promise<YoutubeCapturePayload | null> {
 
   return {
     source_type: "youtube",
-    url: window.location.href,
-    title: title.trim(),
+    url: window.location.href.slice(0, 2048),
+    title,
     content: content.trim(),
     author,
     thumbnail_url: thumbnailUrl,
+    is_force: isForce,
   };
 }

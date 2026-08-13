@@ -143,7 +143,7 @@ export default function Login() {
 
           <p className="auth-switch">
             Don&apos;t have an account?{" "}
-            <Link to="/signup" className="auth-switch-link">
+            <Link to="/onboarding" className="auth-switch-link">
               Sign up
             </Link>
           </p>
