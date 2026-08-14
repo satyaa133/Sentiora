@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
+    openai_api_key: str | None = None
+    openai_embedding_model: str = "text-embedding-3-small"
+    openai_chat_model: str = "gpt-4o-mini"
+    # RAG retrieval tuning
+    rag_top_k: int = 8
+    rag_max_distance: float = 0.65
+    # Maximum total characters of retrieved chunk content sent to the LLM.
+    # Keeps prompt size predictable and within token budget.
+    rag_max_context_chars: int = 6000
+    embedding_dimensions: int = 1536
 
     @field_validator("cors_origins", mode="before")
     @classmethod

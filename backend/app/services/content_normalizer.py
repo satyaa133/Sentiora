@@ -1,3 +1,12 @@
+"""Content normalisation utilities for captured memory content.
+
+Handles HTML stripping, whitespace normalisation, noise-line removal, and
+YouTube-specific transcript annotation.
+
+Noise patterns are kept conservative: only remove lines that are clearly
+navigation/UI artefacts with zero informational value.
+"""
+
 from __future__ import annotations
 
 import re
@@ -8,14 +17,44 @@ from app.models.memory_item import SourceType
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 _WHITESPACE_RE = re.compile(r"[ \t]+")
 _MULTI_NEWLINE_RE = re.compile(r"\n{3,}")
-_METRIC_RE = re.compile(r"^\d+(\.\d+)?[kmKMbB]?$", re.IGNORECASE)
+_METRIC_RE = re.compile(r"^\d+(,\d{3})*(\.\d+)?[kmKMbBtT]?$", re.IGNORECASE)
 _DUPLICATE_LINE_RE = re.compile(r"^(?P<line>.+)(?:\n(?P=line)){2,}", re.MULTILINE)
 
+# Core cookie / navigation noise — exact phrase matches
 _NOISE_LINE_RE = re.compile(
-    r"^(accept all cookies|reject all|cookie settings|we use cookies|"
-    r"subscribe to (our )?newsletter|sign in|log in|share this|"
-    r"advertisement|sponsored content|related articles|trending now|"
-    r"skip to (main )?content|enable javascript|all rights reserved)$",
+    r"^("
+    # Cookie / consent banners
+    r"accept all cookies|reject all|cookie settings|we use cookies|"
+    r"manage preferences|privacy policy|terms of service|"
+    # Auth / subscription CTAs
+    r"subscribe to (our )?newsletter|sign in|log in|sign up|create account|"
+    r"already have an account|"
+    # Social / sharing
+    r"share this|share on|tweet this|follow us|"
+    # Ad labels
+    r"advertisement|sponsored content|sponsored|"
+    # Navigation chrome
+    r"related articles|trending now|you might (also )?like|"
+    r"skip to (main )?content|enable javascript|"
+    # Footer / legal
+    r"all rights reserved|copyright ©|"
+    # Coding-tutorial site chrome (GeeksforGeeks, TUF+, LeetCode, etc.)
+    r"check out tuf\+?|tuf\+|practice now|try it yourself|try it now|"
+    r"run on ide|run code|open in ide|"
+    r"next article|previous article|next →|← previous|"
+    r"similar reads?|also read|recommended for you|"
+    r"read more|\.\.\.more|load more|show more|view more|"
+    r"improve this article|"
+    # Generic UI chrome
+    r"menu|close|open|search\.\.\.|"
+    r"article tags"
+    r")$",
+    re.IGNORECASE,
+)
+
+# Lines that are purely numeric stats (view counts, like counts, etc.)
+_PURE_NUMERIC_RE = re.compile(
+    r"^[\d,\s]+(views?|likes?|shares?|comments?|followers?|subscribers?)?$",
     re.IGNORECASE,
 )
 
@@ -51,6 +90,7 @@ def detect_language(text: str) -> str | None:
 
 
 def _strip_metric_streaks(text: str) -> str:
+    """Remove long runs of bare numeric metrics (e.g., view counts in a row)."""
     words = text.split(" ")
     cleaned: list[str] = []
     stat_streak = 0
@@ -69,9 +109,14 @@ def _is_noise_line(line: str) -> bool:
     compact = re.sub(r"\s+", " ", line).strip()
     if not compact:
         return True
-    if len(compact) < 3:
+    # Very short lines are almost certainly UI artefacts, not content.
+    if len(compact) < 4:
         return True
-    return bool(_NOISE_LINE_RE.match(compact))
+    if _NOISE_LINE_RE.match(compact):
+        return True
+    if _PURE_NUMERIC_RE.match(compact):
+        return True
+    return False
 
 
 def normalize_content(text: str | None, source_type: SourceType) -> str:

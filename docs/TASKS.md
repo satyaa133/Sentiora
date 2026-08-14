@@ -17,10 +17,11 @@
 | Phase 3: Capture Pipeline | ✅ Completed | 100% | Meaningful Capture Engine (webpage, YouTube, PDF, blocklist) |
 | Phase 4: Backend Core APIs | ✅ Completed | 100% | Memory CRUD APIs, DB migration, RQ processing job |
 | Phase 5: Frontend Dashboard | ✅ Completed | 100% | Memory Feed UI, compact timeline cards, detail drawer, stats, auto-sync |
-| Phase 6: Search | 🟡 In Progress | 75% | Search UI, client & title filter, pgvector integration in progress |
-| Phase 7: AI / RAG Chat | 🟡 In Progress | 80% | Ask Sentiora AI View, citation cards, copy header, formatted markdown rendering |
-| Phase 8: Testing | 🟡 In Progress | 70% | Vitest & Pytest suites running and passing across all packages |
+| Phase 6: Search | ✅ Completed | 100% | Semantic pgvector search, lexical fallback, user isolation |
+| Phase 7: AI / RAG Chat | ✅ Completed | 100% | Real LLM integration (OpenAI), grounded RAG pipeline, citations, 503 error handling, content dedup |
+| Phase 8: Testing | 🟡 In Progress | 75% | Pytest suites running; E2E Playwright pending |
 | Phase 9: Deployment & Launch | ⏳ Planned | 0% | Staging/Prod environments, monitoring, Web Store |
+
 
 ---
 
