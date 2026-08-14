@@ -75,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearSession = useCallback(() => {
     sessionStorage.removeItem("access_token");
+    localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     localStorage.removeItem("sentiora_auth_session");
     window.postMessage({ type: "SENTIORA_AUTH_LOGOUT" }, "*");
@@ -111,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentUser = normalizeUser(response.data.data);
       setUser(currentUser);
 
-      const accessToken = sessionStorage.getItem("access_token");
+      const accessToken = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
       const refreshToken = localStorage.getItem("refresh_token");
       if (accessToken && refreshToken) {
         const sessionData = {
@@ -126,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         localStorage.setItem("sentiora_auth_session", JSON.stringify(sessionData));
         window.postMessage({ type: "SENTIORA_AUTH_SYNC", ...sessionData }, "*");
+        window.dispatchEvent(new CustomEvent("sentiora_auth_sync", { detail: sessionData }));
       }
 
       return hydrateSourcePreferences(currentUser);
@@ -136,13 +138,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearSession, hydrateSourcePreferences]);
 
   useEffect(() => {
-    const token = sessionStorage.getItem("access_token");
-    if (token) {
-      fetchCurrentUser().finally(() => setIsLoading(false));
-    } else {
-      setIsLoading(false);
-    }
-  }, [fetchCurrentUser]);
+    const initAuth = async () => {
+      let token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+      const refreshToken = localStorage.getItem("refresh_token");
+
+      if (!token && refreshToken) {
+        try {
+          const resp = await apiClient.post<{
+            success: boolean;
+            data: { access_token: string; refresh_token: string };
+          }>("/auth/refresh-token", { refresh_token: refreshToken });
+          const { access_token, refresh_token: newRefreshToken } = resp.data.data;
+          sessionStorage.setItem("access_token", access_token);
+          localStorage.setItem("access_token", access_token);
+          localStorage.setItem("refresh_token", newRefreshToken);
+          token = access_token;
+        } catch {
+          clearSession();
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      if (token) {
+        fetchCurrentUser().finally(() => setIsLoading(false));
+      } else {
+        setIsLoading(false);
+      }
+    };
+
+    initAuth();
+  }, [fetchCurrentUser, clearSession]);
 
   useEffect(() => {
     const handleLogout = () => clearSession();
@@ -158,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { access_token, refresh_token } = response.data.data;
     sessionStorage.setItem("access_token", access_token);
+    localStorage.setItem("access_token", access_token);
     localStorage.setItem("refresh_token", refresh_token);
 
     const currentUser = await fetchCurrentUser();

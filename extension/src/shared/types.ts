@@ -8,6 +8,7 @@ export interface WebpageCapturePayload {
   author?: string;
   favicon_url?: string;
   thumbnail_url?: string;
+  is_force?: boolean;
 }
 
 export interface YoutubeCapturePayload {
@@ -17,6 +18,7 @@ export interface YoutubeCapturePayload {
   content: string;
   author?: string;
   thumbnail_url?: string;
+  is_force?: boolean;
 }
 
 export interface PdfCapturePayload {
@@ -25,6 +27,7 @@ export interface PdfCapturePayload {
   title: string;
   content: string;
   author?: string;
+  is_force?: boolean;
 }
 
 export type CapturePayload = WebpageCapturePayload | YoutubeCapturePayload | PdfCapturePayload;

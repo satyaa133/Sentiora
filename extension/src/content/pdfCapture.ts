@@ -10,8 +10,8 @@ export function isPdfDocument(): boolean {
   );
 }
 
-export function capturePdf(): PdfCapturePayload | null {
-  const url = window.location.href;
+export function capturePdf(isForce = false): PdfCapturePayload | null {
+  const url = window.location.href.slice(0, 2048);
 
   // Extract title from filename or document title
   let title = document.title;
@@ -19,6 +19,7 @@ export function capturePdf(): PdfCapturePayload | null {
     const filename = url.split("/").pop()?.split("?")[0] || "Document.pdf";
     title = decodeURIComponent(filename);
   }
+  title = title.trim().slice(0, 1024);
 
   // Chrome's built-in PDF viewer renders text layer inside #viewer or shadowRoot
   let content = "";
@@ -42,5 +43,6 @@ export function capturePdf(): PdfCapturePayload | null {
     url,
     title,
     content,
+    is_force: isForce,
   };
 }

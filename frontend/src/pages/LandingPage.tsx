@@ -209,7 +209,7 @@ export default function LandingPage() {
           <p className="font-serif font-bold text-[#1F2421]">Sentiora © 2026</p>
           <div className="flex items-center gap-6">
             <Link to="/login" className="hover:underline">Sign In</Link>
-            <Link to="/signup" className="hover:underline">Create Account</Link>
+            <Link to="/onboarding" className="hover:underline">Create Account</Link>
             <Link to="/onboarding" className="hover:underline">Onboarding</Link>
             <Link to="/dashboard" className="hover:underline">Vault Dashboard</Link>
           </div>

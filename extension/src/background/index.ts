@@ -90,10 +90,13 @@ async function handleCaptureMessage(
 ): Promise<{ success: boolean; deduplicated?: boolean; error?: string }> {
   const sanitized = sanitizeCapturePayload(payload);
 
-  const recent = await isUrlCapturedRecently(sanitized.url);
-  if (recent) {
-    console.info("[Sentiora Background] Skipping capture, URL captured recently:", sanitized.url);
-    return { success: true, deduplicated: true };
+  // Check rate limit / deduplication unless user explicitly forced capture
+  if (!payload.is_force) {
+    const recent = await isUrlCapturedRecently(sanitized.url);
+    if (recent) {
+      console.info("[Sentiora Background] Skipping automatic capture, URL captured recently:", sanitized.url);
+      return { success: true, deduplicated: true };
+    }
   }
 
   const result = await postCapturePayload(
@@ -113,7 +116,33 @@ async function handleCaptureMessage(
 
   await markUrlCaptured(sanitized.url);
   showBadgeSuccess();
+  notifyDashboardTabs();
   return { success: true };
+}
+
+function notifyDashboardTabs(): void {
+  try {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (
+          tab.id &&
+          tab.url &&
+          (tab.url.includes("localhost") ||
+            tab.url.includes("127.0.0.1") ||
+            tab.url.includes("sentiora"))
+        ) {
+          chrome.tabs.sendMessage(tab.id, { type: "REFRESH_MEMORY_FEED" }, () => {
+            // Ignore tab send errors if script not listening
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          });
+        }
+      }
+    });
+  } catch {
+    // Ignore tab query errors
+  }
 }
 
 function showBadgeSuccess(): void {

@@ -76,6 +76,23 @@ export default function DashboardHome() {
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleFocus);
 
+    // Extension messaging listener for instant updates
+    const winChrome = (window as unknown as { chrome?: { runtime?: { onMessage?: { addListener: (fn: (msg: { type?: string }) => void) => void; removeListener: (fn: (msg: { type?: string }) => void) => void } } } }).chrome;
+    if (winChrome?.runtime?.onMessage) {
+      const listener = (msg: { type?: string }) => {
+        if (msg?.type === "REFRESH_MEMORY_FEED") {
+          loadMemoryFeed(true);
+        }
+      };
+      winChrome.runtime.onMessage.addListener(listener);
+      return () => {
+        clearInterval(interval);
+        window.removeEventListener("focus", handleFocus);
+        document.removeEventListener("visibilitychange", handleFocus);
+        winChrome.runtime?.onMessage?.removeListener(listener);
+      };
+    }
+
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", handleFocus);

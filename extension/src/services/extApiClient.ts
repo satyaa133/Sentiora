@@ -24,30 +24,42 @@ interface ApiResponse<T = unknown> {
 let isRefreshing = false;
 let refreshPromise: Promise<string | null> | null = null;
 
-async function attemptTokenRefresh(): Promise<string | null> {
+export async function attemptTokenRefresh(): Promise<string | null> {
+  if (isRefreshing && refreshPromise) {
+    return refreshPromise;
+  }
+
   const refreshToken = await getRefreshToken();
   if (!refreshToken) return null;
 
-  try {
-    const resp = await fetch(`${API_PREFIX}/auth/refresh-token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
+  isRefreshing = true;
+  refreshPromise = (async () => {
+    try {
+      const resp = await fetch(`${API_PREFIX}/auth/refresh-token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
 
-    if (!resp.ok) {
+      if (!resp.ok) {
+        await clearAllAuthData();
+        return null;
+      }
+
+      const json: ApiResponse<{ access_token: string; refresh_token: string }> = await resp.json();
+      await setAccessToken(json.data.access_token);
+      await setRefreshToken(json.data.refresh_token);
+      return json.data.access_token;
+    } catch {
       await clearAllAuthData();
       return null;
     }
+  })().finally(() => {
+    isRefreshing = false;
+    refreshPromise = null;
+  });
 
-    const json: ApiResponse<{ access_token: string; refresh_token: string }> = await resp.json();
-    await setAccessToken(json.data.access_token);
-    await setRefreshToken(json.data.refresh_token);
-    return json.data.access_token;
-  } catch {
-    await clearAllAuthData();
-    return null;
-  }
+  return refreshPromise;
 }
 
 export async function extApiFetch<T = unknown>(

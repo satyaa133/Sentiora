@@ -24,12 +24,13 @@ declare global {
 export async function extractCapturePayload(manualCapture = false): Promise<ExtractCaptureResult> {
   const started = performance.now();
 
-  if (isCurrentPageSensitive(manualCapture)) {
+  if (isCurrentPageSensitive(manualCapture) && !manualCapture) {
+    console.info("[Sentiora] Page capture skipped: page flagged as sensitive or blocked.");
     return { status: "skipped", reason: "sensitive" };
   }
 
   if (isYoutubeWatchPage()) {
-    const payload = await captureYoutube();
+    const payload = await captureYoutube(manualCapture);
     if (!payload) {
       return { status: "skipped", reason: "no_payload" };
     }
@@ -37,7 +38,7 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
   }
 
   if (isPdfDocument()) {
-    const payload = capturePdf();
+    const payload = capturePdf(manualCapture);
     if (!payload) {
       return { status: "skipped", reason: "no_payload" };
     }
@@ -191,37 +192,65 @@ function initContentScript(): void {
     return;
   }
 
+  const syncAuth = (session: { accessToken?: string; refreshToken?: string; user?: unknown }) => {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime?.id) return;
+      if (session?.accessToken && session?.refreshToken && session?.user) {
+        chrome.runtime.sendMessage(
+          {
+            type: "SYNC_AUTH_TOKENS",
+            payload: {
+              accessToken: session.accessToken,
+              refreshToken: session.refreshToken,
+              user: session.user,
+            },
+          },
+          () => {
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          },
+        );
+      }
+    } catch {
+      /* ignore context invalidated */
+    }
+  };
+
   const syncFromStorage = () => {
     try {
       const rawSession = localStorage.getItem("sentiora_auth_session");
       if (!rawSession) return;
       const parsed = JSON.parse(rawSession);
-      if (parsed.accessToken && parsed.refreshToken && parsed.user) {
-        chrome.runtime.sendMessage({
-          type: "SYNC_AUTH_TOKENS",
-          payload: {
-            accessToken: parsed.accessToken,
-            refreshToken: parsed.refreshToken,
-            user: parsed.user,
-          },
-        });
-      }
+      syncAuth(parsed);
     } catch {
       // Ignore storage parse errors
     }
   };
 
+  // 1. Listen for real-time postMessage & custom DOM auth events from Dashboard
   window.addEventListener("message", (event) => {
     if (event.data?.type === "SENTIORA_AUTH_SYNC") {
-      const { accessToken, refreshToken, user } = event.data;
-      if (accessToken && refreshToken && user) {
-        chrome.runtime.sendMessage({
-          type: "SYNC_AUTH_TOKENS",
-          payload: { accessToken, refreshToken, user },
-        });
-      }
+      syncAuth(event.data);
     } else if (event.data?.type === "SENTIORA_AUTH_LOGOUT") {
-      chrome.runtime.sendMessage({ type: "CLEAR_AUTH_TOKENS" });
+      try {
+        if (typeof chrome !== "undefined" && chrome.runtime?.id) {
+          chrome.runtime.sendMessage({ type: "CLEAR_AUTH_TOKENS" }, () => {
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          });
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+
+  window.addEventListener("sentiora_auth_sync", (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    if (detail) {
+      syncAuth(detail);
     }
   });
 
