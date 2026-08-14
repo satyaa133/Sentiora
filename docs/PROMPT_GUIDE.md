@@ -3,10 +3,10 @@
 ## Project Context
 **Sentiora** is a memory-oriented web application designed to capture, index, and retrieve user content from webpages, PDFs, and YouTube.
 * **Product Vision**: A private, intelligent, and context-aware second brain.
-* **Architecture**: Clean Architecture, modular services, message-passing Chrome Extension, and background Celery workers.
+* **Architecture**: Clean Architecture, modular services, message-passing Chrome Extension, and background RQ workers.
 * **Tech Stack**:
-  * **Backend**: Python 3.11+, FastAPI, PostgreSQL (pgvector), SQLAlchemy, Alembic, Celery, Redis, MinIO/S3, LangChain.
-  * **Frontend**: React, Vite, TypeScript, Tailwind CSS, Zustand, React Router.
+  * **Backend**: Python 3.12+, FastAPI, PostgreSQL (pgvector), SQLAlchemy, Alembic, RQ, Redis, OpenAI SDK.
+  * **Frontend**: React, Vite, TypeScript, Tailwind CSS, React Router.
   * **Extension**: Chrome Extension (Manifest V3), React, TypeScript.
 * **Repository Structure**: Monorepo split into `backend/`, `frontend/`, `extension/`, and `shared/` directories.
 * **Current Phase**: Refer to `TASKS.md` for the latest active development phase.

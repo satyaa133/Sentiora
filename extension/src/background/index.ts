@@ -1,12 +1,12 @@
 import { extApiFetch } from "../services/extApiClient";
 import { setAccessToken, setRefreshToken, setCachedUser, clearAllAuthData } from "../services/storage";
+import { postCapturePayload, sanitizeCapturePayload } from "../shared/captureUtils";
 import type { ExtensionMessage, CapturePayload } from "../shared/types";
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info("Sentiora extension background initialized.");
 });
 
-// Cache for captured URLs in session storage to prevent duplicates (10 minute cooldown)
 const CAPTURE_COOLDOWN_MS = 10 * 60 * 1000;
 
 async function isUrlCapturedRecently(url: string): Promise<boolean> {
@@ -39,15 +39,18 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     message.type === "CAPTURE_PDF"
   ) {
     handleCaptureMessage(message.payload)
-      .then((success) => {
-        sendResponse({ success });
+      .then((result) => {
+        sendResponse(result);
       })
       .catch((err) => {
         console.error("[Sentiora Background] Capture payload failed:", err);
-        sendResponse({ success: false, error: String(err) });
+        sendResponse({
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
       });
 
-    return true; // Keep message channel open for async response
+    return true;
   }
 
   if (message.type === "SYNC_AUTH_TOKENS") {
@@ -82,37 +85,39 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
   }
 });
 
-async function handleCaptureMessage(payload: CapturePayload): Promise<boolean> {
-  if (!payload.url || !payload.title) {
-    return false;
-  }
+async function handleCaptureMessage(
+  payload: CapturePayload,
+): Promise<{ success: boolean; deduplicated?: boolean; error?: string }> {
+  const sanitized = sanitizeCapturePayload(payload);
 
   // Check rate limit / deduplication unless user explicitly forced capture
   if (!payload.is_force) {
-    const recent = await isUrlCapturedRecently(payload.url);
+    const recent = await isUrlCapturedRecently(sanitized.url);
     if (recent) {
-      console.info("[Sentiora Background] Skipping automatic capture, URL captured recently:", payload.url);
-      return true;
+      console.info("[Sentiora Background] Skipping automatic capture, URL captured recently:", sanitized.url);
+      return { success: true, deduplicated: true };
     }
   }
 
-  // Strip non-backend fields from API request payload
-  const { is_force: _isForce, ...apiPayload } = payload;
+  const result = await postCapturePayload(
+    async (capturePayload) => {
+      await extApiFetch("/memory-items", {
+        method: "POST",
+        body: JSON.stringify(capturePayload),
+      });
+    },
+    sanitized,
+  );
 
-  try {
-    await extApiFetch("/memory-items", {
-      method: "POST",
-      body: JSON.stringify(apiPayload),
-    });
-
-    await markUrlCaptured(payload.url);
-    showBadgeSuccess();
-    notifyDashboardTabs();
-    return true;
-  } catch (err) {
-    console.error("[Sentiora Background] API post memory-item error:", err);
-    return false;
+  if (!result.success) {
+    console.error("[Sentiora Background] API post memory-item error:", result.error);
+    return { success: false, error: result.error };
   }
+
+  await markUrlCaptured(sanitized.url);
+  showBadgeSuccess();
+  notifyDashboardTabs();
+  return { success: true };
 }
 
 function notifyDashboardTabs(): void {
@@ -143,7 +148,7 @@ function notifyDashboardTabs(): void {
 function showBadgeSuccess(): void {
   try {
     chrome.action.setBadgeText({ text: "✓" });
-    chrome.action.setBadgeBackgroundColor({ color: "#0d9488" }); // teal-600
+    chrome.action.setBadgeBackgroundColor({ color: "#0d9488" });
     setTimeout(() => {
       chrome.action.setBadgeText({ text: "" });
     }, 3000);

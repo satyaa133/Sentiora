@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import ProtectedRoute from "./components/ProtectedRoute";
+import OnboardingRoute from "./components/OnboardingRoute";
 import { AuthProvider } from "./context/AuthContext";
 import DashboardHome from "./pages/DashboardHome";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -18,8 +19,14 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
-          {/* Onboarding accessible to both new visitors and registered users */}
-          <Route path="/onboarding" element={<Onboarding />} />
+          <Route
+            path="/onboarding"
+            element={
+              <OnboardingRoute>
+                <Onboarding />
+              </OnboardingRoute>
+            }
+          />
           <Route
             path="/dashboard"
             element={

@@ -10,12 +10,12 @@ class MemoryItemCreate(BaseModel):
     """Payload sent by the Chrome extension to ingest a captured page."""
 
     source_type: SourceType
-    url: str = Field(..., min_length=1)
-    title: str = Field(..., min_length=1)
-    content: str | None = Field(default=None)
-    author: str | None = Field(default=None)
-    favicon_url: str | None = Field(default=None)
-    thumbnail_url: str | None = Field(default=None)
+    url: str = Field(..., min_length=1, max_length=2048)
+    title: str = Field(..., min_length=1, max_length=1024)
+    content: str | None = Field(default=None, max_length=100_000)
+    author: str | None = Field(default=None, max_length=512)
+    favicon_url: str | None = Field(default=None, max_length=2048)
+    thumbnail_url: str | None = Field(default=None, max_length=2048)
 
     @field_validator("url", mode="before")
     @classmethod
@@ -62,6 +62,9 @@ class MemoryItemResponse(BaseModel):
     author: str | None
     favicon_url: str | None
     thumbnail_url: str | None
+    domain: str | None = None
+    language: str | None = None
+    content_length: int = 0
     word_count: int
     reading_time_seconds: int
     status: ItemStatus

@@ -59,6 +59,17 @@ export default function MemoryCard({ item, onSelect, onDelete }: MemoryCardProps
         {/* Source badge + timestamp */}
         <div className="flex items-center gap-2 text-xs">
           {renderSourceBadge()}
+          {item.status && item.status !== "ready" && (
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
+                item.status === "failed"
+                  ? "bg-rose-50 text-rose-700"
+                  : "bg-amberBadge-100 text-amberBadge-600"
+              }`}
+            >
+              {item.status === "failed" ? "Failed" : "Processing..."}
+            </span>
+          )}
           <span className="text-[11px] text-ink-500 font-medium">
             {getRelativeTimeString(item.captured_at)}
           </span>

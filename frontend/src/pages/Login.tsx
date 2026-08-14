@@ -40,8 +40,8 @@ export default function Login() {
     setErrors({});
 
     try {
-      await login(email, password);
-      navigate("/dashboard");
+      const currentUser = await login(email, password);
+      navigate(currentUser.onboarding_completed ? "/dashboard" : "/onboarding");
     } catch (err) {
       const axiosErr = err as AxiosError<ApiErrorResponse>;
       const apiCode = axiosErr.response?.data?.error?.code;

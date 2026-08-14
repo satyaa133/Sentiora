@@ -1,161 +1,196 @@
-import { Readability } from "@mozilla/readability";
 import { isCurrentPageSensitive } from "./sensitiveGuard";
 import { isYoutubeWatchPage, captureYoutube } from "./youtubeCapture";
 import { isPdfDocument, capturePdf } from "./pdfCapture";
-import type { ExtensionMessage, WebpageCapturePayload } from "../shared/types";
+import { captureWebpageTimed } from "./webpageCapture";
+import { sendCaptureMessage } from "../shared/captureUtils";
+import type { CapturePayload, ExtensionMessage } from "../shared/types";
 
-function cleanExtractedText(rawText: string): string {
-  if (!rawText) return "";
-  let text = rawText.replace(/\s+/g, " ").trim();
+export type CapturePipelineResult =
+  | { status: "saved"; deduplicated?: boolean }
+  | { status: "skipped"; reason: "sensitive" | "insufficient_content" | "no_payload" }
+  | { status: "failed"; error: string };
 
-  // Filter out repetitive metric badge noise (e.g. "3k 1.6m 3.2k 1.4m 2.4k 1.6m 2.2k...")
-  const words = text.split(" ");
-  const cleanedWords: string[] = [];
-  let statStreak = 0;
+export type ExtractCaptureResult =
+  | { status: "ok"; payload: CapturePayload; extractionMs?: number }
+  | { status: "skipped"; reason: "sensitive" | "insufficient_content" | "no_payload" }
+  | { status: "failed"; error: string };
 
-  for (const word of words) {
-    const isMetricWord = /^\d+(\.\d+)?[kmKMbB]?$/i.test(word.replace(/,/g, ""));
-    if (isMetricWord) {
-      statStreak++;
-      if (statStreak <= 2) {
-        cleanedWords.push(word);
-      }
-    } else {
-      statStreak = 0;
-      cleanedWords.push(word);
-    }
+declare global {
+  interface Window {
+    __sentioraContentLoaded?: boolean;
   }
-
-  return cleanedWords.join(" ").replace(/\s+/g, " ").trim();
 }
 
-async function runCapturePipeline(isForce = false): Promise<boolean> {
-  // 1. Guard check
-  if (isCurrentPageSensitive() && !isForce) {
+export async function extractCapturePayload(manualCapture = false): Promise<ExtractCaptureResult> {
+  const started = performance.now();
+
+  if (isCurrentPageSensitive(manualCapture) && !manualCapture) {
     console.info("[Sentiora] Page capture skipped: page flagged as sensitive or blocked.");
-    return false;
+    return { status: "skipped", reason: "sensitive" };
   }
 
-  // 2. Check YouTube
   if (isYoutubeWatchPage()) {
-    const payload = await captureYoutube(isForce);
-    if (payload) {
-      return await sendCapture({ type: "CAPTURE_YOUTUBE", payload });
+    const payload = await captureYoutube(manualCapture);
+    if (!payload) {
+      return { status: "skipped", reason: "no_payload" };
     }
-    return false;
+    return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
   }
 
-  // 3. Check PDF
   if (isPdfDocument()) {
-    const payload = capturePdf(isForce);
-    if (payload) {
-      return await sendCapture({ type: "CAPTURE_PDF", payload });
+    const payload = capturePdf(manualCapture);
+    if (!payload) {
+      return { status: "skipped", reason: "no_payload" };
     }
-    return false;
+    return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
   }
 
-  // 4. General Webpage Capture via Readability
   try {
-    const documentClone = document.cloneNode(true) as Document;
-    const reader = new Readability(documentClone);
-    const article = reader.parse();
-
-    const rawTitle = article?.title || document.title || "Untitled Page";
-    const title = rawTitle.trim().slice(0, 1024);
-
-    const rawContent = article?.textContent || document.body.innerText || "";
-    const content = cleanExtractedText(rawContent);
-
-    // Skip pages with trivial content unless forced
-    if (!isForce && (!content || content.length < 50)) {
-      console.info("[Sentiora] Page capture skipped: insufficient content length.");
-      return false;
+    const extracted = captureWebpageTimed();
+    if (!extracted) {
+      return { status: "skipped", reason: "insufficient_content" };
     }
-
-    // Extract metadata
-    const faviconEl = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
-    let faviconUrl = faviconEl ? faviconEl.href : undefined;
-    if (faviconUrl && (faviconUrl.startsWith("data:") || faviconUrl.length > 2048)) {
-      faviconUrl = undefined;
-    }
-
-    const ogImageEl = document.querySelector<HTMLMetaElement>("meta[property='og:image']");
-    let thumbnailUrl = ogImageEl ? ogImageEl.content : undefined;
-    if (thumbnailUrl && (thumbnailUrl.startsWith("data:") || thumbnailUrl.length > 2048)) {
-      thumbnailUrl = undefined;
-    }
-
-    const rawAuthor = article?.byline || undefined;
-    const author = rawAuthor ? rawAuthor.trim().slice(0, 512) : undefined;
-
-    const payload: WebpageCapturePayload = {
-      source_type: "webpage",
-      url: window.location.href.slice(0, 2048),
-      title,
-      content,
-      author,
-      favicon_url: faviconUrl,
-      thumbnail_url: thumbnailUrl,
-      is_force: isForce,
-    };
-
-    return await sendCapture({ type: "CAPTURE_WEBPAGE", payload });
+    return { status: "ok", payload: extracted.payload, extractionMs: extracted.extractionMs };
   } catch (err) {
-    console.error("[Sentiora] Webpage capture error:", err);
-    return false;
+    return {
+      status: "failed",
+      error: err instanceof Error ? err.message : "Webpage capture failed.",
+    };
   }
 }
 
-function sendCapture(message: ExtensionMessage): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      if (typeof chrome === "undefined" || !chrome.runtime?.id) {
-        resolve(false);
-        return;
+async function submitExtractedPayload(payload: CapturePayload): Promise<CapturePipelineResult> {
+  const messageType: ExtensionMessage["type"] =
+    payload.source_type === "youtube"
+      ? "CAPTURE_YOUTUBE"
+      : payload.source_type === "pdf"
+        ? "CAPTURE_PDF"
+        : "CAPTURE_WEBPAGE";
+
+  const result = await sendCaptureMessage({ type: messageType, payload } as ExtensionMessage);
+  if (!result.success) {
+    return { status: "failed", error: result.error ?? "Capture API failed." };
+  }
+  return { status: "saved", deduplicated: result.deduplicated };
+}
+
+async function runAutoCapturePipeline(): Promise<CapturePipelineResult> {
+  const extracted = await extractCapturePayload(false);
+  if (extracted.status === "skipped") {
+    return { status: "skipped", reason: extracted.reason };
+  }
+  if (extracted.status === "failed") {
+    return { status: "failed", error: extracted.error };
+  }
+  return submitExtractedPayload(extracted.payload);
+}
+
+function initContentScript(): void {
+  if (window.__sentioraContentLoaded) {
+    return;
+  }
+  window.__sentioraContentLoaded = true;
+
+  let autoCaptureQueued = false;
+  let extractInFlight = false;
+
+  function queueAutoCapture(): void {
+    if (autoCaptureQueued) return;
+    autoCaptureQueued = true;
+    setTimeout(async () => {
+      autoCaptureQueued = false;
+      if (extractInFlight) return;
+      extractInFlight = true;
+      try {
+        await runAutoCapturePipeline();
+      } finally {
+        extractInFlight = false;
       }
-      chrome.runtime.sendMessage(message, (response) => {
-        if (chrome.runtime.lastError) {
-          console.warn("[Sentiora] Runtime send message error:", chrome.runtime.lastError.message);
-          resolve(false);
-          return;
-        }
-        if (response?.success) {
-          console.info("[Sentiora] Content successfully captured and queued.");
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-      });
-    } catch {
-      resolve(false);
+    }, 1000);
+  }
+
+  if (document.readyState === "complete") {
+    queueAutoCapture();
+  } else {
+    window.addEventListener("load", queueAutoCapture);
+  }
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "FORCE_CAPTURE") {
+      extractInFlight = true;
+      extractCapturePayload(true)
+        .then((result) => {
+          if (result.status === "ok") {
+            sendResponse({
+              success: true,
+              payload: result.payload,
+              extractionMs: result.extractionMs,
+            });
+            return;
+          }
+
+          if (result.status === "skipped") {
+            sendResponse({
+              success: false,
+              skipped: true,
+              reason: result.reason,
+            });
+            return;
+          }
+
+          sendResponse({
+            success: false,
+            error: result.error,
+          });
+        })
+        .catch((err) => {
+          sendResponse({
+            success: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+        .finally(() => {
+          extractInFlight = false;
+        });
+      return true;
+    }
+
+    if (message?.type === "PING") {
+      sendResponse({ success: true });
+      return true;
     }
   });
-}
 
-// ── Listen for explicit FORCE_CAPTURE request from popup button click ──
-try {
-  if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (message?.type === "FORCE_CAPTURE") {
-        runCapturePipeline(true)
-          .then((success) => sendResponse({ success }))
-          .catch((err) => sendResponse({ success: false, error: String(err) }));
-        return true;
+  let lastCapturedUrl = window.location.href;
+  function checkYoutubeUrlChange(): void {
+    if (window.location.href !== lastCapturedUrl) {
+      lastCapturedUrl = window.location.href;
+      if (isYoutubeWatchPage()) {
+        setTimeout(() => {
+          void runAutoCapturePipeline();
+        }, 1500);
       }
-    });
+    }
   }
-} catch {
-  // Ignore runtime listener attachment errors if context invalidated
-}
 
-// ── Dashboard Auth Sync Bridge ──
-function initDashboardAuthSync(): void {
+  if (window.location.hostname.includes("youtube.com")) {
+    window.addEventListener("yt-navigate-finish", () => {
+      setTimeout(() => {
+        void runAutoCapturePipeline();
+      }, 1500);
+    });
+    window.addEventListener("popstate", checkYoutubeUrlChange);
+    setInterval(checkYoutubeUrlChange, 2500);
+  }
+
   const isDashboardHost =
     window.location.hostname === "localhost" ||
     window.location.hostname === "127.0.0.1" ||
     window.location.hostname.includes("sentiora");
 
-  if (!isDashboardHost) return;
+  if (!isDashboardHost) {
+    return;
+  }
 
   const syncAuth = (session: { accessToken?: string; refreshToken?: string; user?: unknown }) => {
     try {
@@ -179,6 +214,17 @@ function initDashboardAuthSync(): void {
       }
     } catch {
       /* ignore context invalidated */
+    }
+  };
+
+  const syncFromStorage = () => {
+    try {
+      const rawSession = localStorage.getItem("sentiora_auth_session");
+      if (!rawSession) return;
+      const parsed = JSON.parse(rawSession);
+      syncAuth(parsed);
+    } catch {
+      // Ignore storage parse errors
     }
   };
 
@@ -208,16 +254,13 @@ function initDashboardAuthSync(): void {
     }
   });
 
-  // 2. Check localStorage on page load
-  try {
-    const rawSession = localStorage.getItem("sentiora_auth_session");
-    if (rawSession) {
-      const parsed = JSON.parse(rawSession);
-      syncAuth(parsed);
+  syncFromStorage();
+  window.addEventListener("focus", syncFromStorage);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      syncFromStorage();
     }
-  } catch {
-    // Ignore storage parse errors
-  }
+  });
 }
 
-initDashboardAuthSync();
+initContentScript();

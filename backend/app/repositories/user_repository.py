@@ -2,7 +2,7 @@ from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session as DBSession
+from sqlalchemy.orm import Session as DBSession, selectinload
 
 from app.models.user import User, UserProfile
 from datetime import UTC
@@ -14,7 +14,9 @@ class UserRepository:
 
     def get_by_id(self, user_id: UUID) -> User | None:
         result = self.db.execute(
-            select(User).where(User.id == user_id, User.deleted_at.is_(None))
+            select(User)
+            .options(selectinload(User.profile))
+            .where(User.id == user_id, User.deleted_at.is_(None))
         ).scalar_one_or_none()
         return cast(User | None, result)
 
@@ -57,3 +59,7 @@ class UserRepository:
     def update_password(self, user: User, password_hash: str) -> None:
         user.password_hash = password_hash
         self.db.commit()
+
+    def commit_profile(self, profile: UserProfile) -> None:
+        self.db.commit()
+        self.db.refresh(profile)

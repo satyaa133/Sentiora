@@ -1,3 +1,4 @@
+import { capExtractedContent, normalizeExtractedText } from "../shared/captureUtils";
 import type { PdfCapturePayload } from "../shared/types";
 
 export function isPdfDocument(): boolean {
@@ -31,7 +32,7 @@ export function capturePdf(isForce = false): PdfCapturePayload | null {
     content = document.body ? document.body.innerText : "";
   }
 
-  content = content.replace(/\s+/g, " ").trim();
+  content = capExtractedContent(normalizeExtractedText(content));
 
   if (!content || content.length < 10) {
     content = `PDF document titled '${title}' captured from ${url}.`;

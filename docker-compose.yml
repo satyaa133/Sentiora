@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: ./infrastructure/postgres
+      dockerfile: Dockerfile
+    image: sentiora-postgres-pgvector:16
     container_name: sentiora-postgres
     environment:
       POSTGRES_DB: Sentiora
@@ -46,6 +49,7 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-CHANGE_ME_LOCAL_DEV}@postgres:5432/Sentiora
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173"]}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/app/backend
     ports:
@@ -68,6 +72,7 @@ services:
       APP_VERSION: ${APP_VERSION:-0.1.0}
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-CHANGE_ME_LOCAL_DEV}@postgres:5432/Sentiora
       REDIS_URL: redis://redis:6379/0
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/app/backend
     depends_on:

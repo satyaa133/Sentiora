@@ -10,6 +10,8 @@ class UserProfileData(BaseModel):
     bio: str | None = None
     timezone: str = "UTC"
     locale: str = "en-US"
+    onboarding_completed: bool = False
+    source_preferences: dict[str, str] = {}
 
 
 class UserResponseData(BaseModel):

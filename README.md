@@ -20,10 +20,10 @@
 
 | Layer | Technology |
 |---|---|
-| **Backend** | Python 3.12, FastAPI, PostgreSQL, SQLAlchemy, Alembic, Redis, RQ |
+| **Backend** | Python 3.12, FastAPI, PostgreSQL (pgvector), SQLAlchemy, Alembic, Redis, RQ |
 | **Frontend** | React 18, Vite, TypeScript, Tailwind CSS, React Router |
 | **Extension** | Chrome Extension Manifest V3, React, TypeScript |
-| **AI / Search** | pgvector, LangChain, OpenAI embeddings *(Phase 6+)* |
+| **AI / Search** | OpenAI embeddings + chat completions, pgvector semantic search, lexical fallback |
 | **Infrastructure** | Docker, Docker Compose, MinIO/S3, pgAdmin |
 
 ---
@@ -54,7 +54,7 @@ Ensure you have the following installed on your machine:
 | Tool | Min Version | Download Link |
 |---|---|---|
 | **Node.js** | `>= 18.x` | [nodejs.org](https://nodejs.org) |
-| **Python** | `>= 3.10` | [python.org](https://python.org/downloads) |
+| **Python** | `>= 3.12` | [python.org](https://python.org/downloads) |
 | **Docker Desktop** | Latest | [docker.com](https://www.docker.com/products/docker-desktop) |
 | **Git** | Latest | [git-scm.com](https://git-scm.com) |
 
@@ -124,7 +124,7 @@ docker compose up -d postgres redis
 
 ### Step 6 — Run Database Migrations
 
-Apply Alembic migrations to create PostgreSQL tables (`users`, `memory_items`):
+Apply Alembic migrations to create PostgreSQL tables (`users`, `memory_items`, `memory_chunks`, and related indexes):
 
 ```bash
 # Mac / Linux
@@ -135,6 +135,16 @@ backend/.venv/bin/python3 -m alembic -c backend/alembic.ini upgrade head
 REM Windows
 backend\.venv\Scripts\python -m alembic -c backend\alembic.ini upgrade head
 ```
+
+### Step 7 — Configure AI (Required for Ask Sentiora)
+
+Set `OPENAI_API_KEY` in the root `.env` and `backend/.env` files (see `.env.example` for placeholders). Without it:
+
+- **Ask Sentiora** (`POST /api/v1/chat`) returns HTTP `503` with error code `AI_NOT_CONFIGURED`.
+- **Semantic search** falls back to lexical matching when embeddings are unavailable.
+- **Capture** still works; embeddings are generated in the background worker when the key is present.
+
+Optional tuning variables: `OPENAI_EMBEDDING_MODEL`, `OPENAI_CHAT_MODEL`, `RAG_TOP_K`, `RAG_MAX_DISTANCE`, `RAG_MAX_CONTEXT_CHARS`.
 
 ---
 
@@ -222,13 +232,36 @@ npm run test:backend       # Pytest backend tests
 - Privacy Center with custom domain blocklist and complete JSON vault exporter
 - Account Settings with avatar initials, personal preferences, and timezone options
 
-### 🟡 Phase 6 — Semantic Search *(In Progress)*
-- Natural language similarity query endpoint (`GET /api/v1/search?q=`)
-- pgvector embeddings integration
+### ✅ Phase 6 — Semantic Search
+- `GET /api/v1/search?q=` with pgvector semantic retrieval and lexical fallback
+- User-scoped chunk retrieval with distance scoring (`RAG_MAX_DISTANCE`)
+- Background embedding generation in the capture worker when `OPENAI_API_KEY` is set
 
-### 🟡 Phase 7 — AI / RAG Chat *(In Progress)*
-- Ask Sentiora AI View with formatted Markdown rendering, citation cards, and copy header
-- LangChain RAG retrieval integration
+### ✅ Phase 7 — AI / RAG Chat
+- `POST /api/v1/chat` grounded RAG pipeline with citations and insufficient-context handling
+- Fail-fast `503 AI_NOT_CONFIGURED` when `OPENAI_API_KEY` is missing (no silent fallback)
+- Frontend Ask Sentiora view surfaces configuration and retrieval errors clearly
+
+### 🟡 Phase 8 — Testing *(In Progress)*
+- Backend pytest suites for auth, capture, search, and Ask/RAG behavior
+- Frontend, extension, and shared Vitest coverage
+- End-to-end Playwright automation pending
+
+### ⏳ Phase 9 — Deployment & Launch *(Planned)*
+- Staging/production environments, monitoring, and Chrome Web Store release
+
+---
+
+## Ask Sentiora / RAG Behavior
+
+| Scenario | HTTP status | Behavior |
+|---|---|---|
+| LLM configured, relevant memories found | `200` | Grounded answer with citations |
+| LLM configured, insufficient context | `200` | `insufficient_context: true`, no fabricated citations |
+| `OPENAI_API_KEY` missing | `503` | `AI_NOT_CONFIGURED` — Ask Sentiora does not return a fake answer |
+| LLM request fails at runtime | `502` | `RAG_LLM_FAILED` |
+
+Embeddings and chat completions use the OpenAI SDK directly (no LangChain dependency). Retrieval is scoped per authenticated user.
 
 ---
 

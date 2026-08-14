@@ -60,6 +60,17 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete }: MemoryDe
             <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-moss-100 text-moss-600">
               {item.source_type.toUpperCase()}
             </span>
+            {item.status !== "ready" && (
+              <span
+                className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
+                  item.status === "failed"
+                    ? "bg-rose-50 text-rose-700"
+                    : "bg-amberBadge-100 text-amberBadge-600"
+                }`}
+              >
+                {item.status === "failed" ? "Failed" : "Processing..."}
+              </span>
+            )}
             <h2 className="text-xl font-bold font-serif text-ink-900 leading-snug">{item.title}</h2>
             <a
               href={item.url}

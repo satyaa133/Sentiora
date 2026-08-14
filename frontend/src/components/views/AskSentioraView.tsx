@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import type { MemoryItem } from "../../types/memory";
-import { formatExtractedContent } from "../../utils/contentFormatter";
+import { askSentiora, AskApiError, type AskCitation } from "../../services/askService";
+
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
@@ -10,16 +11,21 @@ interface Message {
   id: string;
   sender: "user" | "ai";
   text: string;
-  citations?: { title: string; url: string }[];
+  citations?: AskCitation[];
   isNotFound?: boolean;
 }
 
 export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
   const [input, setInput] = useState("");
 
-  const initialWelcomeText = items.length > 0
-    ? `Hello! I am **Sentiora AI**. I can synthesize answers strictly based on your **${items.length} saved memory source${items.length > 1 ? "s" : ""}**:\n\n${items.slice(0, 3).map((i) => `• **"${i.title}"**`).join("\n")}\n\nAsk me anything about your saved archive!`
-    : "Hello! I am **Sentiora AI**. You currently have no saved memories in your vault. Connect browser sources or save pages to enable AI Q&A.";
+  const readyItems = items.filter((item) => item.status === "ready");
+  const isIndexing = items.some((item) => item.status === "pending" || item.status === "processing");
+
+  const initialWelcomeText = readyItems.length > 0
+    ? `Hello! I am **Sentiora AI**. I can synthesize answers strictly based on your **${readyItems.length} saved memory source${readyItems.length > 1 ? "s" : ""}**:\n\n${readyItems.slice(0, 3).map((i) => `• **"${i.title}"**`).join("\n")}\n\nAsk me anything about your saved archive!`
+    : isIndexing
+      ? "Hello! I am **Sentiora AI**. Your latest captures are still being indexed. Ask again once they show as Ready."
+      : "Hello! I am **Sentiora AI**. You currently have no saved memories in your vault. Connect browser sources or save pages to enable AI Q&A.";
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -31,11 +37,11 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const firstTitle = items[0]?.title || "";
-  const secondTitle = items[1]?.title || "";
+  const firstTitle = readyItems[0]?.title || "";
+  const secondTitle = readyItems[1]?.title || "";
 
   // Dynamic suggested prompt chips from real items
-  const suggestedPrompts = items.length > 0 && firstTitle
+  const suggestedPrompts = readyItems.length > 0 && firstTitle
     ? [
         `What is "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}" about?`,
         `Summarize "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}"`,
@@ -49,11 +55,11 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
         "How to save YouTube transcripts?",
       ];
 
-  const dynamicPlaceholder = items.length > 0 && firstTitle
-    ? `Ask about "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}" or your ${items.length} saved source${items.length > 1 ? "s" : ""}...`
+  const dynamicPlaceholder = readyItems.length > 0 && firstTitle
+    ? `Ask about "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}" or your ${readyItems.length} saved source${readyItems.length > 1 ? "s" : ""}...`
     : "Ask a question about your saved articles, notes, or YouTube transcripts...";
 
-  function handleSendQuery(queryText: string) {
+  async function handleSendQuery(queryText: string) {
     if (!queryText.trim()) return;
 
     const userMsg: Message = {
@@ -66,121 +72,47 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
     setInput("");
     setIsGenerating(true);
 
-    setTimeout(() => {
-      const cleanQuery = queryText.trim().toLowerCase();
+    try {
+      const result = await askSentiora({ question: queryText.trim() });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: result.answer,
+          citations: result.citations,
+          isNotFound: result.insufficient_context,
+        },
+      ]);
+    } catch (err) {
+      let errorText =
+        "Sentiora AI could not answer right now. Please try again in a moment.";
 
-      if (items.length === 0) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            sender: "ai",
-            text: "You currently have no saved memories in your vault. Capture webpages, YouTube videos, or PDFs to start querying your archive!",
-            isNotFound: true,
-          },
-        ]);
-        setIsGenerating(false);
-        return;
+      if (err instanceof AskApiError) {
+        if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
+          errorText =
+            "Sentiora AI is not configured yet. Please set the OPENAI_API_KEY " +
+            "in the backend environment and restart the server.";
+        } else if (err.status === 502 || err.code === "RAG_LLM_FAILED") {
+          errorText =
+            "Sentiora AI is temporarily unavailable. Please try again in a moment.";
+        } else {
+          errorText = err.message || errorText;
+        }
       }
 
-      // Check if query is a general question or conversational phrase
-      const isGeneralQuery =
-        cleanQuery.length <= 4 ||
-        /what|summary|summarize|explain|tell|saved|it|this|show|detail|design|memory|memories|about|dribbl/.test(cleanQuery);
-
-      // Score and match items with fuzzy substring & token matching
-      const queryWords = cleanQuery
-        .replace(/[^\w\s]/g, "")
-        .split(/\s+/)
-        .filter((w) => w.length >= 2);
-
-      let matchedItems = items.filter((item) => {
-        const formatted = formatExtractedContent(item);
-        const corpus = `${item.title} ${formatted.cleanText} ${item.url} ${item.source_type} ${item.author || ""}`.toLowerCase();
-
-        if (corpus.includes(cleanQuery)) return true;
-
-        return queryWords.some((word) => {
-          const stem = word.length > 4 ? word.slice(0, 4) : word;
-          return corpus.includes(stem);
-        });
-      });
-
-      // Fallback to top items if no match but query is general
-      if (matchedItems.length === 0 && (isGeneralQuery || queryWords.length === 0)) {
-        matchedItems = items.slice(0, 3);
-      }
-
-      if (matchedItems.length > 0) {
-        const topMatches = matchedItems.slice(0, 3);
-        const citations = topMatches.map((m) => ({ title: m.title, url: m.url }));
-
-        const structuredAnswers = topMatches.map((item) => {
-          const formatted = formatExtractedContent(item);
-          let domain = "webpage";
-          try {
-            domain = new URL(item.url).hostname.replace(/^www\./, "");
-          } catch {
-            domain = item.url;
-          }
-
-          let summaryText = formatted.cleanText
-            .replace(/^Captured page resource from \S+\s*\([^)]*\)\.\s*/i, "")
-            .replace(/Contains page layout references, media assets, and design components\./i, "It features curated landing page design inspiration, UI layout references, media assets, and reusable design components.");
-
-          if (!summaryText.trim()) {
-            summaryText = `Contains saved reference materials and content captured from ${domain}.`;
-          }
-
-          if (summaryText.length > 350) {
-            summaryText = summaryText.slice(0, 350) + "...";
-          }
-
-          const sourceTypeLabel = item.source_type === "youtube" ? "YouTube Video" : item.source_type === "pdf" ? "PDF Document" : "Webpage";
-          const readTime = Math.max(1, Math.ceil((item.reading_time_seconds || 120) / 60));
-
-          return `### 💡 **${item.title}**
-*Source: ${sourceTypeLabel} via \`${domain}\`*
-
-${summaryText}
-
-**Key Details:**
-- **Source Domain**: \`${domain}\`
-- **Estimated Reading Time**: ~${readTime} min read (${item.word_count || 120} words)
-- **Captured Date**: ${new Date(item.captured_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
-        });
-
-        const fallbackAnswer = structuredAnswers[0] || "No detailed summary available.";
-        const aiAnswer = topMatches.length === 1
-          ? fallbackAnswer
-          : `Here is the synthesized answer based on your saved memory sources:\n\n${structuredAnswers.join("\n\n---\n\n")}`;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            sender: "ai",
-            text: aiAnswer,
-            citations,
-          },
-        ]);
-      } else {
-        const availableTitles = items.slice(0, 3).map((i) => `• **"${i.title}"**`).join("\n");
-        const notFoundText = `I searched your saved memory archive, but no available memory sources contain specific information matching **"${queryText}"**.\n\nYour available memory sources (${items.length}):\n${availableTitles}\n\nTry asking a question related to one of your saved sources above.`;
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: (Date.now() + 1).toString(),
-            sender: "ai",
-            text: notFoundText,
-            isNotFound: true,
-          },
-        ]);
-      }
-
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: errorText,
+          isNotFound: true,
+        },
+      ]);
+    } finally {
       setIsGenerating(false);
-    }, 500);
+    }
   }
 
   function handleSubmit(e: FormEvent) {
@@ -254,12 +186,13 @@ ${summaryText}
         <div>
           <h2 className="font-serif font-bold text-base text-ink-900">Ask Sentiora RAG Assistant</h2>
           <p className="text-[11px] text-ink-500">
-            Synthesizing answers strictly from your {items.length} saved memory source{items.length !== 1 ? "s" : ""}.
+            Synthesizing answers strictly from your {readyItems.length} indexed memory source{readyItems.length !== 1 ? "s" : ""}.
+            {isIndexing ? " Newer captures are still processing." : ""}
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-moss-100/90 backdrop-blur-xs text-moss-700 text-[10px] font-bold shadow-xs">
           <span className="w-1.5 h-1.5 rounded-full bg-moss-600 animate-pulse" />
-          RAG Engine Active ({items.length} Sources)
+          RAG Engine Active ({readyItems.length} Sources)
         </span>
       </div>
 
@@ -327,7 +260,10 @@ ${summaryText}
                       rel="noopener noreferrer"
                       className="flex items-center justify-between p-2 rounded-lg bg-parchment-50/90 backdrop-blur-xs border border-parchment-200/80 text-[11px] text-moss-600 hover:underline font-medium transition-colors"
                     >
-                      <span className="truncate">[{i + 1}] {c.title}</span>
+                      <span className="truncate">
+                        [{i + 1}] {c.title}
+                        {c.page_number ? ` · p.${c.page_number}` : ""}
+                      </span>
                       <svg className="w-3 h-3 text-moss-600 shrink-0 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                       </svg>

@@ -1,4 +1,4 @@
-# OS and Editor files
+﻿# OS and Editor files
 Thumbs.db
 Desktop.ini
 .DS_Store
@@ -53,10 +53,13 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+.venv*/
 venv/
 ENV/
 *.egg-info/
 .eggs/
+backend/.venv/
+backend/.venv312/
 
 # Temporary & Backup files
 *.tmp
