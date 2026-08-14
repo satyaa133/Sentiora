@@ -114,9 +114,7 @@ def _is_noise_line(line: str) -> bool:
         return True
     if _NOISE_LINE_RE.match(compact):
         return True
-    if _PURE_NUMERIC_RE.match(compact):
-        return True
-    return False
+    return bool(_PURE_NUMERIC_RE.match(compact))
 
 
 def normalize_content(text: str | None, source_type: SourceType) -> str:
