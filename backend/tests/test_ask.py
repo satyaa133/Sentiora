@@ -149,6 +149,26 @@ def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  #
             return _hashed_embed(texts)
 
     monkeypatch.setattr("app.services.retrieval_service.get_embedding_adapter", lambda: Adapter())
+    monkeypatch.setattr(
+        "app.services.rag_service.get_settings",
+        lambda: type(
+            "S",
+            (),
+            {
+                "openai_api_key": "sk-test",
+                "openai_chat_model": "gpt-4o-mini",
+                "rag_top_k": 8,
+                "rag_max_distance": 0.65,
+                "rag_max_context_chars": 6000,
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        "app.services.rag_service.RagService._complete",
+        lambda self, question, chunks: (
+            "I couldn't find enough information in your saved memories to answer that."
+        ),
+    )
     headers, _item_id = _index_memory(
         "ask_empty@example.com",
         "Binary Search Explained",
