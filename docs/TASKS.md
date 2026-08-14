@@ -39,7 +39,9 @@
 * PostgreSQL and Alembic integrated with migrations (`001_initial_users`, `002_memory_items`)
 * Authentication endpoints (`/auth/register`, `/auth/login`, `/auth/refresh`, `/users/me`) implemented
 * Memory Items CRUD APIs (`POST /memory-items`, `GET /memory-items`, `DELETE /memory-items/:id`)
-* Async RQ background worker job (`process_capture.py`) for content cleaning, word count, and reading time
+* Async RQ background worker job (`process_capture.py`) for content normalization, chunking, embeddings, and deduplication
+* Semantic search (`GET /api/v1/search`) with pgvector retrieval and lexical fallback
+* Ask Sentiora RAG chat (`POST /api/v1/chat`) with citations, insufficient-context handling, and `503 AI_NOT_CONFIGURED` when the LLM is not configured
 
 **Frontend (React + Vite + Tailwind)**
 * Vite + React + TypeScript initialized with Parchment glassmorphism design system
@@ -64,13 +66,14 @@
 
 ## 4. Current Phase
 
-* **Current active phase**: Phase 6 (Semantic Search) & Phase 7 (AI / RAG Chat)
-* **Current objectives**: Connect backend pgvector embedding generation to natural language search query endpoint and complete RAG chat streaming backend.
-* **Current deliverables**: 
-  * `GET /api/v1/search?q=` semantic search backend endpoint with vector distance scoring
-  * `POST /api/v1/chat` backend streaming RAG completion route
+* **Current active phase**: Phase 8 (Testing)
+* **Current objectives**: Maintain CI-green test coverage across frontend, extension, shared, and backend; add end-to-end Playwright flows.
+* **Current deliverables**:
+  * Pytest coverage for capture, search, and Ask/RAG (including `AI_NOT_CONFIGURED` and insufficient-context cases)
+  * Vitest suites for dashboard, extension capture utilities, and shared packages
+  * GitHub Actions CI running lint, typecheck, test, and build on pull requests
 * **Current blockers**: None
-* **Current branch**: `main`
+* **Current branch**: `Vansh` (PR #1 → `main`, CI green at commit `0fb3b8d`)
 
 ---
 
@@ -78,10 +81,9 @@
 
 | Priority | Task | Estimated Complexity | Dependencies | Expected Output |
 | -------- | ---- | -------------------- | ------------ | --------------- |
-| P0 | Complete pgvector vector embedding generation on ingest | Medium | Phase 4 | Embeddings stored in `memory_items.embedding` column |
-| P0 | Connect `/api/v1/chat` backend streaming endpoint | Medium | Phase 7 UI | Live LLM response stream for Ask Sentiora |
 | P1 | End-to-end Playwright user flow tests | Medium | Phase 8 | E2E automation test script |
 | P1 | Production Docker deployment configuration | Medium | Phase 9 | Single command production deployment |
+| P2 | Chrome Web Store packaging and release checklist | Medium | Phase 9 | Published extension build |
 
 ---
 
