@@ -2,6 +2,7 @@ import logging
 from uuid import UUID
 
 from sqlalchemy import and_, select
+from sqlalchemy.orm import Session as DBSession
 
 from app.core.db import SessionLocal
 from app.models.memory_chunk import MemoryChunk
@@ -20,7 +21,7 @@ from app.services.embedding_service import get_embedding_adapter
 logger = logging.getLogger(__name__)
 
 
-def _find_existing_ready(db: object, user_id: UUID, url: str, current_id: UUID) -> MemoryItem | None:
+def _find_existing_ready(db: DBSession, user_id: UUID, url: str, current_id: UUID) -> MemoryItem | None:
     """Return the first existing ready memory item for this user+URL that is not the current item."""
     stmt = select(MemoryItem).where(
         and_(
@@ -31,7 +32,7 @@ def _find_existing_ready(db: object, user_id: UUID, url: str, current_id: UUID) 
             MemoryItem.id != current_id,
         )
     )
-    return db.execute(stmt).scalar_one_or_none()  # type: ignore[union-attr]
+    return db.execute(stmt).scalar_one_or_none()
 
 
 def process_capture(memory_item_id_str: str) -> None:
