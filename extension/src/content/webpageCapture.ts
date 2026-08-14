@@ -51,11 +51,11 @@ export function getExtractionRoot(doc: Document = document): Element {
   );
 }
 
-export function stripNonContentNodes(root: ParentNode): void {
+export function stripNonContentNodes(root: Element): void {
   root.querySelectorAll(JUNK_SELECTOR).forEach((node) => node.remove());
 }
 
-export function extractSemanticText(root: ParentNode): string {
+export function extractSemanticText(root: Element): string {
   const parts: string[] = [];
   root.querySelectorAll(SEMANTIC_TEXT_SELECTOR).forEach((node) => {
     const text = node.textContent?.replace(/\s+/g, " ").trim();
