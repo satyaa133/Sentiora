@@ -10,7 +10,8 @@ navigation/UI artefacts with zero informational value.
 from __future__ import annotations
 
 import re
-from urllib.parse import urlparse
+import hashlib
+from urllib.parse import urlparse, parse_qsl, urlencode, urlunparse
 
 from app.models.memory_item import SourceType
 
@@ -62,6 +63,44 @@ _YOUTUBE_STUB_RE = re.compile(
     r"^youtube video titled ['\"].+['\"] by .+\.?$",
     re.IGNORECASE,
 )
+
+
+def canonicalize_url(url: str) -> str:
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        scheme = parsed.scheme.lower()
+        netloc = parsed.netloc.lower()
+        path = parsed.path
+        # Normalize trailing slash in path if present (except for root path)
+        if len(path) > 1 and path.endswith("/"):
+            path = path[:-1]
+        
+        # Remove known tracking parameters
+        query_params = parse_qsl(parsed.query, keep_blank_values=True)
+        cleaned_params = []
+        for key, val in query_params:
+            lower_key = key.lower()
+            if (
+                lower_key.startswith("utm_")
+                or lower_key in ("fbclid", "gclid", "ref", "source", "campaign")
+            ):
+                continue
+            cleaned_params.append((key, val))
+        
+        new_query = urlencode(cleaned_params)
+        canonical = urlunparse((scheme, netloc, path, parsed.params, new_query, parsed.fragment))
+        return canonical
+    except Exception:
+        return url
+
+
+def compute_content_hash(text: str) -> str:
+    if not text:
+        return ""
+    normalized = text.strip()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def extract_domain(url: str) -> str | None:

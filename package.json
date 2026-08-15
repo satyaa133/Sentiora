@@ -32,7 +32,7 @@
     "test:frontend": "npm run test --workspace frontend",
     "test:extension": "npm run test --workspace extension",
     "test:shared": "npm run test --workspace shared",
-    "test:backend": "[ -x backend/.venv/bin/python3 ] && backend/.venv/bin/python3 -m pytest backend/tests || python3 -m pytest backend/tests",
+    "test:backend": "docker compose exec -T backend pytest",
     "typecheck": "npm run typecheck:frontend && npm run typecheck:extension && npm run typecheck:shared && npm run typecheck:backend",
     "typecheck:frontend": "npm run typecheck --workspace frontend",
     "typecheck:extension": "npm run typecheck --workspace extension",

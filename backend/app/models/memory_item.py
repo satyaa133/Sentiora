@@ -4,8 +4,8 @@ from datetime import datetime, UTC
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, Float
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -79,6 +79,18 @@ class MemoryItem(Base):
         DateTime(timezone=True), nullable=True, index=True
     )
     processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Capture v2 schema enhancements
+    structured_content: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    extraction_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    extraction_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    extraction_quality_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    extraction_quality_reasons: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    raw_content_length: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utc_now, nullable=False
+    )
 
     chunks: Mapped[list["MemoryChunk"]] = relationship(
         "MemoryChunk",

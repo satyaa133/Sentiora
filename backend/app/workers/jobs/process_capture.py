@@ -1,7 +1,7 @@
 import logging
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.db import SessionLocal
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def _find_existing_ready(db: DBSession, user_id: UUID, url: str, current_id: UUID) -> MemoryItem | None:
-    """Return the first existing ready memory item for this user+URL that is not the current item."""
+    """Return the first existing ready memory item for this user matching URL."""
     stmt = select(MemoryItem).where(
         and_(
             MemoryItem.user_id == user_id,
