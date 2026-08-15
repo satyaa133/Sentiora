@@ -136,15 +136,17 @@ REM Windows
 backend\.venv\Scripts\python -m alembic -c backend\alembic.ini upgrade head
 ```
 
-### Step 7 — Configure AI (Required for Ask Sentiora)
+### Step 7 — Configure AI (Optional for Ask Sentiora)
 
-Set `OPENAI_API_KEY` in the root `.env` and `backend/.env` files (see `.env.example` for placeholders). Without it:
+Set `LLM_PROVIDER` plus `OPENAI_API_KEY` or `GEMINI_API_KEY` in `backend/.env` (see `.env.example`). Docker backend and worker read that file.
 
-- **Ask Sentiora** (`POST /api/v1/chat`) returns HTTP `503` with error code `AI_NOT_CONFIGURED`.
+Without a provider key:
+
+- **Ask Sentiora** (`POST /api/v1/chat`) still returns HTTP `200` with a short grounded answer from retrieved READY memory (`used_fallback: true`).
 - **Semantic search** falls back to lexical matching when embeddings are unavailable.
-- **Capture** still works; embeddings are generated in the background worker when the key is present.
+- **Capture** still works; memories become READY even if embedding generation is skipped.
 
-Optional tuning variables: `OPENAI_EMBEDDING_MODEL`, `OPENAI_CHAT_MODEL`, `RAG_TOP_K`, `RAG_MAX_DISTANCE`, `RAG_MAX_CONTEXT_CHARS`.
+Optional tuning variables: `OPENAI_EMBEDDING_MODEL`, `OPENAI_CHAT_MODEL`, `GEMINI_CHAT_MODEL`, `RAG_TOP_K`, `RAG_MAX_DISTANCE`, `RAG_MAX_CONTEXT_CHARS`.
 
 ---
 
@@ -239,8 +241,8 @@ npm run test:backend       # Pytest backend tests
 
 ### ✅ Phase 7 — AI / RAG Chat
 - `POST /api/v1/chat` grounded RAG pipeline with citations and insufficient-context handling
-- Fail-fast `503 AI_NOT_CONFIGURED` when `OPENAI_API_KEY` is missing (no silent fallback)
-- Frontend Ask Sentiora view surfaces configuration and retrieval errors clearly
+- LLM answers when a provider key is configured; otherwise a grounded local fallback from retrieved memory
+- Frontend Ask Sentiora view distinguishes empty vault, indexing, fallback answers, auth, and system errors
 
 ### 🟡 Phase 8 — Testing *(In Progress)*
 - Backend pytest suites for auth, capture, search, and Ask/RAG behavior
@@ -258,10 +260,12 @@ npm run test:backend       # Pytest backend tests
 |---|---|---|
 | LLM configured, relevant memories found | `200` | Grounded answer with citations |
 | LLM configured, insufficient context | `200` | `insufficient_context: true`, no fabricated citations |
-| `OPENAI_API_KEY` missing | `503` | `AI_NOT_CONFIGURED` — Ask Sentiora does not return a fake answer |
-| LLM request fails at runtime | `502` | `RAG_LLM_FAILED` |
+| Provider key missing, relevant memories found | `200` | Grounded local fallback, `used_fallback: true`, real citations |
+| LLM request fails at runtime, memories found | `200` | Same grounded local fallback |
+| No relevant memory | `200` | `insufficient_context: true` |
+| Unexpected server error | `502` | `ASK_SYSTEM_FAILED` |
 
-Embeddings and chat completions use the OpenAI SDK directly (no LangChain dependency). Retrieval is scoped per authenticated user.
+Embeddings and chat completions use the configured provider (OpenAI or Gemini). Retrieval is scoped per authenticated user.
 
 ---
 

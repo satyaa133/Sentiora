@@ -12,7 +12,8 @@ DEFAULT_DATABASE_URL = (
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),
+        # Load repo-root .env first, then backend/.env so local backend settings win.
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -29,9 +30,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
+    llm_provider: str = "openai"
     openai_api_key: str | None = None
     openai_embedding_model: str = "text-embedding-3-small"
     openai_chat_model: str = "gpt-4o-mini"
+    gemini_api_key: str | None = None
+    gemini_embedding_model: str = "text-embedding-004"
+    gemini_chat_model: str = "gemini-2.5-flash"
     # RAG retrieval tuning
     rag_top_k: int = 8
     rag_max_distance: float = 0.65

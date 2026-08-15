@@ -25,6 +25,7 @@ export default function DashboardHome() {
   const [selectedFilter, setSelectedFilter] = useState<"all" | SourceType>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [askQuery, setAskQuery] = useState<string>("");
+  const [askMemoryId, setAskMemoryId] = useState<string | undefined>();
   const [selectedItem, setSelectedItem] = useState<MemoryItem | null>(null);
 
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -561,7 +562,17 @@ export default function DashboardHome() {
         )}
 
         {/* Tab 4: Ask Sentiora RAG */}
-        {activeTab === "ask" && <AskSentioraView items={items} />}
+        {activeTab === "ask" && (
+          <AskSentioraView
+            items={items}
+            initialQuery={askQuery}
+            focusMemoryId={askMemoryId}
+            onClearInitialQuery={() => {
+              setAskQuery("");
+              setAskMemoryId(undefined);
+            }}
+          />
+        )}
 
         {/* Tab 5: Connected Sources */}
         {activeTab === "sources" && (
@@ -580,6 +591,12 @@ export default function DashboardHome() {
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
         onDelete={handleDeleteItem}
+        onAskAnything={(item) => {
+          setAskQuery(`What is "${item.title}" about?`);
+          setAskMemoryId(item.id);
+          setActiveTab("ask");
+          setSelectedItem(null);
+        }}
       />
 
       {/* Manual Memory Ingestion Modal */}

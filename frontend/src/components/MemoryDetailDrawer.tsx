@@ -6,9 +6,10 @@ interface MemoryDetailDrawerProps {
   item: MemoryItem | null;
   onClose: () => void;
   onDelete: (id: string) => Promise<void>;
+  onAskAnything?: (item: MemoryItem) => void;
 }
 
-export default function MemoryDetailDrawer({ item, onClose, onDelete }: MemoryDetailDrawerProps) {
+export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnything }: MemoryDetailDrawerProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -153,17 +154,28 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete }: MemoryDe
 
         {/* Footer Actions */}
         <div className="p-4 border-t border-parchment-200/80 bg-parchment-50/90 backdrop-blur-md flex items-center justify-between gap-3">
-          <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-4 py-2.5 rounded-xl bg-white border border-parchment-200 hover:bg-parchment-100 text-ink-900 text-xs font-semibold transition-colors flex items-center gap-2 shadow-card"
-          >
-            Open Source Page
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-            </svg>
-          </a>
+          <div className="flex gap-2">
+            <a
+              href={item.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-4 py-2.5 rounded-xl bg-white border border-parchment-200 hover:bg-parchment-100 text-ink-900 text-xs font-semibold transition-colors flex items-center gap-2 shadow-card"
+            >
+              Open Source
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+            </a>
+            
+            {onAskAnything && item.status === "ready" && (
+              <button
+                onClick={() => onAskAnything(item)}
+                className="px-4 py-2.5 rounded-xl bg-moss-600 hover:bg-moss-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-md hover:shadow-lg active:scale-95"
+              >
+                <span>✨</span> Ask Anything
+              </button>
+            )}
+          </div>
 
           <button
             onClick={handleDelete}

@@ -1,12 +1,8 @@
-import { type AxiosError } from "axios";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { getApiErrorMessage } from "../services/apiClient";
 import "./Auth.css";
-
-interface ApiErrorResponse {
-  error?: { code?: string; message?: string };
-}
 
 export default function SignUp() {
   const { register, login } = useAuth();
@@ -77,12 +73,11 @@ export default function SignUp() {
       await login(email, password);
       navigate("/onboarding");
     } catch (err) {
-      const axiosErr = err as AxiosError<ApiErrorResponse>;
-      const apiCode = axiosErr.response?.data?.error?.code;
-      if (apiCode === "AUTH_EMAIL_ALREADY_EXISTS") {
-        setErrors({ email: "An account with this email already exists." });
+      const message = getApiErrorMessage(err, "Something went wrong. Please try again.");
+      if (message.toLowerCase().includes("already exists")) {
+        setErrors({ email: message });
       } else {
-        setErrors({ general: "Something went wrong. Please try again." });
+        setErrors({ general: message });
       }
     } finally {
       setIsLoading(false);

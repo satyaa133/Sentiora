@@ -1,12 +1,8 @@
-import { type AxiosError } from "axios";
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { getApiErrorMessage } from "../services/apiClient";
 import "./Auth.css";
-
-interface ApiErrorResponse {
-  error?: { code?: string; message?: string };
-}
 
 export default function Login() {
   const { login } = useAuth();
@@ -43,13 +39,9 @@ export default function Login() {
       const currentUser = await login(email, password);
       navigate(currentUser.onboarding_completed ? "/dashboard" : "/onboarding");
     } catch (err) {
-      const axiosErr = err as AxiosError<ApiErrorResponse>;
-      const apiCode = axiosErr.response?.data?.error?.code;
-      if (apiCode === "AUTH_INVALID_CREDENTIALS") {
-        setErrors({ general: "Invalid email or password. Please try again." });
-      } else {
-        setErrors({ general: "Something went wrong. Please try again." });
-      }
+      setErrors({
+        general: getApiErrorMessage(err, "Something went wrong. Please try again."),
+      });
     } finally {
       setIsLoading(false);
     }

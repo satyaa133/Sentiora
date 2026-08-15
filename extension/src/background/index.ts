@@ -85,10 +85,17 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
   }
 });
 
+const inFlightCaptures = new Set<string>();
+
 async function handleCaptureMessage(
   payload: CapturePayload,
 ): Promise<{ success: boolean; deduplicated?: boolean; error?: string }> {
   const sanitized = sanitizeCapturePayload(payload);
+
+  if (inFlightCaptures.has(sanitized.url)) {
+    console.info("[Sentiora Background] Skipping capture, URL currently in-flight:", sanitized.url);
+    return { success: true, deduplicated: true };
+  }
 
   // Check rate limit / deduplication unless user explicitly forced capture
   if (!payload.is_force) {
@@ -99,25 +106,30 @@ async function handleCaptureMessage(
     }
   }
 
-  const result = await postCapturePayload(
-    async (capturePayload) => {
-      await extApiFetch("/memory-items", {
-        method: "POST",
-        body: JSON.stringify(capturePayload),
-      });
-    },
-    sanitized,
-  );
+  inFlightCaptures.add(sanitized.url);
+  try {
+    const result = await postCapturePayload(
+      async (capturePayload) => {
+        await extApiFetch("/memory-items", {
+          method: "POST",
+          body: JSON.stringify(capturePayload),
+        });
+      },
+      sanitized,
+    );
 
-  if (!result.success) {
-    console.error("[Sentiora Background] API post memory-item error:", result.error);
-    return { success: false, error: result.error };
+    if (!result.success) {
+      console.error("[Sentiora Background] API post memory-item error:", result.error);
+      return { success: false, error: result.error };
+    }
+
+    await markUrlCaptured(sanitized.url);
+    showBadgeSuccess();
+    notifyDashboardTabs();
+    return { success: true };
+  } finally {
+    inFlightCaptures.delete(sanitized.url);
   }
-
-  await markUrlCaptured(sanitized.url);
-  showBadgeSuccess();
-  notifyDashboardTabs();
-  return { success: true };
 }
 
 function notifyDashboardTabs(): void {

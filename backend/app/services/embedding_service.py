@@ -35,8 +35,47 @@ class OpenAIEmbeddingAdapter(EmbeddingPort):
         return [list(item.embedding) for item in ordered]
 
 
-def get_embedding_adapter() -> OpenAIEmbeddingAdapter | None:
+class GeminiEmbeddingAdapter(EmbeddingPort):
+    def __init__(self) -> None:
+        from google import genai
+
+        settings = get_settings()
+        if not settings.gemini_api_key:
+            raise EmbeddingNotConfiguredError("GEMINI_API_KEY is not configured.")
+        self._client = genai.Client(api_key=settings.gemini_api_key)
+        self._model = settings.gemini_embedding_model
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        
+        from google.genai import types
+        # Google GenAI handles batch embeddings
+        response = self._client.models.embed_content(
+            model=self._model,
+            contents=texts,
+            config=types.EmbedContentConfig(output_dimensionality=1536)
+        )
+        embeddings = response.embeddings or []
+        vectors: list[list[float]] = []
+        for emb in embeddings:
+            values = emb.values
+            if values is None:
+                continue
+            vectors.append([float(value) for value in values])
+        return vectors
+
+
+def get_embedding_adapter() -> EmbeddingPort | None:
     settings = get_settings()
-    if not settings.openai_api_key:
+    try:
+        if settings.llm_provider == "gemini":
+            if not settings.gemini_api_key:
+                return None
+            return GeminiEmbeddingAdapter()
+        if not settings.openai_api_key:
+            return None
+        return OpenAIEmbeddingAdapter()
+    except Exception:
+        logger.exception("Failed to initialize embedding adapter")
         return None
-    return OpenAIEmbeddingAdapter()

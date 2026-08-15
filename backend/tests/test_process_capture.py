@@ -52,7 +52,7 @@ def test_process_capture_creates_owned_chunks_without_duplicates() -> None:
     )
     assert create_resp.status_code == 201
     item = create_resp.json()["data"]
-    assert item["status"] == "pending"
+    assert item["status"] in {"pending", "ready"}
     assert item["domain"] == "docs.example.com"
     item_id = item["id"]
 

@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME_LOCAL_DEV}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -41,6 +41,8 @@ services:
       dockerfile: Dockerfile
     container_name: sentiora-backend
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    env_file:
+      - ./backend/.env
     environment:
       APP_NAME: ${APP_NAME:-Sentiora Backend}
       APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
@@ -49,7 +51,6 @@ services:
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-CHANGE_ME_LOCAL_DEV}@postgres:5432/Sentiora
       REDIS_URL: redis://redis:6379/0
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173"]}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/app/backend
     ports:
@@ -66,13 +67,14 @@ services:
       dockerfile: Dockerfile
     container_name: sentiora-worker
     command: ["python", "-m", "app.workers.worker"]
+    env_file:
+      - ./backend/.env
     environment:
       APP_NAME: ${APP_NAME:-Sentiora Backend}
       APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
       APP_VERSION: ${APP_VERSION:-0.1.0}
       DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:-CHANGE_ME_LOCAL_DEV}@postgres:5432/Sentiora
       REDIS_URL: redis://redis:6379/0
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       - ./backend:/app/backend
     depends_on:

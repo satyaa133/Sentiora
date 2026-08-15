@@ -21,6 +21,7 @@ export interface AskResponse {
   answer: string;
   citations: AskCitation[];
   insufficient_context: boolean;
+  used_fallback?: boolean;
 }
 
 export interface AskRequest {
@@ -63,7 +64,7 @@ export async function askSentiora(payload: AskRequest): Promise<AskResponse> {
       const apiError = response.data?.error;
       const code = apiError?.code;
       const message =
-        apiError?.message ?? "Sentiora AI could not answer right now.";
+        apiError?.message ?? "Sentiora could not answer right now.";
       throw new AskApiError(message, status, code);
     }
     throw err;

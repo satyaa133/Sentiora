@@ -53,6 +53,21 @@ class MemoryService:
         # Calculate fingerprint hash based on the normalized plain text
         c_hash = compute_content_hash(normalized_content)
 
+        # Deduplicate identical captures
+        existing = (
+            self.db.query(MemoryItem)
+            .filter(
+                MemoryItem.user_id == user_id,
+                MemoryItem.url == canonical_url,
+                MemoryItem.status != ItemStatus.failed,
+                MemoryItem.deleted_at.is_(None)
+            )
+            .order_by(MemoryItem.created_at.desc())
+            .first()
+        )
+        if existing:
+            return MemoryItemResponse.model_validate(existing)
+
         # Client vs server timestamps
         client_captured_at = payload.captured_at or datetime.now(UTC)
         server_received_at = datetime.now(UTC)
@@ -82,7 +97,7 @@ class MemoryService:
         )
         item = self.repo.create(item)
 
-        # Enqueue async processing job. Non-fatal if worker is not running.
+        # Enqueue via RQ (primary path). Inline process only if Redis/RQ is down.
         try:
             queues = create_queues()
             queues[0].enqueue(
@@ -93,9 +108,13 @@ class MemoryService:
         except Exception:
             logger.warning(
                 "Could not enqueue process_capture job for item %s. "
-                "Item will remain in 'pending' state until worker runs.",
+                "Processing inline so the capture can still become READY.",
                 item.id,
             )
+            from app.workers.jobs.process_capture import process_capture
+
+            process_capture(str(item.id))
+            self.db.refresh(item)
 
         return MemoryItemResponse.model_validate(item)
 

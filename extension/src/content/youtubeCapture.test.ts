@@ -1,5 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { isYoutubeWatchPage } from "../content/youtubeCapture";
+import { describe, expect, it } from "vitest";
 import { buildPlainTextFromNodes } from "../shared/captureUtils";
 import type { StructuredNode } from "../shared/types";
 

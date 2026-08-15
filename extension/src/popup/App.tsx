@@ -3,7 +3,7 @@ import { APP_NAME } from "@shared/constants/app";
 import PopupAuth from "./PopupAuth";
 import { getAccessToken, getRefreshToken, getCachedUser, setCachedUser, clearAllAuthData, type CachedUser } from "../services/storage";
 import { extApiFetch, ExtApiError, attemptTokenRefresh } from "../services/extApiClient";
-import { postCapturePayload, sanitizeCapturePayload } from "../shared/captureUtils";
+import { sendCaptureMessage } from "../shared/captureUtils";
 import type { CapturePayload } from "../shared/types";
 
 type PopupView =
@@ -109,15 +109,11 @@ export default function App() {
   }
 
   async function postCaptureFromPopup(payload: CapturePayload): Promise<boolean> {
-    const result = await postCapturePayload(
-      async (capturePayload) => {
-        await extApiFetch("/memory-items", {
-          method: "POST",
-          body: JSON.stringify(sanitizeCapturePayload(capturePayload)),
-        });
-      },
-      payload,
-    );
+    const messageType = payload.source_type === "youtube" ? "CAPTURE_YOUTUBE" : payload.source_type === "pdf" ? "CAPTURE_PDF" : "CAPTURE_WEBPAGE";
+    const result = await sendCaptureMessage({
+      type: messageType,
+      payload: { ...payload, is_force: true }
+    } as any);
 
     if (!result.success) {
       setCaptureError(result.error ?? "Capture request failed.");

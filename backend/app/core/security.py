@@ -3,10 +3,18 @@ import uuid
 from datetime import datetime, timedelta, UTC
 from typing import Any
 
+import bcrypt
 import jwt
 from passlib.context import CryptContext  # type: ignore[import-untyped]
 
 from app.core.config import get_settings
+
+# passlib 1.7.x reads bcrypt.__about__.__version__, which bcrypt 4.1+ removed.
+if not hasattr(bcrypt, "__about__"):
+    class _BcryptAbout:
+        __version__ = getattr(bcrypt, "__version__", "4.2.0")
+
+    bcrypt.__about__ = _BcryptAbout()  # type: ignore[attr-defined]
 
 settings = get_settings()
 
@@ -18,7 +26,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bool(pwd_context.verify(plain_password, hashed_password))
+    try:
+        return bool(pwd_context.verify(plain_password, hashed_password))
+    except ValueError:
+        return False
 
 
 def hash_refresh_token(token: str) -> str:

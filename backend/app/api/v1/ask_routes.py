@@ -2,7 +2,8 @@
 
 Error hierarchy:
   LLMNotConfiguredError  → HTTP 503  AI_NOT_CONFIGURED
-  Any other exception    → HTTP 502  RAG_LLM_FAILED
+    (only when no retrieved memory can be used for a local fallback)
+  Any other exception    → HTTP 502  ASK_SYSTEM_FAILED
 """
 
 from __future__ import annotations
@@ -56,8 +57,9 @@ def ask_memories(
             detail={
                 "code": "AI_NOT_CONFIGURED",
                 "message": (
-                    "Sentiora AI is not configured. "
-                    "Please set OPENAI_API_KEY in the backend environment and restart."
+                    "Sentiora AI is not configured and no saved memory could be "
+                    "used to answer. Set LLM_PROVIDER and the corresponding API "
+                    "key (OPENAI_API_KEY or GEMINI_API_KEY), then retry."
                 ),
             },
         ) from None
@@ -65,10 +67,10 @@ def ask_memories(
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
-                "code": "RAG_LLM_FAILED",
+                "code": "ASK_SYSTEM_FAILED",
                 "message": (
-                    "Sentiora AI is temporarily unavailable. "
-                    "Please try again in a moment."
+                    "Sentiora could not complete this question because of a "
+                    "server error. This is not an AI-key configuration problem."
                 ),
             },
         ) from None

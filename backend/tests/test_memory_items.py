@@ -1,6 +1,5 @@
 from typing import Any
 import pytest
-from datetime import datetime, UTC
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -52,7 +51,7 @@ def test_memory_items_crud_flow(clean_db: None) -> None:
     item_data = create_resp.json()["data"]
     assert item_data["title"] == "Test Article Title"
     assert item_data["url"] == "https://example.com/test-article"
-    assert item_data["status"] == "pending"
+    assert item_data["status"] in {"pending", "ready"}
     item_id = item_data["id"]
 
     # 3. List Memory Items (GET /api/v1/memory-items)
@@ -209,3 +208,35 @@ def test_normalization_and_fingerprinting_rules() -> None:
     h2 = compute_content_hash(normalize_content(c1, SourceType.webpage))
     assert h1 == h2
     assert h1 != compute_content_hash("A B C\n\nDifferent")
+
+
+def test_create_memory_item_deduplication(clean_db: None) -> None:
+    headers = _auth_headers("test_dedup@example.com")
+
+    payload = {
+        "source_type": "webpage",
+        "url": "https://example.com/dedupe-test",
+        "title": "Deduplication Test",
+        "content": "This content should only result in one memory item.",
+    }
+
+    # First request
+    resp1 = client.post("/api/v1/memory-items", json=payload, headers=headers)
+    assert resp1.status_code == 201
+    item_id_1 = resp1.json()["data"]["id"]
+
+    # Second identical request (e.g. concurrent manual force capture)
+    resp2 = client.post("/api/v1/memory-items", json=payload, headers=headers)
+    assert resp2.status_code == 201
+    item_id_2 = resp2.json()["data"]["id"]
+
+    # Must return the SAME item id
+    assert item_id_1 == item_id_2
+
+    # Verify only ONE item exists for this URL
+    list_resp = client.get("/api/v1/memory-items", headers=headers)
+    assert list_resp.status_code == 200
+    items = list_resp.json()["data"]["items"]
+    dedupe_items = [i for i in items if i["url"] == "https://example.com/dedupe-test"]
+    assert len(dedupe_items) == 1
+

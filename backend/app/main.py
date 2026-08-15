@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import datetime, UTC
 
@@ -16,6 +17,7 @@ from app.core.logging import configure_logging
 from app.models import MemoryChunk, MemoryItem  # noqa: F401
 
 configure_logging()
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 app = FastAPI(
@@ -99,6 +101,10 @@ async def validation_exception_handler(
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled server error on %s %s", request.method, request.url.path)
+    details = None
+    if settings.app_environment == "development":
+        details = {"exception": type(exc).__name__, "message": str(exc)}
     return JSONResponse(
         status_code=500,
         content={
@@ -106,7 +112,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
             "error": {
                 "code": "SYSTEM_ERROR",
                 "message": "An unexpected error occurred.",
-                "details": None,
+                "details": details,
             },
             "meta": _meta(request),
         },

@@ -40,6 +40,42 @@ _STOPWORDS = {
     "would",
     "should",
     "will",
+    "your",
+    "saved",
+    "please",
+    "tell",
+    "give",
+    "some",
+    "into",
+    "article",
+    "articles",
+    "page",
+    "pages",
+    "video",
+    "paper",
+    "content",
+    "memory",
+    "memories",
+    "note",
+    "notes",
+    "thing",
+    "stuff",
+    "information",
+    "summary",
+    "summarize",
+    "explain",
+    "describe",
+    "details",
+    "anything",
+    "something",
+    "someone",
+    "compare",
+    "versus",
+    "between",
+    "across",
+    "also",
+    "just",
+    "really",
 }
 
 
@@ -57,6 +93,27 @@ class RetrievedChunk:
     captured_at: datetime
     distance: float | None
     lexical: bool = False
+    rank: float = 0.0
+
+
+def _query_tokens(query: str) -> list[str]:
+    return [
+        token
+        for token in "".join(ch.lower() if ch.isalnum() else " " for ch in query).split()
+        if len(token) >= 3 and token not in _STOPWORDS
+    ]
+
+
+def _lexical_rank(title: str, content: str, tokens: list[str]) -> float:
+    title_l = (title or "").lower()
+    content_l = (content or "").lower()
+    score = 0.0
+    for token in tokens:
+        if token in title_l:
+            score += 3.0
+        elif token in content_l:
+            score += 1.0
+    return score
 
 
 class RetrievalService:
@@ -73,11 +130,25 @@ class RetrievalService:
         memory_id: UUID | None = None,
     ) -> list[RetrievedChunk]:
         limit = top_k or self.settings.rag_top_k
+        tokens = _query_tokens(query)
         semantic = self._semantic_search(user_id, query, limit, source_type, memory_id)
-        if semantic:
-            return self._deduplicate_chunks(semantic)
         lexical = self._lexical_search(user_id, query, limit, source_type, memory_id)
-        return self._deduplicate_chunks(lexical)
+
+        if tokens:
+            if lexical:
+                lexical_ids = {chunk.memory_id for chunk in lexical}
+                # Token hits are the relevance gate so a weak vector match cannot
+                # hide the memory that actually contains the asked-about terms.
+                semantic_keep = [chunk for chunk in semantic if chunk.memory_id in lexical_ids]
+                merged = self._deduplicate_chunks(semantic_keep + lexical)
+                return merged[:limit]
+            if semantic:
+                return self._deduplicate_chunks(semantic)[:limit]
+            return []
+
+        return self._deduplicate_chunks(
+            self._recent_chunks(user_id, limit, source_type, memory_id)
+        )[:limit]
 
     def _base_query(
         self,
@@ -107,6 +178,7 @@ class RetrievalService:
         item: MemoryItem,
         distance: float | None,
         lexical: bool,
+        rank: float = 0.0,
     ) -> RetrievedChunk:
         return RetrievedChunk(
             chunk_id=chunk.id,
@@ -121,6 +193,7 @@ class RetrievalService:
             captured_at=item.captured_at,
             distance=distance,
             lexical=lexical,
+            rank=rank,
         )
 
     def _semantic_search(
@@ -167,11 +240,7 @@ class RetrievalService:
         source_type: SourceType | None,
         memory_id: UUID | None,
     ) -> list[RetrievedChunk]:
-        tokens = [
-            token
-            for token in "".join(ch.lower() if ch.isalnum() else " " for ch in query).split()
-            if len(token) >= 4 and token not in _STOPWORDS
-        ]
+        tokens = _query_tokens(query)
         if not tokens:
             return []
 
@@ -182,33 +251,56 @@ class RetrievalService:
             )
             for token in tokens[:6]
         ]
-        stmt = self._base_query(user_id, source_type, memory_id).where(or_(*filters)).limit(top_k)
+        candidate_limit = max(top_k * 4, 16)
+        stmt = (
+            self._base_query(user_id, source_type, memory_id)
+            .where(or_(*filters))
+            .limit(candidate_limit)
+        )
+        rows = self.db.execute(stmt).all()
+        scored: list[RetrievedChunk] = []
+        for chunk, item in rows:
+            rank = _lexical_rank(item.title, chunk.content, tokens)
+            if rank <= 0:
+                continue
+            scored.append(self._to_retrieved(chunk, item, None, lexical=True, rank=rank))
+        scored.sort(key=lambda item: (-item.rank, -item.captured_at.timestamp()))
+        return scored[:top_k]
+
+    def _recent_chunks(
+        self,
+        user_id: UUID,
+        top_k: int,
+        source_type: SourceType | None,
+        memory_id: UUID | None,
+    ) -> list[RetrievedChunk]:
+        stmt = (
+            self._base_query(user_id, source_type, memory_id)
+            .order_by(MemoryItem.captured_at.desc(), MemoryChunk.chunk_index.asc())
+            .limit(top_k)
+        )
         rows = self.db.execute(stmt).all()
         return [self._to_retrieved(chunk, item, None, lexical=True) for chunk, item in rows]
 
     @staticmethod
     def _deduplicate_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
-        """Remove chunks with nearly identical content from the same memory.
-
-        When the same memory is captured multiple times, multiple chunks may
-        have very similar text. Keep the one with the lowest distance (most
-        relevant) per (memory_id, content_prefix) pair.
-        """
+        """Remove chunks with nearly identical content from the same memory."""
         seen: dict[tuple[UUID, str], RetrievedChunk] = {}
         for chunk in chunks:
-            # Use first 120 chars as content fingerprint
             key = (chunk.memory_id, chunk.content[:120].strip().lower())
             existing = seen.get(key)
             if existing is None:
                 seen[key] = chunk
             else:
-                # Prefer the chunk with lower distance (better relevance)
                 existing_dist = existing.distance if existing.distance is not None else 1.0
                 chunk_dist = chunk.distance if chunk.distance is not None else 1.0
                 if chunk_dist < existing_dist:
                     seen[key] = chunk
-        # Re-sort by distance ascending (lexical chunks have None distance — keep at end)
         return sorted(
             seen.values(),
-            key=lambda c: (c.distance is None, c.distance or 0.0),
+            key=lambda c: (
+                c.distance is None,
+                c.distance if c.distance is not None else 0.0,
+                -c.rank,
+            ),
         )

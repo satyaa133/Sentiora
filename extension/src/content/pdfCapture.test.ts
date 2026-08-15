@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildPlainTextFromNodes, scoreExtractionQuality } from "../shared/captureUtils";
 import type { StructuredNode } from "../shared/types";
 
@@ -6,13 +6,13 @@ import type { StructuredNode } from "../shared/types";
 // PDF.js mock — avoids real HTTP fetch in unit tests
 // ──────────────────────────────────────────────
 
-const makePageMock = (
+const _makePageMock = (
   items: { str: string; transform: [number, number, number, number, number, number] }[],
 ) => ({
   getTextContent: vi.fn().mockResolvedValue({ items }),
 });
 
-const makePdfMock = (pages: ReturnType<typeof makePageMock>[]) => ({
+const _makePdfMock = (pages: ReturnType<typeof _makePageMock>[]) => ({
   numPages: pages.length,
   getPage: vi.fn().mockImplementation((pageNum: number) =>
     Promise.resolve(pages[pageNum - 1]),
@@ -70,7 +70,7 @@ describe("PDF text extraction", () => {
 // ──────────────────────────────────────────────
 describe("PDF insufficient content handling", () => {
   it("returns null when no meaningful text extracted", async () => {
-    const { capturePdf, isPdfDocument } = await import("../content/pdfCapture");
+    await import("../content/pdfCapture");
     // isPdfDocument based on URL — the test jsdom has no PDF URL, so skip domain check
     // We test the internal node logic instead:
     const nodes: StructuredNode[] = [];

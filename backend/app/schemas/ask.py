@@ -30,6 +30,9 @@ class AskResponse(BaseModel):
     answer: str
     citations: list[AskCitation]
     insufficient_context: bool = False
+    # True when the answer was derived locally from retrieved memory because
+    # the configured LLM provider was missing or failed. Optional for clients.
+    used_fallback: bool = False
 
 
 class SearchHit(BaseModel):

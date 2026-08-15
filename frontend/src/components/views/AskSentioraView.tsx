@@ -1,10 +1,13 @@
-import { useState, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import type { MemoryItem } from "../../types/memory";
-import { askSentiora, AskApiError, type AskCitation } from "../../services/askService";
+import { askSentiora, AskApiError, type AskCitation, type AskRequest } from "../../services/askService";
 
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
+  initialQuery?: string;
+  focusMemoryId?: string;
+  onClearInitialQuery?: () => void;
 }
 
 interface Message {
@@ -13,10 +16,18 @@ interface Message {
   text: string;
   citations?: AskCitation[];
   isNotFound?: boolean;
+  isError?: boolean;
+  usedFallback?: boolean;
 }
 
-export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
+export default function AskSentioraView({
+  items = [],
+  initialQuery,
+  focusMemoryId,
+  onClearInitialQuery,
+}: AskSentioraViewProps) {
   const [input, setInput] = useState("");
+  const [hasProcessedInitial, setHasProcessedInitial] = useState(false);
 
   const readyItems = items.filter((item) => item.status === "ready");
   const isIndexing = items.some((item) => item.status === "pending" || item.status === "processing");
@@ -72,8 +83,40 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
     setInput("");
     setIsGenerating(true);
 
+    if (items.length === 0) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: "Your vault is empty. Capture a webpage, PDF, or YouTube video before asking Sentiora.",
+          isNotFound: true,
+        },
+      ]);
+      setIsGenerating(false);
+      return;
+    }
+
+    if (readyItems.length === 0 && isIndexing) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: (Date.now() + 1).toString(),
+          sender: "ai",
+          text: "Your captures are still being indexed. Ask again once they show as Ready.",
+          isNotFound: true,
+        },
+      ]);
+      setIsGenerating(false);
+      return;
+    }
+
     try {
-      const result = await askSentiora({ question: queryText.trim() });
+      const payload: AskRequest = { question: queryText.trim() };
+      if (focusMemoryId) {
+        payload.memory_id = focusMemoryId;
+      }
+      const result = await askSentiora(payload);
       setMessages((prev) => [
         ...prev,
         {
@@ -82,20 +125,30 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
           text: result.answer,
           citations: result.citations,
           isNotFound: result.insufficient_context,
+          usedFallback: Boolean(result.used_fallback),
         },
       ]);
     } catch (err) {
       let errorText =
-        "Sentiora AI could not answer right now. Please try again in a moment.";
+        "Sentiora could not reach the server. Confirm the backend is running, then try again.";
+      let isError = true;
 
       if (err instanceof AskApiError) {
-        if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
+        if (err.status === 401 || err.status === 403) {
           errorText =
-            "Sentiora AI is not configured yet. Please set the OPENAI_API_KEY " +
-            "in the backend environment and restart the server.";
-        } else if (err.status === 502 || err.code === "RAG_LLM_FAILED") {
+            "Your session expired or you are not signed in. Please sign in again to ask questions.";
+        } else if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
           errorText =
-            "Sentiora AI is temporarily unavailable. Please try again in a moment.";
+            err.message ||
+            "Sentiora AI is not configured, and no saved memory could be used to answer.";
+        } else if (err.code === "ASK_SYSTEM_FAILED" || err.status === 502) {
+          errorText =
+            err.message ||
+            "The Sentiora server had a problem answering this question. This is not an AI configuration issue.";
+        } else if (err.status >= 500) {
+          errorText =
+            err.message ||
+            "The Sentiora server had a problem. This is not an AI configuration issue.";
         } else {
           errorText = err.message || errorText;
         }
@@ -107,13 +160,23 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
           id: (Date.now() + 1).toString(),
           sender: "ai",
           text: errorText,
-          isNotFound: true,
+          isError,
         },
       ]);
     } finally {
       setIsGenerating(false);
     }
   }
+
+  useEffect(() => {
+    if (initialQuery && !hasProcessedInitial && !isGenerating) {
+      setHasProcessedInitial(true);
+      setInput(initialQuery); // Just set the input instead of auto-sending to let user edit, or auto-send. The prompt says "pre-filled with the context query".
+      if (onClearInitialQuery) {
+        onClearInitialQuery();
+      }
+    }
+  }, [initialQuery, hasProcessedInitial, isGenerating, onClearInitialQuery]);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -221,6 +284,8 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
               className={`max-w-xl p-4 rounded-2xl text-xs leading-relaxed space-y-2 relative group transition-all ${
                 msg.sender === "user"
                   ? "bg-moss-600/95 text-white rounded-br-none shadow-md"
+                  : msg.isError
+                  ? "bg-rose-50/90 border border-rose-200/90 text-rose-950 rounded-bl-none shadow-card"
                   : msg.isNotFound
                   ? "bg-amber-50/90 border border-amber-200/90 text-amber-950 rounded-bl-none shadow-card"
                   : "bg-white/90 backdrop-blur-md border border-parchment-200/80 text-ink-900 rounded-bl-none shadow-card hover:shadow-md"
@@ -243,7 +308,14 @@ export default function AskSentioraView({ items = [] }: AskSentioraViewProps) {
               {msg.sender === "user" ? (
                 <p className="whitespace-pre-wrap">{msg.text}</p>
               ) : (
-                renderFormattedMessage(msg.text)
+                <>
+                  {msg.usedFallback && (
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">
+                      Answered from your saved memory (AI provider unavailable)
+                    </p>
+                  )}
+                  {renderFormattedMessage(msg.text)}
+                </>
               )}
 
               {/* Citations */}

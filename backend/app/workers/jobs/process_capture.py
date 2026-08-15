@@ -1,7 +1,7 @@
 import logging
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.db import SessionLocal
@@ -54,7 +54,7 @@ def process_capture(memory_item_id_str: str) -> None:
         if existing:
             logger.info(
                 "MemoryItem %s is a duplicate of ready item %s (same URL). "
-                "Marking ready without re-processing.",
+                "Copying searchable chunks and marking ready.",
                 memory_item_id_str,
                 existing.id,
             )
@@ -65,6 +65,21 @@ def process_capture(memory_item_id_str: str) -> None:
             item.content_length = existing.content_length
             item.word_count = existing.word_count
             item.reading_time_seconds = existing.reading_time_seconds
+            originals = ChunkRepository(db).list_for_memory(existing.id, item.user_id)
+            clones = [
+                MemoryChunk(
+                    memory_id=item.id,
+                    user_id=item.user_id,
+                    chunk_index=chunk.chunk_index,
+                    content=chunk.content,
+                    heading=chunk.heading,
+                    page_number=chunk.page_number,
+                    source_type=chunk.source_type,
+                    embedding=chunk.embedding,
+                )
+                for chunk in originals
+            ]
+            ChunkRepository(db).replace_for_memory(item.id, item.user_id, clones)
             db.commit()
             return
         # ────────────────────────────────────────────────────────────────────
@@ -102,7 +117,15 @@ def process_capture(memory_item_id_str: str) -> None:
         # ── Embedding generation ─────────────────────────────────────────────
         # Capture MUST remain fast; embeddings are generated here in the
         # background worker, never during the HTTP capture request.
-        adapter = get_embedding_adapter()
+        adapter = None
+        try:
+            adapter = get_embedding_adapter()
+        except Exception as adapter_exc:
+            logger.warning(
+                "Embedding adapter unavailable for MemoryItem %s: %s",
+                memory_item_id_str,
+                adapter_exc,
+            )
         if adapter and chunks:
             try:
                 vectors = adapter.embed_texts([chunk.content for chunk in chunks])
@@ -122,8 +145,8 @@ def process_capture(memory_item_id_str: str) -> None:
                 )
         elif not adapter:
             logger.warning(
-                "OPENAI_API_KEY not set — MemoryItem %s will have no embeddings. "
-                "Semantic search and Ask Sentiora will not work until the key is configured.",
+                "LLM API key not set — MemoryItem %s will have no embeddings. "
+                "Ensure LLM_PROVIDER and corresponding key are set.",
                 memory_item_id_str,
             )
 

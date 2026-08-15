@@ -41,7 +41,7 @@
 * Memory Items CRUD APIs (`POST /memory-items`, `GET /memory-items`, `DELETE /memory-items/:id`)
 * Async RQ background worker job (`process_capture.py`) for content normalization, chunking, embeddings, and deduplication
 * Semantic search (`GET /api/v1/search`) with pgvector retrieval and lexical fallback
-* Ask Sentiora RAG chat (`POST /api/v1/chat`) with citations, insufficient-context handling, and `503 AI_NOT_CONFIGURED` when the LLM is not configured
+* Ask Sentiora RAG chat (`POST /api/v1/chat`) with citations, insufficient-context handling, and a grounded local fallback when the LLM provider is missing or fails
 
 **Frontend (React + Vite + Tailwind)**
 * Vite + React + TypeScript initialized with Parchment glassmorphism design system
@@ -69,10 +69,10 @@
 * **Current active phase**: Phase 8 (Testing)
 * **Current objectives**: Maintain CI-green test coverage across frontend, extension, shared, and backend; add end-to-end Playwright flows.
 * **Current deliverables**:
-  * Pytest coverage for capture, search, and Ask/RAG (including `AI_NOT_CONFIGURED` and insufficient-context cases)
+  * Pytest coverage for capture, search, and Ask/RAG (including grounded fallback, multi-memory retrieval, and insufficient-context cases)
   * Vitest suites for dashboard, extension capture utilities, and shared packages
   * GitHub Actions CI running lint, typecheck, test, and build on pull requests
-* **Current blockers**: None
+* **Current blockers**: LLM-generated (non-fallback) Ask answers still require `OPENAI_API_KEY` or `GEMINI_API_KEY` in `backend/.env`. Local fallback answers work without a key. Host Redis must be reachable for the RQ worker; Compose services use `redis://redis:6379/0`.
 * **Current branch**: `Vansh` (PR #1 → `main`, CI green at commit `0fb3b8d`)
 
 ---

@@ -42,6 +42,10 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config as typeof error.config & { _retry?: boolean };
 
     if (error.response?.status === 401 && !originalRequest?._retry) {
+      const requestUrl = originalRequest?.url ?? "";
+      if (requestUrl.includes("/auth/login") || requestUrl.includes("/auth/register")) {
+        return Promise.reject(error);
+      }
       if (isRefreshing) {
         return new Promise<string>((resolve, reject) => {
           failedQueue.push({ resolve, reject });
@@ -96,5 +100,38 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+export function getApiErrorMessage(err: unknown, fallback: string): string {
+  if (!err || typeof err !== "object") {
+    return fallback;
+  }
+  if ("response" in err && err.response && typeof err.response === "object") {
+    const response = err.response as {
+      status?: number;
+      data?: { error?: { code?: string; message?: string } };
+    };
+    const code = response.data?.error?.code;
+    const message = response.data?.error?.message;
+    if (code === "AUTH_INVALID_CREDENTIALS") {
+      return "Invalid email or password. Please try again.";
+    }
+    if (code === "AUTH_EMAIL_ALREADY_EXISTS") {
+      return "An account with this email already exists.";
+    }
+    if (!response.status) {
+      return "Could not reach the Sentiora server. Confirm it is running on port 8000.";
+    }
+    if (response.status >= 500) {
+      return message || "The Sentiora server could not complete sign-in. Check that Postgres is running.";
+    }
+    if (message) {
+      return message;
+    }
+  }
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  return fallback;
+}
 
 export default apiClient;

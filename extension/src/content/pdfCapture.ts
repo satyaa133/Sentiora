@@ -12,9 +12,10 @@ import type { PdfCapturePayload, StructuredNode } from "../shared/types";
 // ──────────────────────────────────────────────
 // Lazy-load pdfjs-dist to keep the bundle split manageable
 // ──────────────────────────────────────────────
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports -- pdfjs is loaded dynamically
 let pdfjsLib: typeof import("pdfjs-dist") | null = null;
 
-async function getPdfJs(): Promise<typeof import("pdfjs-dist")> {
+async function getPdfJs(): Promise<typeof import("pdfjs-dist")> { // eslint-disable-line @typescript-eslint/consistent-type-imports
   if (!pdfjsLib) {
     // Dynamic import — Vite will bundle this at build time
     pdfjsLib = await import("pdfjs-dist");
