@@ -4,6 +4,7 @@
   "type": "module",
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
+    "pdfjs-dist": "^4.9.155",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

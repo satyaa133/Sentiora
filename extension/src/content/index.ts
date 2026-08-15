@@ -38,7 +38,7 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
   }
 
   if (isPdfDocument()) {
-    const payload = capturePdf(manualCapture);
+    const payload = await capturePdf(manualCapture);
     if (!payload) {
       return { status: "skipped", reason: "no_payload" };
     }
