@@ -1,10 +1,11 @@
+from typing import Any
 import pytest
 from datetime import datetime, UTC
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.user import User
-from app.models.memory_item import MemoryItem
+from app.models.memory_item import MemoryItem, SourceType
 from app.core.db import SessionLocal
 from app.services.content_normalizer import canonicalize_url, compute_content_hash, normalize_content
 
@@ -33,7 +34,7 @@ def _auth_headers(email: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_memory_items_crud_flow(clean_db) -> None:
+def test_memory_items_crud_flow(clean_db: None) -> None:
     headers = _auth_headers("test_memory_user@example.com")
 
     # 2. Ingest Memory Item (POST /api/v1/memory-items)
@@ -76,10 +77,10 @@ def test_memory_items_crud_flow(clean_db) -> None:
     assert get_after_del.status_code == 404
 
 
-def test_capture_v2_validation_and_persistence(clean_db) -> None:
+def test_capture_v2_validation_and_persistence(clean_db: None) -> None:
     headers = _auth_headers("test_capture_v2@example.com")
 
-    payload = {
+    payload: dict[str, Any] = {
         "source_type": "webpage",
         "url": "https://example.com/binary-search?utm_source=feed&v_custom=123",
         "title": "Binary Search",
@@ -131,11 +132,11 @@ def test_capture_v2_validation_and_persistence(clean_db) -> None:
     assert data["structured_content"][0]["text"] == "Binary Search Title"  # Trimmed text
     assert data["structured_content"][0]["metadata"]["level"] == 1
     assert data["structured_content"][1]["parent_id"] == "node-1"
-    assert data["content_hash"] == compute_content_hash(normalize_content(payload["content"], "webpage"))
+    assert data["content_hash"] == compute_content_hash(normalize_content(payload["content"], SourceType.webpage))
     assert data["received_at"] is not None
 
 
-def test_capture_v2_invalid_schema_rejection(clean_db) -> None:
+def test_capture_v2_invalid_schema_rejection(clean_db: None) -> None:
     headers = _auth_headers("test_invalid_schema@example.com")
 
     # Invalid quality score outside 0-1 range
@@ -201,10 +202,10 @@ def test_normalization_and_fingerprinting_rules() -> None:
 
     # Content normalization
     c1 = "A  B \t C\r\n\r\n\r\nD"
-    assert normalize_content(c1, "webpage") == "A B C\nLine 3" or normalize_content(c1, "webpage") == "A B C" or "A B C" in normalize_content(c1, "webpage")
+    assert normalize_content(c1, SourceType.webpage) == "A B C\nLine 3" or normalize_content(c1, SourceType.webpage) == "A B C" or "A B C" in normalize_content(c1, SourceType.webpage)
 
     # Deterministic hashing
-    h1 = compute_content_hash(normalize_content(c1, "webpage"))
-    h2 = compute_content_hash(normalize_content(c1, "webpage"))
+    h1 = compute_content_hash(normalize_content(c1, SourceType.webpage))
+    h2 = compute_content_hash(normalize_content(c1, SourceType.webpage))
     assert h1 == h2
     assert h1 != compute_content_hash("A B C\n\nDifferent")
