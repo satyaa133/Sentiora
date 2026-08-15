@@ -5,9 +5,11 @@ import {
 } from "../shared/captureUtils";
 import type { PdfCapturePayload, StructuredNode } from "../shared/types";
 
-let pdfjsLib: typeof import("pdfjs-dist") | null = null;
+import type * as PDFJS from "pdfjs-dist";
 
-async function getPdfJs(): Promise<typeof import("pdfjs-dist")> {
+let pdfjsLib: typeof PDFJS | null = null;
+
+async function getPdfJs(): Promise<typeof PDFJS> {
   if (!pdfjsLib) {
     pdfjsLib = await import("pdfjs-dist");
     pdfjsLib.GlobalWorkerOptions.workerSrc = "";
@@ -26,11 +28,11 @@ export function isPdfDocument(): boolean {
   );
 }
 
-export function extractTextLayerNodes(root: ParentNode = document): StructuredNode[] {
+export function extractTextLayerNodes(root: Document | Element = document): StructuredNode[] {
   const nodes: StructuredNode[] = [];
   let order = 0;
 
-  const visit = (node: ParentNode, pageHint = 1) => {
+  const visit = (node: Document | Element | ShadowRoot, pageHint = 1) => {
     const layerPages = node.querySelectorAll?.(".textLayer") ?? [];
     if (layerPages.length > 0) {
       layerPages.forEach((layer, index) => {

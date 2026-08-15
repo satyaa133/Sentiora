@@ -87,10 +87,7 @@ describe("YouTube transcript StructuredNode conversion", () => {
   it("decodes HTML entities correctly", () => {
     // Simulate entity decoding
     const raw = "It&amp;s O&#39;(log n) complexity &quot;fast&quot;";
-    const decoded = raw
-      .replace(/&amp;/g, "&")
-      .replace(/&#39;/g, "'")
-      .replace(/&quot;/g, '"');
+    const decoded = decodeHtmlEntities(raw);
     expect(decoded).toBe('It&s O\'(log n) complexity "fast"');
   });
 });
