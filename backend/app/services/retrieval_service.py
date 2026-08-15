@@ -6,6 +6,7 @@ User A can never retrieve User B's memories.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -17,6 +18,8 @@ from app.core.config import get_settings
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.services.embedding_service import get_embedding_adapter
+
+logger = logging.getLogger(__name__)
 
 _STOPWORDS = {
     "about",
@@ -216,15 +219,21 @@ class RetrievalService:
             return []
 
         query_vector = vectors[0]
-        distance = MemoryChunk.embedding.cosine_distance(query_vector)
-        stmt = (
-            self._base_query(user_id, source_type, memory_id)
-            .add_columns(distance.label("distance"))
-            .where(MemoryChunk.embedding.is_not(None))
-            .order_by(distance)
-            .limit(top_k)
-        )
-        rows = self.db.execute(stmt).all()
+        if not query_vector:
+            return []
+        try:
+            distance = MemoryChunk.embedding.cosine_distance(query_vector)
+            stmt = (
+                self._base_query(user_id, source_type, memory_id)
+                .add_columns(distance.label("distance"))
+                .where(MemoryChunk.embedding.is_not(None))
+                .order_by(distance)
+                .limit(top_k)
+            )
+            rows = self.db.execute(stmt).all()
+        except Exception:
+            logger.exception("Semantic retrieval failed; continuing with lexical search")
+            return []
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
             if dist is not None and float(dist) > self.settings.rag_max_distance:

@@ -33,6 +33,18 @@ async function markUrlCaptured(url: string): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
+  if (message.type === "FETCH_PDF_BYTES") {
+    handleFetchPdfBytes(message.url, sender.tab?.id)
+      .then((result) => sendResponse(result))
+      .catch((err) =>
+        sendResponse({
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    return true;
+  }
+
   if (
     message.type === "CAPTURE_WEBPAGE" ||
     message.type === "CAPTURE_YOUTUBE" ||
@@ -155,6 +167,53 @@ function notifyDashboardTabs(): void {
   } catch {
     // Ignore tab query errors
   }
+}
+
+async function handleFetchPdfBytes(
+  url: string,
+  tabId?: number,
+): Promise<{ success: boolean; bytes?: number[]; error?: string }> {
+  try {
+    const resp = await fetch(url);
+    if (resp.ok) {
+      const bytes = Array.from(new Uint8Array(await resp.arrayBuffer()));
+      if (bytes.length > 0) {
+        return { success: true, bytes };
+      }
+    }
+  } catch {
+    // Viewer/file URLs often cannot be fetched from the service worker.
+  }
+
+  if (tabId != null) {
+    try {
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: async (src: string) => {
+          const resp = await fetch(src);
+          const buf = new Uint8Array(await resp.arrayBuffer());
+          return Array.from(buf);
+        },
+        args: [url],
+      });
+      const bytes = injected[0]?.result;
+      if (Array.isArray(bytes) && bytes.length > 0) {
+        return { success: true, bytes };
+      }
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+
+  return {
+    success: false,
+    error:
+      "Could not read PDF bytes. For local files, enable Allow access to file URLs on the Sentiora extension.",
+  };
 }
 
 function showBadgeSuccess(): void {

@@ -17,8 +17,7 @@ export function isYoutubeWatchPage(): boolean {
   );
 }
 
-/** Decode HTML entities in YouTube XML transcript text. */
-function decodeHtmlEntities(text: string): string {
+export function decodeHtmlEntities(text: string): string {
   return text
     .replace(/&amp;/g, "&")
     .replace(/&#39;/g, "'")
@@ -31,82 +30,208 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 }
 
-interface TranscriptSegment {
+export interface TranscriptSegment {
   text: string;
   start: number;
   end: number;
 }
 
-/**
- * Fetch YouTube timedtext XML for the given video ID and language code.
- * Returns parsed segments with timing, or null on failure.
- */
-async function fetchTimedText(
-  videoId: string,
-  lang: string,
-): Promise<TranscriptSegment[] | null> {
+export interface CaptionTrack {
+  baseUrl: string;
+  languageCode: string;
+  kind?: string;
+}
+
+export function parseTimedTextXml(xmlText: string): TranscriptSegment[] | null {
+  if (!xmlText.includes("<text")) return null;
+  const parser = new DOMParser();
+  const xmlDoc = parser.parseFromString(xmlText, "text/xml");
+  const textNodes = xmlDoc.getElementsByTagName("text");
+  const segments: TranscriptSegment[] = [];
+  for (let i = 0; i < textNodes.length; i++) {
+    const node = textNodes[i];
+    if (!node?.textContent) continue;
+    const raw = decodeHtmlEntities(node.textContent.trim());
+    if (!raw) continue;
+    const start = parseFloat(node.getAttribute("start") ?? "0");
+    const dur = parseFloat(node.getAttribute("dur") ?? "0");
+    segments.push({ text: raw, start, end: Math.round((start + dur) * 10) / 10 });
+  }
+  return segments.length > 0 ? segments : null;
+}
+
+export function parseTimedTextJson3(raw: string): TranscriptSegment[] | null {
   try {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 3000);
-
-    const resp = await fetch(
-      `https://www.youtube.com/api/timedtext?lang=${lang}&v=${videoId}`,
-      { signal: controller.signal },
-    );
-    window.clearTimeout(timeoutId);
-
-    if (!resp.ok) return null;
-
-    const xmlText = await resp.text();
-    if (!xmlText.includes("<text")) return null; // empty or error XML
-
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, "text/xml");
-    const textNodes = xmlDoc.getElementsByTagName("text");
-
+    const parsed = JSON.parse(raw) as {
+      events?: { tStartMs?: number; dDurationMs?: number; segs?: { utf8?: string }[] }[];
+    };
     const segments: TranscriptSegment[] = [];
-    for (let i = 0; i < textNodes.length; i++) {
-      const node = textNodes[i];
-      if (!node?.textContent) continue;
-
-      const raw = decodeHtmlEntities(node.textContent.trim());
-      if (!raw) continue;
-
-      const start = parseFloat(node.getAttribute("start") ?? "0");
-      const dur = parseFloat(node.getAttribute("dur") ?? "0");
-
-      segments.push({ text: raw, start, end: Math.round((start + dur) * 10) / 10 });
+    for (const event of parsed.events ?? []) {
+      const text = (event.segs ?? [])
+        .map((seg) => seg.utf8 ?? "")
+        .join("")
+        .replace(/\n/g, " ")
+        .trim();
+      if (!text) continue;
+      const start = (event.tStartMs ?? 0) / 1000;
+      const dur = (event.dDurationMs ?? 0) / 1000;
+      segments.push({ text, start, end: Math.round((start + dur) * 10) / 10 });
     }
-
     return segments.length > 0 ? segments : null;
   } catch {
     return null;
   }
 }
 
-/**
- * Try multiple language codes in priority order.
- * Attempts: en, en-US, en-GB, auto-generated (a.en), then falls back to
- * any track listed in the timedtext list endpoint.
- */
-async function fetchTranscriptAnyLanguage(
-  videoId: string,
-): Promise<TranscriptSegment[] | null> {
-  const langCandidates = ["en", "en-US", "en-GB", "a.en"];
+export function parseCaptionTracks(playerResponse: unknown): CaptionTrack[] {
+  const root = playerResponse as {
+    captions?: {
+      playerCaptionsTracklistRenderer?: {
+        captionTracks?: { baseUrl?: string; languageCode?: string; kind?: string }[];
+      };
+    };
+  };
+  const tracks = root?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
+  return tracks
+    .filter((track) => typeof track.baseUrl === "string" && track.baseUrl.length > 0)
+    .map((track) => ({
+      baseUrl: track.baseUrl as string,
+      languageCode: track.languageCode ?? "",
+      kind: track.kind,
+    }));
+}
 
-  for (const lang of langCandidates) {
+export function readPlayerResponseFromHtml(html: string): unknown | null {
+  const marker = "ytInitialPlayerResponse";
+  const idx = html.indexOf(marker);
+  if (idx < 0) return null;
+  const eq = html.indexOf("=", idx);
+  if (eq < 0) return null;
+  let start = eq + 1;
+  while (html[start] === " ") start += 1;
+  if (html[start] !== "{") return null;
+  let depth = 0;
+  for (let i = start; i < html.length; i++) {
+    const ch = html[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(start, i + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export function groupTranscriptSegments(
+  segments: TranscriptSegment[],
+  maxChars = 420,
+): StructuredNode[] {
+  const nodes: StructuredNode[] = [];
+  let buffer: string[] = [];
+  let order = 0;
+  let groupStart = 0;
+  let groupEnd = 0;
+
+  const flush = () => {
+    const text = buffer.join(" ").replace(/\s+/g, " ").trim();
+    if (!text) return;
+    nodes.push({
+      id: `node-${order}`,
+      type: "paragraph",
+      text,
+      order,
+      parent_id: null,
+      metadata: { start_seconds: groupStart, end_seconds: groupEnd },
+    });
+    order += 1;
+    buffer = [];
+  };
+
+  for (const segment of segments) {
+    if (buffer.length === 0) {
+      groupStart = segment.start;
+    }
+    groupEnd = segment.end;
+    buffer.push(segment.text);
+    if (buffer.join(" ").length >= maxChars) {
+      flush();
+    }
+  }
+  flush();
+  return nodes;
+}
+
+function pickCaptionTracks(tracks: CaptionTrack[]): CaptionTrack[] {
+  const preferred = ["en", "en-US", "en-GB"];
+  const ranked = [...tracks].sort((a, b) => {
+    const aPref = preferred.indexOf(a.languageCode);
+    const bPref = preferred.indexOf(b.languageCode);
+    const aScore = (aPref >= 0 ? aPref : 50) + (a.kind === "asr" ? 10 : 0);
+    const bScore = (bPref >= 0 ? bPref : 50) + (b.kind === "asr" ? 10 : 0);
+    return aScore - bScore;
+  });
+  return ranked.slice(0, 6);
+}
+
+async function fetchCaptionUrl(url: string): Promise<TranscriptSegment[] | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(url, { signal: controller.signal, credentials: "include" });
+    window.clearTimeout(timeoutId);
+    if (!resp.ok) return null;
+    const raw = await resp.text();
+    return parseTimedTextJson3(raw) ?? parseTimedTextXml(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchTimedText(videoId: string, lang: string): Promise<TranscriptSegment[] | null> {
+  const urls = [
+    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=json3`,
+    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}`,
+  ];
+  for (const url of urls) {
+    const segments = await fetchCaptionUrl(url);
+    if (segments) return segments;
+  }
+  return null;
+}
+
+async function fetchTranscriptFromPlayer(videoId: string): Promise<TranscriptSegment[] | null> {
+  const playerResponse =
+    readPlayerResponseFromHtml(document.documentElement.innerHTML) ??
+    (window as unknown as { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse ??
+    null;
+  if (!playerResponse) return null;
+  const tracks = pickCaptionTracks(parseCaptionTracks(playerResponse));
+  for (const track of tracks) {
+    const withFmt = track.baseUrl.includes("fmt=") ? track.baseUrl : `${track.baseUrl}&fmt=json3`;
+    const segments = (await fetchCaptionUrl(withFmt)) ?? (await fetchCaptionUrl(track.baseUrl));
+    if (segments) return segments;
+  }
+  void videoId;
+  return null;
+}
+
+async function fetchTranscriptAnyLanguage(videoId: string): Promise<TranscriptSegment[] | null> {
+  const fromPlayer = await fetchTranscriptFromPlayer(videoId);
+  if (fromPlayer) return fromPlayer;
+
+  for (const lang of ["en", "en-US", "en-GB", "a.en"]) {
     const segments = await fetchTimedText(videoId, lang);
     if (segments) return segments;
   }
 
-  // Last resort: query the list endpoint for available tracks
   try {
-    const controller = new AbortController();
-    window.setTimeout(() => controller.abort(), 2000);
-
-    const listResp = await fetch(
-      `https://www.youtube.com/api/timedtext?type=list&v=${videoId}`,
-    );
+    const listResp = await fetch(`https://www.youtube.com/api/timedtext?type=list&v=${videoId}`);
     if (listResp.ok) {
       const listXml = await listResp.text();
       const langMatch = /lang_code="([^"]+)"/.exec(listXml);
@@ -118,39 +243,7 @@ async function fetchTranscriptAnyLanguage(
   } catch {
     // ignore
   }
-
   return null;
-}
-
-/** Convert transcript segments → StructuredNode[] with timing metadata. */
-function buildTranscriptNodes(segments: TranscriptSegment[]): StructuredNode[] {
-  return segments.map((seg, i) => ({
-    id: `node-${i}`,
-    type: "paragraph" as const,
-    text: seg.text,
-    order: i,
-    parent_id: null,
-    metadata: {
-      start_seconds: seg.start,
-      end_seconds: seg.end,
-    },
-  }));
-}
-
-/** Extract meaningful description from YouTube page DOM. */
-function extractDescription(): string {
-  const descEl =
-    document.querySelector("#description-inline-expander") ||
-    document.querySelector("#description") ||
-    document.querySelector("meta[name='description']");
-
-  if (!descEl) return "";
-
-  const text =
-    (descEl as HTMLElement).innerText ??
-    (descEl as HTMLMetaElement).content ??
-    "";
-  return text.trim();
 }
 
 export async function captureYoutube(isForce = false): Promise<YoutubeCapturePayload | null> {
@@ -159,7 +252,6 @@ export async function captureYoutube(isForce = false): Promise<YoutubeCapturePay
   const videoId = urlParams.get("v");
   if (!videoId) return null;
 
-  // ── Title ─────────────────────────────────────
   const titleEl =
     document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
     document.querySelector("h1.title ytd-formatted-string") ||
@@ -172,56 +264,31 @@ export async function captureYoutube(isForce = false): Promise<YoutubeCapturePay
     : document.title;
   const title = rawTitle.trim().slice(0, 1024);
 
-  // ── Author / channel ────────────────────────────
   const authorEl =
     document.querySelector("#owner #channel-name a") ||
     document.querySelector("ytd-channel-name a");
   const rawAuthor = authorEl ? (authorEl as HTMLElement).innerText.trim() : undefined;
   const author = rawAuthor ? rawAuthor.slice(0, 512) : undefined;
-
-  // ── Thumbnail ────────────────────────────────────
   const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
 
-  // ── Transcript (primary) ─────────────────────────
-  let nodes: StructuredNode[] = [];
-  let status: ExtractionStatus = "insufficient_content";
-  let extractionAttempted = "youtube_transcript" as const;
-
   const segments = await fetchTranscriptAnyLanguage(videoId);
+  const nodes = segments && segments.length > 0 ? groupTranscriptSegments(segments) : [];
+  const status: ExtractionStatus = nodes.length > 0 ? "success" : "insufficient_content";
 
-  if (segments && segments.length > 0) {
-    nodes = buildTranscriptNodes(segments);
-    status = "success";
-  } else {
-    // ── Description fallback ───────────────────────
-    const description = extractDescription();
-    if (description && description.length >= 50) {
-      nodes = description
-        .split(/\n+/)
-        .filter((line) => line.trim().length >= 10)
-        .map((line, i) => ({
-          id: `node-${i}`,
-          type: "paragraph" as const,
-          text: line.trim(),
-          order: i,
-          parent_id: null,
-        }));
-      status = nodes.length > 0 ? "partial" : "insufficient_content";
-    }
-  }
-
-  // ── No meaningful content → do NOT fabricate ─────
-  if (nodes.length === 0 || status === "insufficient_content") {
+  if (nodes.length === 0) {
     return null;
   }
 
   const rawContent = buildPlainTextFromNodes(nodes);
   const content = capExtractedContent(rawContent);
-  const durationMs = Math.round(performance.now() - started);
+  if (content.split(/\s+/).filter(Boolean).length < 12) {
+    return null;
+  }
 
+  const durationMs = Math.round(performance.now() - started);
   const { quality_score, quality_reasons } = scoreExtractionQuality(
     nodes,
-    extractionAttempted,
+    "youtube_transcript",
     status,
   );
 
@@ -235,7 +302,7 @@ export async function captureYoutube(isForce = false): Promise<YoutubeCapturePay
     captured_at: new Date().toISOString(),
     structured_content: nodes,
     extraction: {
-      method: extractionAttempted,
+      method: "youtube_transcript",
       duration_ms: durationMs,
       status,
       quality_score,

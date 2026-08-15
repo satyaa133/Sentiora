@@ -28,6 +28,10 @@ class LLMNotConfiguredError(RuntimeError):
     """Raised when the LLM API key is not set and no retrieved memory is available."""
 
 
+class LLMProviderError(RuntimeError):
+    """Raised when a configured LLM provider fails at runtime."""
+
+
 SYSTEM_PROMPT = """You are Sentiora, a private intelligent memory assistant.
 Your ONLY job is to answer questions using the EXACT memory sources supplied below.
 
@@ -189,8 +193,12 @@ class RagService:
                         insufficient_context=insufficient,
                         used_fallback=False,
                     )
-            except Exception:
-                logger.exception("LLM completion failed; using retrieved-memory fallback")
+                raise LLMProviderError("The language model returned an empty response.")
+            except LLMProviderError:
+                raise
+            except Exception as exc:
+                logger.exception("LLM completion failed for configured provider")
+                raise LLMProviderError(str(exc) or type(exc).__name__) from exc
 
         return AskResponse(
             answer=_local_fallback_answer(chunks),
@@ -250,4 +258,26 @@ class RagService:
                 max_output_tokens=500,
             ),
         )
-        return response.text or ""
+        return _gemini_response_text(response)
+
+
+def _gemini_response_text(response: object) -> str:
+    try:
+        text = getattr(response, "text", None)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    except Exception as exc:
+        logger.warning("Gemini response.text is unusable: %s", exc)
+
+    candidates = getattr(response, "candidates", None) or []
+    parts: list[str] = []
+    for candidate in candidates:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            value = getattr(part, "text", None)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+    if parts:
+        return "\n".join(parts)
+
+    raise LLMProviderError("Gemini returned no usable text (blocked, empty, or malformed).")

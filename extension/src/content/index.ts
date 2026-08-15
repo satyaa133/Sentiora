@@ -32,7 +32,7 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
   if (isYoutubeWatchPage()) {
     const payload = await captureYoutube(manualCapture);
     if (!payload) {
-      return { status: "skipped", reason: "no_payload" };
+      return { status: "skipped", reason: "insufficient_content" };
     }
     return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
   }
@@ -40,7 +40,7 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
   if (isPdfDocument()) {
     const payload = await capturePdf(manualCapture);
     if (!payload) {
-      return { status: "skipped", reason: "no_payload" };
+      return { status: "skipped", reason: "insufficient_content" };
     }
     return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
   }

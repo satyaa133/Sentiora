@@ -106,6 +106,7 @@ class MemoryItemResponse(BaseModel):
     word_count: int
     reading_time_seconds: int
     status: ItemStatus
+    processing_error: str | None = None
     captured_at: datetime
     created_at: datetime
 

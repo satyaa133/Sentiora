@@ -18,6 +18,7 @@ type PopupView =
   | "settings";
 
 const EXTRACT_TIMEOUT_MS = 8_000;
+const PDF_YOUTUBE_EXTRACT_TIMEOUT_MS = 25_000;
 const SAVE_TIMEOUT_MS = 8_000;
 const PING_TIMEOUT_MS = 400;
 
@@ -329,7 +330,7 @@ export default function App() {
       try {
         response = await withTimeout(
           requestForceCapture(activeTab.id),
-          EXTRACT_TIMEOUT_MS,
+          activeTabType === "webpage" ? EXTRACT_TIMEOUT_MS : PDF_YOUTUBE_EXTRACT_TIMEOUT_MS,
           "Extraction timed out. The page is too large or still loading.",
         );
       } catch (err) {
@@ -351,6 +352,17 @@ export default function App() {
         return;
       }
 
+      if (response?.skipped && response.reason === "insufficient_content") {
+        const detail =
+          activeTabType === "youtube"
+            ? "Could not extract a YouTube transcript for this video. Captions may be disabled."
+            : activeTabType === "pdf"
+              ? "Could not extract text from this PDF. For local files, enable Allow access to file URLs on the Sentiora extension, or upload the PDF from the dashboard."
+              : "Could not extract readable content from this page.";
+        fail(detail);
+        return;
+      }
+
       const extractionMs = response?.extractionMs ?? Math.round(performance.now() - extractStarted);
       setCapturePhase("saving");
       const saveStarted = performance.now();
@@ -362,14 +374,22 @@ export default function App() {
           SAVE_TIMEOUT_MS,
           "Saving timed out. The vault did not confirm this memory.",
         );
-      } else if (usedFallback) {
+      } else if (usedFallback && activeTabType === "webpage") {
         saved = await withTimeout(
           performFallbackCapture(activeTab),
           SAVE_TIMEOUT_MS,
           "Saving timed out. The vault did not confirm this memory.",
         );
       } else {
-        fail(response?.error ? String(response.error) : "Could not extract readable content from this page.");
+        fail(
+          activeTabType === "youtube"
+            ? "Could not extract a YouTube transcript for this video. Captions may be disabled."
+            : activeTabType === "pdf"
+              ? "Could not extract text from this PDF. For local files, enable Allow access to file URLs on the Sentiora extension."
+              : response?.error
+                ? String(response.error)
+                : "Could not extract readable content from this page.",
+        );
         return;
       }
 

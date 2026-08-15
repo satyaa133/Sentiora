@@ -169,9 +169,10 @@ def normalize_content(text: str | None, source_type: SourceType) -> str:
     previous = None
     for raw_line in cleaned.split("\n"):
         line = _strip_metric_streaks(raw_line.strip())
-        if _is_noise_line(line):
-            continue
-        if line == previous:
+        if source_type == SourceType.youtube:
+            if not line or line == previous:
+                continue
+        elif _is_noise_line(line) or line == previous:
             continue
         cleaned_lines.append(line)
         previous = line

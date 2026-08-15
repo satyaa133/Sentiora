@@ -48,21 +48,27 @@ class GeminiEmbeddingAdapter(EmbeddingPort):
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        
+
         from google.genai import types
-        # Google GenAI handles batch embeddings
-        response = self._client.models.embed_content(
-            model=self._model,
-            contents=texts,
-            config=types.EmbedContentConfig(output_dimensionality=1536)
-        )
-        embeddings = response.embeddings or []
+
+        settings = get_settings()
+        dim = settings.embedding_dimensions
         vectors: list[list[float]] = []
-        for emb in embeddings:
-            values = emb.values
-            if values is None:
-                continue
-            vectors.append([float(value) for value in values])
+        for text in texts:
+            response = self._client.models.embed_content(
+                model=self._model,
+                contents=text[:8000] if text else " ",
+                config=types.EmbedContentConfig(output_dimensionality=dim),
+            )
+            embeddings = response.embeddings or []
+            if not embeddings or embeddings[0].values is None:
+                raise RuntimeError("Gemini returned no embedding values.")
+            values = [float(value) for value in embeddings[0].values]
+            if len(values) != dim:
+                raise RuntimeError(
+                    f"Gemini embedding dimension {len(values)} != {dim}."
+                )
+            vectors.append(values)
         return vectors
 
 

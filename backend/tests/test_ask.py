@@ -333,11 +333,11 @@ def test_chat_falls_back_when_llm_completion_fails(monkeypatch) -> None:  # type
         json={"question": "What is binary search?"},
         headers=headers,
     )
-    assert chat_resp.status_code == 200
-    payload = chat_resp.json()["data"]
-    assert payload["used_fallback"] is True
-    assert payload["citations"][0]["memory_id"] == item_id
-    assert "halves" in payload["answer"].lower()
+    assert chat_resp.status_code == 502
+    error = chat_resp.json()["error"]
+    assert error["code"] == "ASK_LLM_FAILED"
+    assert "unavailable" not in error["message"].lower() or "language model failed" in error["message"].lower()
+    assert "provider timeout" in error["message"].lower() or "failed" in error["message"].lower()
 
 
 def test_search_lexical_without_embeddings(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -571,3 +571,18 @@ def test_chat_hybrid_retrieval_does_not_prefer_unrelated_semantic_hit(monkeypatc
     ).json()["data"]
     assert chat["citations"][0]["memory_id"] == react_id
     assert "render on the server" in chat["answer"].lower()
+
+
+def test_chat_with_no_ready_memories_is_insufficient() -> None:
+    headers = _auth_headers("ask_noready@example.com")
+    chat_resp = client.post(
+        "/api/v1/chat",
+        json={"question": "What is binary search?"},
+        headers=headers,
+    )
+    assert chat_resp.status_code == 200
+    payload = chat_resp.json()["data"]
+    assert payload["insufficient_context"] is True
+    assert payload["citations"] == []
+    assert "couldn't find enough information" in payload["answer"].lower()
+    assert "temporarily unavailable" not in payload["answer"].lower()

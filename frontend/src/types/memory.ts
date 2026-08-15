@@ -18,6 +18,7 @@ export interface MemoryItem {
   word_count: number;
   reading_time_seconds: number;
   status: ItemStatus;
+  processing_error?: string | null;
   captured_at: string;
   created_at: string;
 }

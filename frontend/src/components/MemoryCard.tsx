@@ -61,6 +61,7 @@ export default function MemoryCard({ item, onSelect, onDelete }: MemoryCardProps
           {renderSourceBadge()}
           {item.status && item.status !== "ready" && (
             <span
+              title={item.processing_error || undefined}
               className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
                 item.status === "failed"
                   ? "bg-rose-50 text-rose-700"

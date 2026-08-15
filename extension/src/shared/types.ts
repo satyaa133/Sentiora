@@ -114,7 +114,8 @@ export type ExtensionMessage =
   | { type: "CAPTURE_PDF"; payload: PdfCapturePayload }
   | { type: "CAPTURE_RESULT"; success: boolean; error?: string }
   | { type: "SYNC_AUTH_TOKENS"; payload: AuthSyncPayload }
-  | { type: "CLEAR_AUTH_TOKENS" };
+  | { type: "CLEAR_AUTH_TOKENS" }
+  | { type: "FETCH_PDF_BYTES"; url: string };
 
 export interface ExtensionState {
   readonly isReady: boolean;

@@ -67,7 +67,7 @@ def test_process_capture_creates_owned_chunks_without_duplicates() -> None:
     assert "Accept all cookies" not in ready["content"]
     assert ready["word_count"] > 20
     assert ready["content_length"] > 20
-    assert "processing_error" not in ready
+    assert ready.get("processing_error") in (None, "")
 
     db = SessionLocal()
     try:
@@ -121,3 +121,116 @@ def test_chunks_are_isolated_by_user() -> None:
 
     other_get = client.get(f"/api/v1/memory-items/{item_id}", headers=other_headers)
     assert other_get.status_code == 404
+
+
+YOUTUBE_TRANSCRIPT = """
+Binary search on a rotated sorted array still uses the sorted half as the decision point.
+Compare the middle value with the low and high bounds to decide which side remains sorted.
+If the target lies in the sorted half, continue there, otherwise search the rotated half.
+This keeps the logarithmic time bound even when duplicates are present.
+"""
+
+PDF_TEXT = """
+TCS NQT is a 3 hour test with foundation and advanced sections.
+The foundation paper covers aptitude, reasoning, and verbal ability.
+The advanced paper includes programming languages, data structures, and coding problems.
+"""
+
+
+def test_process_capture_fails_when_extraction_is_empty() -> None:
+    headers = _auth_headers("chunk_empty@example.com")
+    create_resp = client.post(
+        "/api/v1/memory-items",
+        json={
+            "source_type": "youtube",
+            "url": "https://www.youtube.com/watch?v=empty123",
+            "title": "Empty Video",
+            "content": "Captured youtube content: Empty Video. Open the dashboard to view full extracted content when available.",
+        },
+        headers=headers,
+    )
+    item_id = create_resp.json()["data"]["id"]
+    process_capture(item_id)
+    ready = client.get(f"/api/v1/memory-items/{item_id}", headers=headers).json()["data"]
+    assert ready["status"] == "failed"
+    assert ready["processing_error"]
+
+
+def test_process_capture_fails_when_embeddings_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    class BoomAdapter:
+        def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("quota exceeded")
+
+    monkeypatch.setattr(
+        "app.workers.jobs.process_capture.get_embedding_adapter",
+        lambda: BoomAdapter(),
+    )
+    headers = _auth_headers("chunk_embed_fail@example.com")
+    create_resp = client.post(
+        "/api/v1/memory-items",
+        json={
+            "source_type": "webpage",
+            "url": "https://docs.example.com/embed-fail",
+            "title": "Binary Search",
+            "content": ARTICLE,
+        },
+        headers=headers,
+    )
+    item_id = create_resp.json()["data"]["id"]
+    process_capture(item_id)
+    ready = client.get(f"/api/v1/memory-items/{item_id}", headers=headers).json()["data"]
+    assert ready["status"] == "failed"
+    assert "Embedding" in (ready["processing_error"] or "")
+
+
+def test_youtube_transcript_becomes_ready_chunks() -> None:
+    headers = _auth_headers("chunk_yt@example.com")
+    create_resp = client.post(
+        "/api/v1/memory-items",
+        json={
+            "source_type": "youtube",
+            "url": "https://www.youtube.com/watch?v=rotatedbs5",
+            "title": "BS-5. Search Element in Rotated Sorted Array II",
+            "content": YOUTUBE_TRANSCRIPT,
+        },
+        headers=headers,
+    )
+    item_id = create_resp.json()["data"]["id"]
+    process_capture(item_id)
+    ready = client.get(f"/api/v1/memory-items/{item_id}", headers=headers).json()["data"]
+    assert ready["status"] == "ready"
+    assert ready["word_count"] > 20
+    assert "rotated" in ready["content"].lower()
+    db = SessionLocal()
+    try:
+        chunks = db.query(MemoryChunk).filter(MemoryChunk.memory_id == UUID(item_id)).all()
+        assert len(chunks) >= 1
+        assert all(len(chunk.content) >= 20 for chunk in chunks)
+    finally:
+        db.close()
+
+
+def test_pdf_text_becomes_ready_chunks() -> None:
+    headers = _auth_headers("chunk_pdf@example.com")
+    create_resp = client.post(
+        "/api/v1/memory-items",
+        json={
+            "source_type": "pdf",
+            "url": "file:///D:/DSA/TCS%20NQT.pdf",
+            "title": "TCS NQT.pdf",
+            "content": PDF_TEXT,
+        },
+        headers=headers,
+    )
+    item_id = create_resp.json()["data"]["id"]
+    process_capture(item_id)
+    ready = client.get(f"/api/v1/memory-items/{item_id}", headers=headers).json()["data"]
+    assert ready["status"] == "ready"
+    assert "TCS NQT" in ready["content"]
+    assert "3 hour" in ready["content"].lower()
+    db = SessionLocal()
+    try:
+        chunks = db.query(MemoryChunk).filter(MemoryChunk.memory_id == UUID(item_id)).all()
+        assert len(chunks) >= 1
+    finally:
+        db.close()

@@ -29,7 +29,9 @@ export default function AskSentioraView({
   const [input, setInput] = useState("");
   const [hasProcessedInitial, setHasProcessedInitial] = useState(false);
 
-  const readyItems = items.filter((item) => item.status === "ready");
+  const readyItems = items.filter(
+    (item) => item.status === "ready" && (item.word_count > 0 || Boolean(item.content?.trim())),
+  );
   const isIndexing = items.some((item) => item.status === "pending" || item.status === "processing");
 
   const initialWelcomeText = readyItems.length > 0
@@ -141,6 +143,10 @@ export default function AskSentioraView({
           errorText =
             err.message ||
             "Sentiora AI is not configured, and no saved memory could be used to answer.";
+        } else if (err.code === "ASK_LLM_FAILED") {
+          errorText =
+            err.message ||
+            "The language model failed while answering. Your memories were found; try again in a moment.";
         } else if (err.code === "ASK_SYSTEM_FAILED" || err.status === 502) {
           errorText =
             err.message ||
@@ -249,13 +255,21 @@ export default function AskSentioraView({
         <div>
           <h2 className="font-serif font-bold text-base text-ink-900">Ask Sentiora RAG Assistant</h2>
           <p className="text-[11px] text-ink-500">
-            Synthesizing answers strictly from your {readyItems.length} indexed memory source{readyItems.length !== 1 ? "s" : ""}.
-            {isIndexing ? " Newer captures are still processing." : ""}
+            {readyItems.length > 0
+              ? `Synthesizing answers strictly from your ${readyItems.length} indexed memory source${readyItems.length !== 1 ? "s" : ""}.`
+              : isIndexing
+                ? "Waiting for captures to finish indexing before answers can be grounded."
+                : "No indexed memories yet. Capture a page to enable grounded answers."}
+            {isIndexing && readyItems.length > 0 ? " Newer captures are still processing." : ""}
           </p>
         </div>
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-moss-100/90 backdrop-blur-xs text-moss-700 text-[10px] font-bold shadow-xs">
           <span className="w-1.5 h-1.5 rounded-full bg-moss-600 animate-pulse" />
-          RAG Engine Active ({readyItems.length} Sources)
+          {readyItems.length > 0
+            ? `RAG Engine Active (${readyItems.length} Sources)`
+            : isIndexing
+              ? "Indexing memories"
+              : "No indexed sources"}
         </span>
       </div>
 

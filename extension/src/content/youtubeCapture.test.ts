@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildPlainTextFromNodes } from "../shared/captureUtils";
+import {
+  groupTranscriptSegments,
+  parseCaptionTracks,
+  parseTimedTextJson3,
+  parseTimedTextXml,
+  decodeHtmlEntities,
+} from "./youtubeCapture";
 import type { StructuredNode } from "../shared/types";
 
 // ──────────────────────────────────────────────
@@ -147,15 +154,53 @@ describe("YouTube timedtext XML parsing", () => {
     const xml = makeTranscriptXml([
       { text: "Binary search explanation", start: 124.5, dur: 13.7 },
     ]);
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(xml, "text/xml");
-    const textNodes = doc.getElementsByTagName("text");
-    expect(textNodes.length).toBe(1);
-    const node = textNodes[0]!;
-    const start = parseFloat(node.getAttribute("start") ?? "0");
-    const dur = parseFloat(node.getAttribute("dur") ?? "0");
-    expect(start).toBeCloseTo(124.5);
-    expect(Math.round((start + dur) * 10) / 10).toBeCloseTo(138.2);
-    expect(node.textContent).toBe("Binary search explanation");
+    const segments = parseTimedTextXml(xml);
+    expect(segments).toHaveLength(1);
+    expect(segments![0]!.start).toBeCloseTo(124.5);
+    expect(segments![0]!.end).toBeCloseTo(138.2);
+    expect(segments![0]!.text).toBe("Binary search explanation");
+  });
+});
+
+describe("YouTube caption track parsing", () => {
+  it("reads captionTracks from ytInitialPlayerResponse", () => {
+    const tracks = parseCaptionTracks({
+      captions: {
+        playerCaptionsTracklistRenderer: {
+          captionTracks: [
+            { baseUrl: "https://www.youtube.com/api/timedtext?v=abc", languageCode: "en" },
+            { baseUrl: "https://www.youtube.com/api/timedtext?v=abc&kind=asr", languageCode: "en", kind: "asr" },
+          ],
+        },
+      },
+    });
+    expect(tracks).toHaveLength(2);
+    expect(tracks[0]!.languageCode).toBe("en");
+  });
+
+  it("parses json3 caption events into transcript text", () => {
+    const segments = parseTimedTextJson3(
+      JSON.stringify({
+        events: [
+          { tStartMs: 0, dDurationMs: 1200, segs: [{ utf8: "Binary " }, { utf8: "search" }] },
+          { tStartMs: 1200, dDurationMs: 900, segs: [{ utf8: "in a rotated array" }] },
+        ],
+      }),
+    );
+    expect(segments).not.toBeNull();
+    expect(segments!.map((s) => s.text).join(" ")).toContain("Binary search");
+    expect(segments!.map((s) => s.text).join(" ")).toContain("rotated array");
+  });
+
+  it("groups short caption cues into longer searchable paragraphs", () => {
+    const nodes = groupTranscriptSegments([
+      { text: "Search", start: 0, end: 1 },
+      { text: "the", start: 1, end: 1.2 },
+      { text: "rotated", start: 1.2, end: 1.8 },
+      { text: "sorted array using binary search.", start: 1.8, end: 4 },
+    ]);
+    const content = buildPlainTextFromNodes(nodes);
+    expect(content.split(/\s+/).length).toBeGreaterThan(3);
+    expect(content).toContain("binary search");
   });
 });

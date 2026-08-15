@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildPlainTextFromNodes, scoreExtractionQuality } from "../shared/captureUtils";
 import type { StructuredNode } from "../shared/types";
+import { extractTextLayerNodes } from "./pdfCapture";
 
 // ──────────────────────────────────────────────
 // PDF.js mock — avoids real HTTP fetch in unit tests
@@ -40,6 +41,26 @@ function makePdfNodes(
 // ──────────────────────────────────────────────
 // Text extraction
 // ──────────────────────────────────────────────
+describe("PDF viewer text layer", () => {
+  it("extracts readable text from Chrome PDF.js textLayer spans", () => {
+    document.body.innerHTML = `
+      <div class="textLayer" data-page-number="1">
+        <span>TCS NQT</span>
+        <span>is a 3 Hour test</span>
+        <span>covering foundation and advanced aptitude</span>
+      </div>
+    `;
+    const layer = document.querySelector(".textLayer") as HTMLElement;
+    layer.dataset.pageNumber = "1";
+    const nodes = extractTextLayerNodes(document);
+    const text = nodes.map((n) => n.text).join(" ");
+    expect(text).toContain("TCS NQT");
+    expect(text).toContain("3 Hour test");
+    expect(text.toLowerCase()).toContain("aptitude");
+    document.body.innerHTML = "";
+  });
+});
+
 describe("PDF text extraction", () => {
   it("produces paragraph nodes from PDF text items", () => {
     const nodes = makePdfNodes([

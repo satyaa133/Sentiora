@@ -8,6 +8,7 @@ Error hierarchy:
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 
@@ -19,10 +20,11 @@ from app.models.memory_item import SourceType
 from app.models.user import User
 from app.schemas.ask import AskRequest, AskResponse, SearchHit
 from app.schemas.envelope import APIResponse, ResponseMeta
-from app.services.rag_service import LLMNotConfiguredError, RagService
+from app.services.rag_service import LLMNotConfiguredError, LLMProviderError, RagService
 from app.services.retrieval_service import RetrievalService
 
 router = APIRouter(tags=["Ask Sentiora"])
+logger = logging.getLogger(__name__)
 
 
 def _meta(request: Request) -> ResponseMeta:
@@ -63,14 +65,29 @@ def ask_memories(
                 ),
             },
         ) from None
+    except LLMProviderError as exc:
+        logger.exception("Ask LLM provider failed")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "ASK_LLM_FAILED",
+                "message": (
+                    "Sentiora could not generate an AI answer because the language "
+                    f"model failed ({exc}). Your memories were retrieved; try again "
+                    "in a moment."
+                ),
+            },
+        ) from None
     except Exception:
+        logger.exception("Ask retrieval/system failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
                 "code": "ASK_SYSTEM_FAILED",
                 "message": (
                     "Sentiora could not complete this question because of a "
-                    "server error. This is not an AI-key configuration problem."
+                    "server error during retrieval. This is not an AI-key "
+                    "configuration problem."
                 ),
             },
         ) from None
