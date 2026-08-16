@@ -9,11 +9,21 @@ const rootDirectory = dirname(fileURLToPath(import.meta.url));
 const manifestSource = resolve(rootDirectory, "manifest.json");
 const manifestTarget = resolve(rootDirectory, "dist", "manifest.json");
 
+// pdfjs-dist worker — must be a static extension asset so chrome.runtime.getURL works
+const pdfjsWorkerSrc = resolve(
+  rootDirectory,
+  "../node_modules/pdfjs-dist/build/pdf.worker.min.mjs",
+);
+const pdfjsWorkerDest = resolve(rootDirectory, "dist", "pdf.worker.min.mjs");
+
 function chromeExtensionBuildPlugin() {
   return {
     name: "chrome-extension-build",
     async writeBundle() {
       await copyFile(manifestSource, manifestTarget);
+      // Copy PDF.js worker into dist so content script can reference it
+      // via chrome.runtime.getURL("pdf.worker.min.mjs")
+      await copyFile(pdfjsWorkerSrc, pdfjsWorkerDest);
 
       // Build standalone background.js as a self-contained ES module
       await viteBuild({

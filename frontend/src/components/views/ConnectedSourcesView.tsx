@@ -2,6 +2,7 @@ import { useMemo, useCallback, useRef, useState, type DragEvent, type ChangeEven
 import type { MemoryItem, SourceType } from "../../types/memory";
 import { useAuth } from "../../context/AuthContext";
 import { createMemoryItem } from "../../services/memoryService";
+import { parsePdf } from "../../utils/pdfParser";
 import {
   SOURCE_CATALOG,
   statusToUiLabel,
@@ -142,18 +143,39 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
     try {
       for (const file of Array.from(files)) {
         let textContent = "";
-        try {
-          textContent = await file.text();
-        } catch {
-          textContent = `Uploaded file document: ${file.name}`;
+        let structuredNodes = undefined;
+
+        if (file.name.toLowerCase().endsWith(".pdf")) {
+          try {
+            const buffer = await file.arrayBuffer();
+            const nodes = await parsePdf(buffer);
+            if (nodes && nodes.length > 0) {
+              structuredNodes = nodes.slice(0, 5000);
+              textContent = structuredNodes.map((n: any) => n.text).join("\n\n");
+            } else {
+              textContent = `Uploaded PDF document: ${file.name}`;
+            }
+          } catch (err) {
+            console.error("PDF parse error:", err);
+            textContent = `Uploaded PDF document: ${file.name}`;
+          }
+        } else {
+          try {
+            textContent = await file.text();
+          } catch {
+            textContent = `Uploaded file document: ${file.name}`;
+          }
         }
+
+        textContent = textContent.slice(0, 500_000);
 
         await createMemoryItem({
           title: file.name.replace(/\.[^/.]+$/, ""),
           url: `file://uploads/${encodeURIComponent(file.name)}`,
           source_type: file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "webpage",
-          content: textContent.slice(0, 8000) || `Uploaded file ${file.name}`,
+          content: textContent || `Uploaded file ${file.name}`,
           author: "Local Upload",
+          structured_content: structuredNodes,
         });
       }
 
@@ -300,7 +322,7 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.txt,.md,.epub"
+          accept=".pdf,.txt,.md"
           multiple
           onChange={handleFileChange}
           className="hidden"
@@ -325,7 +347,7 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
             <p className="text-xs font-bold text-ink-900">
               {uploading ? "Ingesting & indexing document..." : "Drag & drop PDF files here, or click to browse"}
             </p>
-            <p className="text-[11px] text-ink-500">Supports PDF, EPUB, TXT, and Markdown files up to 50MB</p>
+            <p className="text-[11px] text-ink-500">Supports PDF, TXT, and Markdown files up to 50MB</p>
           </div>
           {uploadSuccess && (
             <p className="text-xs font-bold text-moss-600 animate-fade-in">✓ {uploadSuccess}</p>

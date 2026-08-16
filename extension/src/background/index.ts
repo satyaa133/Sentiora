@@ -33,6 +33,13 @@ async function markUrlCaptured(url: string): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
+  if (message.type === "CHECK_FILE_ACCESS") {
+    chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
+      sendResponse({ isAllowed });
+    });
+    return true;
+  }
+
   if (message.type === "FETCH_PDF_BYTES") {
     handleFetchPdfBytes(message.url, sender.tab?.id)
       .then((result) => sendResponse(result))

@@ -45,14 +45,14 @@ class MemoryItemCreate(BaseModel):
     source_type: SourceType
     url: str = Field(..., min_length=1, max_length=2048)
     title: str = Field(..., min_length=1, max_length=1024)
-    content: str | None = Field(default=None, max_length=100_000)
+    content: str | None = Field(default=None, max_length=500_000)
     author: str | None = Field(default=None, max_length=512)
     favicon_url: str | None = Field(default=None, max_length=2048)
     thumbnail_url: str | None = Field(default=None, max_length=2048)
     captured_at: datetime | None = None
 
     # New fields for Capture v2
-    structured_content: list[StructuredNode] | None = None
+    structured_content: list[StructuredNode] | None = Field(default=None, max_length=5000)
     extraction: ExtractionMetadata | None = None
 
     @field_validator("url", mode="before")

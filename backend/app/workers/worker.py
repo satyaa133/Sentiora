@@ -18,9 +18,11 @@ def main() -> None:
     queues = create_queues(connection)
     with Connection(connection):
         # RQ's default Worker uses os.fork() and SIGALRM, which Windows does not support.
+        worker: Worker
         if os.name == "nt":
-            worker = SimpleWorker(queues)
-            worker.death_penalty_class = TimerDeathPenalty
+            windows_worker = SimpleWorker(queues)
+            windows_worker.death_penalty_class = TimerDeathPenalty  # type: ignore[assignment]
+            worker = windows_worker
         else:
             worker = Worker(queues)
         worker.work(with_scheduler=False)

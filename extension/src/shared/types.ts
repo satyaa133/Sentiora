@@ -98,6 +98,20 @@ export type CapturePayload =
   | YoutubeCapturePayload
   | PdfCapturePayload;
 
+export type CaptureErrorCode =
+  | "PDF_FILE_ACCESS_DENIED"
+  | "PDF_BYTES_UNAVAILABLE"
+  | "PDF_INVALID"
+  | "PDF_NO_TEXT"
+  | "YOUTUBE_PLAYER_UNREADY"
+  | "YOUTUBE_CAPTIONS_UNAVAILABLE"
+  | "YOUTUBE_TRANSCRIPT_FETCH_FAILED"
+  | "YOUTUBE_TRANSCRIPT_PARSE_FAILED"
+  | "FILE_TYPE_UNSUPPORTED"
+  | "FILE_PARSE_FAILED"
+  | "UPLOAD_FAILED"
+  | "UNKNOWN_ERROR";
+
 // ──────────────────────────────────────────────
 // Extension messaging
 // ──────────────────────────────────────────────
@@ -115,7 +129,8 @@ export type ExtensionMessage =
   | { type: "CAPTURE_RESULT"; success: boolean; error?: string }
   | { type: "SYNC_AUTH_TOKENS"; payload: AuthSyncPayload }
   | { type: "CLEAR_AUTH_TOKENS" }
-  | { type: "FETCH_PDF_BYTES"; url: string };
+  | { type: "FETCH_PDF_BYTES"; url: string }
+  | { type: "CHECK_FILE_ACCESS" };
 
 export interface ExtensionState {
   readonly isReady: boolean;

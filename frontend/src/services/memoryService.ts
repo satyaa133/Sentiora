@@ -1,5 +1,5 @@
 import apiClient from "./apiClient";
-import type { MemoryItem, MemoryItemListResponse } from "../types/memory";
+import type { MemoryItem, MemoryItemListResponse, StructuredNode, ExtractionMetadata } from "../types/memory";
 
 interface APIEnvelope<T> {
   success: boolean;
@@ -33,6 +33,8 @@ export interface CreateMemoryItemPayload {
   author?: string;
   favicon_url?: string;
   thumbnail_url?: string;
+  structured_content?: StructuredNode[];
+  extraction?: ExtractionMetadata;
 }
 
 export async function createMemoryItem(
