@@ -29,7 +29,7 @@
 
 **Repository & Scaffolding**
 * Monorepo folder structure established (`frontend/`, `backend/`, `extension/`, `shared/`)
-* Docker and `docker-compose.yml` configured for Postgres, Redis, MinIO, pgAdmin
+* Docker and `docker-compose.yml` configured for Postgres, Redis, pgAdmin
 * Environment files (`.env.example`) defined across all packages
 * Core project documentation added (`docs/`, `AGENTS.md`, `README.md`)
 * CI pipeline (`.github/workflows/ci.yml`) defined
@@ -73,7 +73,7 @@
   * Vitest suites for dashboard, extension capture utilities, and shared packages
   * GitHub Actions CI running lint, typecheck, test, and build on pull requests
 * **Current blockers**: LLM-generated (non-fallback) Ask answers still require `OPENAI_API_KEY` or `GEMINI_API_KEY` in `backend/.env`. Local fallback answers work without a key. Host Redis must be reachable for the RQ worker; Compose services use `redis://redis:6379/0`.
-* **Current branch**: `Vansh` (PR #1 → `main`, CI green at commit `0fb3b8d`)
+* **Current branch**: `main`
 
 ---
 
