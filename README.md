@@ -24,7 +24,7 @@
 | **Frontend** | React 18, Vite, TypeScript, Tailwind CSS, React Router |
 | **Extension** | Chrome Extension Manifest V3, React, TypeScript |
 | **AI / Search** | OpenAI embeddings + chat completions, pgvector semantic search, lexical fallback |
-| **Infrastructure** | Docker, Docker Compose, MinIO/S3, pgAdmin |
+| **Infrastructure** | Docker, Docker Compose, pgAdmin |
 
 ---
 
@@ -111,7 +111,7 @@ backend\.venv\Scripts\pip install -e ".\backend[dev]"
 
 ### Step 5 — Start Infrastructure Containers (Postgres + Redis)
 
-Ensure **Docker Desktop** is running, then start database services:
+Ensure **Docker Desktop** is running, then start database services (or use `npm run compose:up`):
 
 ```bash
 docker compose up -d postgres redis
@@ -154,18 +154,25 @@ Optional tuning variables: `OPENAI_EMBEDDING_MODEL`, `OPENAI_CHAT_MODEL`, `GEMIN
 
 ### Start Everything (Recommended)
 
-Run both the backend API and frontend dev server simultaneously with one command:
+Run both the backend API and frontend dev server simultaneously in one terminal:
 
 ```bash
 npm start
 ```
 
+In a separate terminal, start the background worker to process captures:
+
+```bash
+npm run dev:worker
+```
+
 ### Load the Chrome Extension
 
-1. Open Chrome and navigate to `chrome://extensions`.
-2. Enable **Developer mode** (toggle in the top right corner).
-3. Click **Load unpacked**.
-4. Select the `Sentiora/extension` (or `extension/dist` after running `npm run build --workspace extension`) directory.
+1. Build the extension bundle first: `npm run build:extension`
+2. Open Chrome and navigate to `chrome://extensions`.
+3. Enable **Developer mode** (toggle in the top right corner).
+4. Click **Load unpacked**.
+5. Select the `extension/dist` directory.
 
 ---
 
@@ -203,7 +210,7 @@ npm run test:backend       # Pytest backend tests
 
 ### ✅ Phase 0 — Environment & Foundations
 - Monorepo folder layout (`frontend/`, `backend/`, `extension/`, `shared/`)
-- Docker Compose setup for Postgres, Redis, MinIO, pgAdmin
+- Docker Compose setup for Postgres, Redis, pgAdmin
 - GitHub Actions CI pipeline configuration
 
 ### ✅ Phase 1 — Authentication
