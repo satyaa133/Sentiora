@@ -3,19 +3,8 @@ import {
   buildPlainTextFromNodes,
   scoreExtractionQuality,
 } from "../shared/captureUtils";
-import type { PdfCapturePayload, StructuredNode } from "../shared/types";
-
-import type * as PDFJS from "pdfjs-dist";
-
-let pdfjsLib: typeof PDFJS | null = null;
-
-async function getPdfJs(): Promise<typeof PDFJS> {
-  if (!pdfjsLib) {
-    pdfjsLib = await import("pdfjs-dist");
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-  }
-  return pdfjsLib;
-}
+import type { PdfCapturePayload, StructuredNode, CaptureErrorCode } from "../shared/types";
+import { extractPdfNodesFromData } from "./pdfParser";
 
 export function isPdfDocument(): boolean {
   const url = window.location.href.toLowerCase();
@@ -26,6 +15,12 @@ export function isPdfDocument(): boolean {
     document.querySelector("embed[type='application/pdf']") !== null ||
     document.querySelector("embed[src*='.pdf']") !== null
   );
+}
+
+function throwError(code: CaptureErrorCode, message: string): never {
+  const err = new Error(message) as any;
+  err.code = code;
+  throw err;
 }
 
 export function extractTextLayerNodes(root: Document | Element = document): StructuredNode[] {
@@ -74,17 +69,70 @@ function pdfSourceUrl(): string {
   return window.location.href;
 }
 
-async function fetchPdfBytes(url: string): Promise<Uint8Array | null> {
+function checkFileAccess(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "CHECK_FILE_ACCESS" }, (response) => {
+        if (chrome.runtime.lastError || !response) resolve(false);
+        else resolve(!!response.isAllowed);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function fetchFileViaXhr(url: string): Promise<Uint8Array | null> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", url, true);
+    xhr.responseType = "arraybuffer";
+    xhr.onload = () => {
+      if (xhr.status === 200 || xhr.status === 0) {
+        if (xhr.response) resolve(new Uint8Array(xhr.response));
+        else resolve(null);
+      } else {
+        resolve(null);
+      }
+    };
+    xhr.onerror = () => resolve(null);
+    try {
+      xhr.send();
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+async function fetchPdfBytes(url: string): Promise<Uint8Array> {
+  const isLocalFile = url.startsWith("file://");
+  
+  if (isLocalFile) {
+    const isAllowed = await checkFileAccess();
+    if (!isAllowed) {
+      throwError(
+        "PDF_FILE_ACCESS_DENIED", 
+        "Extension does not have access to file URLs. Please enable 'Allow access to file URLs' in the Sentiora extension settings."
+      );
+    }
+
+    // Try XHR first for file:/// URLs
+    const xhrBytes = await fetchFileViaXhr(url);
+    if (xhrBytes && xhrBytes.length > 0) return xhrBytes;
+  }
+
   try {
     const resp = await fetch(url);
     if (resp.ok) {
-      return new Uint8Array(await resp.arrayBuffer());
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength > 0) return new Uint8Array(buf);
     }
   } catch {
-    // Isolated-world fetch often fails for Chrome's PDF viewer and file:// URLs.
+    // Fall back to background worker
   }
 
-  return await new Promise((resolve) => {
+  // Fallback to background worker
+  const bgBytes = await new Promise<Uint8Array | null>((resolve) => {
     try {
       chrome.runtime.sendMessage({ type: "FETCH_PDF_BYTES", url }, (response) => {
         if (chrome.runtime.lastError || !response?.success || !response.bytes) {
@@ -97,89 +145,27 @@ async function fetchPdfBytes(url: string): Promise<Uint8Array | null> {
       resolve(null);
     }
   });
-}
 
-export async function extractPdfNodesFromData(data: Uint8Array): Promise<StructuredNode[] | null> {
-  try {
-    const pdfjs = await getPdfJs();
-    const loadingTask = pdfjs.getDocument({
-      data,
-      disableRange: true,
-      disableStream: true,
-    });
-    const pdf = await loadingTask.promise;
-    const nodes: StructuredNode[] = [];
-    let order = 0;
-
-    for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-      const lineBuffer: string[] = [];
-      let lastY: number | null = null;
-      const Y_THRESHOLD = 2;
-
-      const flush = () => {
-        const line = lineBuffer.join(" ").trim();
-        if (line.length >= 3) {
-          nodes.push({
-            id: `node-${order}`,
-            type: "paragraph",
-            text: line,
-            order: order++,
-            parent_id: null,
-            metadata: { page_number: pageNum },
-          });
-        }
-        lineBuffer.length = 0;
-      };
-
-      for (const item of textContent.items) {
-        const textItem = item as { str: string; transform: number[] };
-        const text = textItem.str;
-        if (!text?.trim()) continue;
-        const y: number = textItem.transform[5] ?? 0;
-        if (lastY !== null && Math.abs(y - lastY) > Y_THRESHOLD) {
-          flush();
-        }
-        lineBuffer.push(text);
-        lastY = y;
-      }
-      flush();
-    }
-
-    return nodes.length > 0 ? nodes : null;
-  } catch {
-    return null;
+  if (!bgBytes || bgBytes.length === 0) {
+    throwError("PDF_BYTES_UNAVAILABLE", "Could not obtain PDF bytes from the document or network.");
   }
+
+  return bgBytes;
 }
 
-async function extractPdfNodes(url: string): Promise<StructuredNode[] | null> {
+
+
+async function extractPdfNodes(url: string): Promise<StructuredNode[]> {
   const layerNodes = extractTextLayerNodes(document);
-  if (layerNodes.length > 0) {
-    return layerNodes;
+  if (layerNodes.length > 10) {
+    return layerNodes.slice(0, 5000);
   }
 
   const bytes = await fetchPdfBytes(url);
-  if (bytes && bytes.byteLength > 0) {
-    return extractPdfNodesFromData(bytes);
-  }
-
-  try {
-    const pdfjs = await getPdfJs();
-    const loadingTask = pdfjs.getDocument({
-      url,
-      disableRange: true,
-      disableStream: true,
-    });
-    const pdf = await loadingTask.promise;
-    const copy = await pdf.getData();
-    return extractPdfNodesFromData(copy);
-  } catch {
-    return null;
-  }
+  return extractPdfNodesFromData(bytes);
 }
 
-export async function capturePdf(isForce = false): Promise<PdfCapturePayload | null> {
+export async function capturePdf(isForce = false): Promise<PdfCapturePayload> {
   const started = performance.now();
   const url = pdfSourceUrl().slice(0, 2048);
 
@@ -191,15 +177,13 @@ export async function capturePdf(isForce = false): Promise<PdfCapturePayload | n
   title = title.trim().slice(0, 1024);
 
   const nodes = await extractPdfNodes(url);
-  if (!nodes || nodes.length === 0) {
-    return null;
+  let rawContent = buildPlainTextFromNodes(nodes);
+  
+  if (rawContent.length > 500_000) {
+    rawContent = rawContent.slice(0, 500_000);
   }
 
-  const rawContent = buildPlainTextFromNodes(nodes);
   const content = capExtractedContent(rawContent);
-  if (!content || content.split(/\s+/).filter(Boolean).length < 12) {
-    return null;
-  }
 
   const durationMs = Math.round(performance.now() - started);
   const { quality_score, quality_reasons } = scoreExtractionQuality(nodes, "pdf_js", "success");

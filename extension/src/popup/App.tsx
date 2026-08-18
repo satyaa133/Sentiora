@@ -382,13 +382,13 @@ export default function App() {
         );
       } else {
         fail(
-          activeTabType === "youtube"
-            ? "Could not extract a YouTube transcript for this video. Captions may be disabled."
-            : activeTabType === "pdf"
-              ? "Could not extract text from this PDF. For local files, enable Allow access to file URLs on the Sentiora extension."
-              : response?.error
-                ? String(response.error)
-                : "Could not extract readable content from this page.",
+          response?.error
+            ? String(response.error)
+            : activeTabType === "youtube"
+              ? "Could not extract a YouTube transcript for this video. Captions may be disabled."
+              : activeTabType === "pdf"
+                ? "Could not extract text from this PDF. For local files, enable Allow access to file URLs on the Sentiora extension."
+                : "Could not extract readable content from this page."
         );
         return;
       }

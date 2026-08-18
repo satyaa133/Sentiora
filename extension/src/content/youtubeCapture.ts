@@ -7,6 +7,7 @@ import type {
   YoutubeCapturePayload,
   StructuredNode,
   ExtractionStatus,
+  CaptureErrorCode
 } from "../shared/types";
 
 export function isYoutubeWatchPage(): boolean {
@@ -28,6 +29,12 @@ export function decodeHtmlEntities(text: string): string {
       String.fromCodePoint(parseInt(hex, 16)),
     )
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
+}
+
+function throwError(code: CaptureErrorCode, message: string): never {
+  const err = new Error(message) as any;
+  err.code = code;
+  throw err;
 }
 
 export interface TranscriptSegment {
@@ -101,33 +108,6 @@ export function parseCaptionTracks(playerResponse: unknown): CaptionTrack[] {
     }));
 }
 
-export function readPlayerResponseFromHtml(html: string): unknown | null {
-  const marker = "ytInitialPlayerResponse";
-  const idx = html.indexOf(marker);
-  if (idx < 0) return null;
-  const eq = html.indexOf("=", idx);
-  if (eq < 0) return null;
-  let start = eq + 1;
-  while (html[start] === " ") start += 1;
-  if (html[start] !== "{") return null;
-  let depth = 0;
-  for (let i = start; i < html.length; i++) {
-    const ch = html[i];
-    if (ch === "{") depth += 1;
-    else if (ch === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        try {
-          return JSON.parse(html.slice(start, i + 1));
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
-
 export function groupTranscriptSegments(
   segments: TranscriptSegment[],
   maxChars = 420,
@@ -193,64 +173,120 @@ async function fetchCaptionUrl(url: string): Promise<TranscriptSegment[] | null>
   }
 }
 
-async function fetchTimedText(videoId: string, lang: string): Promise<TranscriptSegment[] | null> {
-  const urls = [
-    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=json3`,
-    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}`,
-  ];
-  for (const url of urls) {
-    const segments = await fetchCaptionUrl(url);
-    if (segments) return segments;
-  }
-  return null;
-}
-
-async function fetchTranscriptFromPlayer(videoId: string): Promise<TranscriptSegment[] | null> {
-  const playerResponse =
-    readPlayerResponseFromHtml(document.documentElement.innerHTML) ??
-    (window as unknown as { ytInitialPlayerResponse?: unknown }).ytInitialPlayerResponse ??
-    null;
-  if (!playerResponse) return null;
-  const tracks = pickCaptionTracks(parseCaptionTracks(playerResponse));
-  for (const track of tracks) {
-    const withFmt = track.baseUrl.includes("fmt=") ? track.baseUrl : `${track.baseUrl}&fmt=json3`;
-    const segments = (await fetchCaptionUrl(withFmt)) ?? (await fetchCaptionUrl(track.baseUrl));
-    if (segments) return segments;
-  }
-  void videoId;
-  return null;
-}
-
-async function fetchTranscriptAnyLanguage(videoId: string): Promise<TranscriptSegment[] | null> {
-  const fromPlayer = await fetchTranscriptFromPlayer(videoId);
-  if (fromPlayer) return fromPlayer;
-
-  for (const lang of ["en", "en-US", "en-GB", "a.en"]) {
-    const segments = await fetchTimedText(videoId, lang);
-    if (segments) return segments;
-  }
-
+/**
+ * Strategy 1: read from the YouTube player element's internal API.
+ * The <ytd-player> / #movie_player element exposes getPlayerResponse()
+ * which IS updated on SPA navigation (unlike ytInitialPlayerResponse).
+ */
+function getPlayerResponseFromElement(targetVideoId: string): unknown | null {
   try {
-    const listResp = await fetch(`https://www.youtube.com/api/timedtext?type=list&v=${videoId}`);
-    if (listResp.ok) {
-      const listXml = await listResp.text();
-      const langMatch = /lang_code="([^"]+)"/.exec(listXml);
-      if (langMatch?.[1]) {
-        const segments = await fetchTimedText(videoId, langMatch[1]);
-        if (segments) return segments;
-      }
-    }
+    const playerEl = document.querySelector("#movie_player") as any;
+    if (typeof playerEl?.getPlayerResponse !== "function") return null;
+    const resp = playerEl.getPlayerResponse();
+    if (resp?.videoDetails?.videoId === targetVideoId) return resp;
   } catch {
     // ignore
   }
   return null;
 }
 
-export async function captureYoutube(isForce = false): Promise<YoutubeCapturePayload | null> {
+/**
+ * Strategy 2: ytInitialPlayerResponse — valid for the INITIAL page load only.
+ * On SPA navigation this becomes stale, so we must verify the video ID.
+ */
+function getInitialPlayerResponse(targetVideoId: string): unknown | null {
+  try {
+    const w = window as any;
+    const resp = w.ytInitialPlayerResponse;
+    if (resp?.videoDetails?.videoId === targetVideoId) return resp;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Strategy 3: ytplayer.config.args.raw_player_response (legacy path).
+ */
+function getLegacyPlayerResponse(targetVideoId: string): unknown | null {
+  try {
+    const ytplayer = (window as any).ytplayer;
+    if (!ytplayer?.config?.args?.raw_player_response) return null;
+    const resp = JSON.parse(ytplayer.config.args.raw_player_response);
+    if (resp?.videoDetails?.videoId === targetVideoId) return resp;
+  } catch {
+    // ignore parse error
+  }
+  return null;
+}
+
+/**
+ * Poll all three strategies for up to maxWaitMs.
+ * The player element strategy (Strategy 1) is authoritative for SPA navigation.
+ */
+async function getPlayerResponse(targetVideoId: string, maxWaitMs = 10000): Promise<unknown> {
+  const start = performance.now();
+  while (performance.now() - start < maxWaitMs) {
+    const resp =
+      getPlayerResponseFromElement(targetVideoId) ??
+      getInitialPlayerResponse(targetVideoId) ??
+      getLegacyPlayerResponse(targetVideoId);
+    if (resp) return resp;
+    await new Promise(resolve => setTimeout(resolve, 400));
+  }
+  return null;
+}
+
+
+async function fetchTranscriptFromPlayer(videoId: string): Promise<TranscriptSegment[]> {
+  const playerResponse = await getPlayerResponse(videoId);
+  if (!playerResponse) {
+    throwError("YOUTUBE_PLAYER_UNREADY", "YouTube player is not ready or navigated too quickly.");
+  }
+
+  const tracks = pickCaptionTracks(parseCaptionTracks(playerResponse));
+  if (tracks.length === 0) {
+    throwError("YOUTUBE_CAPTIONS_UNAVAILABLE", "No captions available for this video.");
+  }
+
+  let lastError = null;
+  for (const track of tracks) {
+    const withFmt = track.baseUrl.includes("fmt=") ? track.baseUrl : `${track.baseUrl}&fmt=json3`;
+    try {
+      const segments = (await fetchCaptionUrl(withFmt)) ?? (await fetchCaptionUrl(track.baseUrl));
+      if (segments) return segments;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  if (lastError) {
+    throwError("YOUTUBE_TRANSCRIPT_FETCH_FAILED", "Failed to fetch transcript from YouTube servers.");
+  }
+  throwError("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "Failed to parse YouTube transcript data.");
+}
+
+export async function captureYoutube(isForce = false): Promise<YoutubeCapturePayload> {
   const started = performance.now();
   const urlParams = new URLSearchParams(window.location.search);
   const videoId = urlParams.get("v");
-  if (!videoId) return null;
+  if (!videoId) {
+    throwError("YOUTUBE_PLAYER_UNREADY", "Could not find video ID in the URL.");
+  }
+
+  const segments = await fetchTranscriptFromPlayer(videoId);
+  const nodes = groupTranscriptSegments(segments);
+  const status: ExtractionStatus = nodes.length > 0 ? "success" : "insufficient_content";
+
+  if (nodes.length === 0) {
+    throwError("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "Transcript fetched but contained no selectable text.");
+  }
+
+  const rawContent = buildPlainTextFromNodes(nodes);
+  const content = capExtractedContent(rawContent);
+  if (content.split(/\s+/).filter(Boolean).length < 12) {
+    throwError("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "Transcript is too short to be meaningful.");
+  }
 
   const titleEl =
     document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
@@ -271,20 +307,6 @@ export async function captureYoutube(isForce = false): Promise<YoutubeCapturePay
   const author = rawAuthor ? rawAuthor.slice(0, 512) : undefined;
   const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
 
-  const segments = await fetchTranscriptAnyLanguage(videoId);
-  const nodes = segments && segments.length > 0 ? groupTranscriptSegments(segments) : [];
-  const status: ExtractionStatus = nodes.length > 0 ? "success" : "insufficient_content";
-
-  if (nodes.length === 0) {
-    return null;
-  }
-
-  const rawContent = buildPlainTextFromNodes(nodes);
-  const content = capExtractedContent(rawContent);
-  if (content.split(/\s+/).filter(Boolean).length < 12) {
-    return null;
-  }
-
   const durationMs = Math.round(performance.now() - started);
   const { quality_score, quality_reasons } = scoreExtractionQuality(
     nodes,
@@ -300,7 +322,7 @@ export async function captureYoutube(isForce = false): Promise<YoutubeCapturePay
     author,
     thumbnail_url: thumbnailUrl,
     captured_at: new Date().toISOString(),
-    structured_content: nodes,
+    structured_content: nodes.slice(0, 5000),
     extraction: {
       method: "youtube_transcript",
       duration_ms: durationMs,

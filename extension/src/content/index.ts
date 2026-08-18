@@ -3,17 +3,17 @@ import { isYoutubeWatchPage, captureYoutube } from "./youtubeCapture";
 import { isPdfDocument, capturePdf } from "./pdfCapture";
 import { captureWebpageTimed } from "./webpageCapture";
 import { sendCaptureMessage } from "../shared/captureUtils";
-import type { CapturePayload, ExtensionMessage } from "../shared/types";
+import type { CapturePayload, ExtensionMessage, CaptureErrorCode } from "../shared/types";
 
 export type CapturePipelineResult =
   | { status: "saved"; deduplicated?: boolean }
   | { status: "skipped"; reason: "sensitive" | "insufficient_content" | "no_payload" }
-  | { status: "failed"; error: string };
+  | { status: "failed"; error: string; errorCode?: CaptureErrorCode };
 
 export type ExtractCaptureResult =
   | { status: "ok"; payload: CapturePayload; extractionMs?: number }
   | { status: "skipped"; reason: "sensitive" | "insufficient_content" | "no_payload" }
-  | { status: "failed"; error: string };
+  | { status: "failed"; error: string; errorCode?: CaptureErrorCode };
 
 declare global {
   interface Window {
@@ -30,19 +30,27 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
   }
 
   if (isYoutubeWatchPage()) {
-    const payload = await captureYoutube(manualCapture);
-    if (!payload) {
-      return { status: "skipped", reason: "insufficient_content" };
+    try {
+      const payload = await captureYoutube(manualCapture);
+      if (!payload) {
+        return { status: "skipped", reason: "insufficient_content" };
+      }
+      return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
+    } catch (err: any) {
+      return { status: "failed", errorCode: err.code || "UNKNOWN_ERROR", error: err.message || String(err) };
     }
-    return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
   }
 
   if (isPdfDocument()) {
-    const payload = await capturePdf(manualCapture);
-    if (!payload) {
-      return { status: "skipped", reason: "insufficient_content" };
+    try {
+      const payload = await capturePdf(manualCapture);
+      if (!payload) {
+        return { status: "skipped", reason: "insufficient_content" };
+      }
+      return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
+    } catch (err: any) {
+      return { status: "failed", errorCode: err.code || "UNKNOWN_ERROR", error: err.message || String(err) };
     }
-    return { status: "ok", payload, extractionMs: Math.round(performance.now() - started) };
   }
 
   try {
