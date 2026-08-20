@@ -153,6 +153,19 @@ def _looks_insufficient(answer: str) -> bool:
     return any(s in lower for s in signals)
 
 
+def _dedupe_repeated_clauses(text: str) -> str:
+    parts = re.split(r"(?<=[.!?])\s+", " ".join((text or "").split()))
+    result: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        key = part.strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(part.strip())
+    return " ".join(result)
+
+
 def _excerpt(text: str, limit: int = 420) -> str:
     unique = _unique_sentences(text, limit=50)
     if unique:
@@ -161,7 +174,7 @@ def _excerpt(text: str, limit: int = 420) -> str:
             return collapsed
         trimmed = collapsed[:limit].rsplit(" ", 1)[0]
         return f"{trimmed}…"
-    collapsed = " ".join(text.split())
+    collapsed = _dedupe_repeated_clauses(text)
     if len(collapsed) <= limit:
         return collapsed
     trimmed = collapsed[:limit].rsplit(" ", 1)[0]
@@ -189,20 +202,26 @@ def _unique_sentences(text: str, limit: int = 5) -> list[str]:
 
 def _local_fallback_answer(chunks: list[RetrievedChunk]) -> str:
     """Deterministic answer from retrieved memory only. Does not invent facts."""
-    unique: list[RetrievedChunk] = []
-    seen: set[UUID] = set()
-    for chunk in chunks:
-        if chunk.memory_id in seen:
-            continue
-        seen.add(chunk.memory_id)
-        unique.append(chunk)
-        if len(unique) >= 4:
-            break
+    if not chunks:
+        return "I couldn't find relevant saved memory for that question."
 
-    if len(unique) == 1:
-        primary = unique[0]
+    by_memory: dict[UUID, list[RetrievedChunk]] = {}
+    memory_order: list[UUID] = []
+    for chunk in chunks:
+        if chunk.memory_id not in by_memory:
+            if len(memory_order) >= 4:
+                continue
+            by_memory[chunk.memory_id] = []
+            memory_order.append(chunk.memory_id)
+        by_memory[chunk.memory_id].append(chunk)
+
+    if len(memory_order) == 1:
+        primary = by_memory[memory_order[0]][0]
         title = (primary.title or "Untitled memory").strip()
-        cleaned = strip_instruction_like_lines(primary.content)
+        cleaned = "\n\n".join(
+            strip_instruction_like_lines(part.content)
+            for part in by_memory[memory_order[0]]
+        )
         points = _unique_sentences(cleaned, limit=5)
         if len(points) <= 1:
             body = _excerpt(cleaned)
@@ -214,9 +233,14 @@ def _local_fallback_answer(chunks: list[RetrievedChunk]) -> str:
         )
 
     parts: list[str] = []
-    for chunk in unique:
-        title = (chunk.title or "Untitled memory").strip()
-        points = _unique_sentences(strip_instruction_like_lines(chunk.content), limit=3)
+    for memory_id in memory_order:
+        chunk_parts = by_memory[memory_id]
+        primary = chunk_parts[0]
+        title = (primary.title or "Untitled memory").strip()
+        cleaned = "\n\n".join(
+            strip_instruction_like_lines(part.content) for part in chunk_parts
+        )
+        points = _unique_sentences(cleaned, limit=3)
         if not points:
             continue
         if len(points) == 1:
@@ -225,7 +249,11 @@ def _local_fallback_answer(chunks: list[RetrievedChunk]) -> str:
             nested = "; ".join(points[:3])
             parts.append(f"- {title}: {nested}")
     if not parts:
-        return _excerpt(strip_instruction_like_lines(unique[0].content))
+        first_chunks = by_memory[memory_order[0]]
+        merged = "\n\n".join(
+            strip_instruction_like_lines(part.content) for part in first_chunks
+        )
+        return _excerpt(merged)
     return "From your saved memories:\n\n" + "\n".join(parts)
 
 
