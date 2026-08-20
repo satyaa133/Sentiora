@@ -43,7 +43,17 @@ class Settings(BaseSettings):
     # Maximum total characters of retrieved chunk content sent to the LLM.
     # Keeps prompt size predictable and within token budget.
     rag_max_context_chars: int = 6000
+    # Output budget for Ask answers. Sized for structured multi-point
+    # explanations without encouraging rambling dumps.
+    rag_max_output_tokens: int = 900
     embedding_dimensions: int = 1536
+    rate_limit_login_per_minute: int = 10
+    rate_limit_register_per_minute: int = 5
+    rate_limit_chat_per_minute: int = 20
+    rate_limit_chat_per_user_per_minute: int = 10
+    failed_login_max_attempts: int = 5
+    failed_login_base_backoff_seconds: int = 2
+    failed_login_max_backoff_seconds: int = 60
 
     @field_validator("cors_origins", mode="before")
     @classmethod

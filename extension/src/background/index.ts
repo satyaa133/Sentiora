@@ -1,5 +1,6 @@
 import { extApiFetch } from "../services/extApiClient";
 import { setAccessToken, setRefreshToken, setCachedUser, clearAllAuthData } from "../services/storage";
+import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
 import { postCapturePayload, sanitizeCapturePayload } from "../shared/captureUtils";
 import type { ExtensionMessage, CapturePayload } from "../shared/types";
 
@@ -110,6 +111,10 @@ async function handleCaptureMessage(
   payload: CapturePayload,
 ): Promise<{ success: boolean; deduplicated?: boolean; error?: string }> {
   const sanitized = sanitizeCapturePayload(payload);
+  const allowLocalPdf = sanitized.source_type === "pdf" && isPdfUrl(sanitized.url);
+  if (isUrlBlocked(sanitized.url, { allowLocalPdf })) {
+    return { success: false, error: "This page is protected and cannot be captured." };
+  }
 
   if (inFlightCaptures.has(sanitized.url)) {
     console.info("[Sentiora Background] Skipping capture, URL currently in-flight:", sanitized.url);

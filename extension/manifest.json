@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Sentiora",
   "version": "0.1.0",
-  "description": "Sentiora Chrome Extension scaffold.",
+  "description": "Capture webpages, PDFs, and notes into your private Sentiora memory vault. Search saved memories and ask Sentiora for cited answers. Requires access to the current tab and local PDF files so content can be extracted on your device before it is stored in your account.",
   "action": {
     "default_title": "Sentiora",
     "default_popup": "src/popup/index.html"

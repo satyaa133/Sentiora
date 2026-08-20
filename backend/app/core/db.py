@@ -22,6 +22,7 @@ def _get_engine() -> Engine:
         settings.database_url,
         pool_pre_ping=True,
         echo=False,
+        connect_args={"connect_timeout": 10},
     )
     event.listen(engine, "connect", _register_pgvector)
     return engine

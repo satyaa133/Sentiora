@@ -20,6 +20,7 @@ from app.models.memory_item import SourceType
 from app.models.user import User
 from app.schemas.ask import AskRequest, AskResponse, SearchHit
 from app.schemas.envelope import APIResponse, ResponseMeta
+from app.core.rate_limit import limit_chat
 from app.services.rag_service import LLMNotConfiguredError, LLMProviderError, RagService
 from app.services.retrieval_service import RetrievalService
 
@@ -45,6 +46,7 @@ def ask_memories(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> APIResponse[AskResponse]:
     service = RagService(RetrievalService(db))
+    limit_chat(request, str(current_user.id))
     try:
         data = service.ask(
             user_id=current_user.id,

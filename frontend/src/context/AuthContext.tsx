@@ -8,6 +8,14 @@ import {
 } from "react";
 import apiClient from "../services/apiClient";
 import {
+  broadcastAuthLogout,
+  broadcastAuthSync,
+  clearAuthStorage,
+  getAccessToken,
+  getRefreshToken,
+  setAuthTokens,
+} from "../services/authStorage";
+import {
   completeOnboarding as completeOnboardingApi,
   fetchSourcePreferences,
   updateSourceStatus as updateSourceStatusApi,
@@ -74,11 +82,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const clearSession = useCallback(() => {
-    sessionStorage.removeItem("access_token");
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("sentiora_auth_session");
-    window.postMessage({ type: "SENTIORA_AUTH_LOGOUT" }, "*");
+    clearAuthStorage();
+    broadcastAuthLogout();
     setUser(null);
   }, []);
 
@@ -112,8 +117,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const currentUser = normalizeUser(response.data.data);
       setUser(currentUser);
 
-      const accessToken = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
-      const refreshToken = localStorage.getItem("refresh_token");
+      const accessToken = getAccessToken();
+      const refreshToken = getRefreshToken();
       if (accessToken && refreshToken) {
         const sessionData = {
           accessToken,
@@ -125,9 +130,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             onboarding_completed: currentUser.onboarding_completed,
           },
         };
-        localStorage.setItem("sentiora_auth_session", JSON.stringify(sessionData));
-        window.postMessage({ type: "SENTIORA_AUTH_SYNC", ...sessionData }, "*");
-        window.dispatchEvent(new CustomEvent("sentiora_auth_sync", { detail: sessionData }));
+        setAuthTokens(accessToken, refreshToken, sessionData.user);
+        broadcastAuthSync(sessionData);
       }
 
       return hydrateSourcePreferences(currentUser);
@@ -139,8 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const initAuth = async () => {
-      let token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
-      const refreshToken = localStorage.getItem("refresh_token");
+      let token = getAccessToken();
+      const refreshToken = getRefreshToken();
 
       if (!token && refreshToken) {
         try {
@@ -149,9 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             data: { access_token: string; refresh_token: string };
           }>("/auth/refresh-token", { refresh_token: refreshToken });
           const { access_token, refresh_token: newRefreshToken } = resp.data.data;
-          sessionStorage.setItem("access_token", access_token);
-          localStorage.setItem("access_token", access_token);
-          localStorage.setItem("refresh_token", newRefreshToken);
+          setAuthTokens(access_token, newRefreshToken);
           token = access_token;
         } catch {
           clearSession();
@@ -183,9 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }>("/auth/login", { email, password });
 
     const { access_token, refresh_token } = response.data.data;
-    sessionStorage.setItem("access_token", access_token);
-    localStorage.setItem("access_token", access_token);
-    localStorage.setItem("refresh_token", refresh_token);
+    setAuthTokens(access_token, refresh_token);
 
     const currentUser = await fetchCurrentUser();
     if (!currentUser) {

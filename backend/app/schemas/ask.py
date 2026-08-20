@@ -24,6 +24,7 @@ class AskCitation(BaseModel):
     domain: str | None = None
     heading: str | None = None
     page_number: int | None = None
+    source_available: bool = True
 
 
 class AskResponse(BaseModel):

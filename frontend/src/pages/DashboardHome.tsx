@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Sidebar, { type NavTab } from "../components/Sidebar";
 import MemoryCard from "../components/MemoryCard";
 import MemoryDetailDrawer from "../components/MemoryDetailDrawer";
@@ -10,17 +10,32 @@ import ConnectedSourcesView from "../components/views/ConnectedSourcesView";
 import PrivacyCenterView from "../components/views/PrivacyCenterView";
 import AccountSettingsView from "../components/views/AccountSettingsView";
 import AddMemoryModal from "../components/AddMemoryModal";
-import { fetchMemoryItems, deleteMemoryItem } from "../services/memoryService";
+import { useMemoryFeed } from "../hooks/useMemoryFeed";
+import { useMemoryStats } from "../hooks/useMemoryStats";
 import type { MemoryItem, SourceType } from "../types/memory";
 import { formatExtractedContent } from "../utils/contentFormatter";
 
 export default function DashboardHome() {
   const [activeTab, setActiveTab] = useState<NavTab>("dashboard");
-  const [items, setItems] = useState<MemoryItem[]>([]);
-  const [totalCount, setTotalCount] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [syncToast, setSyncToast] = useState<string | null>(null);
+  const {
+    items,
+    totalCount,
+    isLoading,
+    isSyncing,
+    loadError,
+    toast,
+    loadMemoryFeed,
+    handleManualSync,
+    handleDeleteItem,
+  } = useMemoryFeed();
+  const {
+    webpageCount,
+    pdfCount,
+    youtubeCount,
+    activeSourcesCount,
+    calculatedStorageString,
+    lastCaptureTimeFormatted,
+  } = useMemoryStats(items, totalCount);
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [selectedFilter, setSelectedFilter] = useState<"all" | SourceType>("all");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -43,75 +58,10 @@ export default function DashboardHome() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const loadMemoryFeed = useCallback(async (silent = false) => {
-    if (!silent) setIsLoading(true);
-
-    try {
-      const data = await fetchMemoryItems(1, 100);
-      setItems(data.items);
-      setTotalCount(data.total);
-    } catch (err) {
-      console.error("Error loading memory feed:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  const handleManualSync = async () => {
-    setIsSyncing(true);
-    await loadMemoryFeed(true);
-    setIsSyncing(false);
-    setSyncToast("Vault synced successfully!");
-    setTimeout(() => setSyncToast(null), 2500);
-  };
-
-  useEffect(() => {
-    loadMemoryFeed();
-
-    // Fast 5-second background poll for real-time extension captures
-    const interval = setInterval(() => {
-      loadMemoryFeed(true);
-    }, 5000);
-
-    const handleFocus = () => loadMemoryFeed(true);
-    window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", handleFocus);
-
-    // Extension messaging listener for instant updates
-    const winChrome = (window as unknown as { chrome?: { runtime?: { onMessage?: { addListener: (fn: (msg: { type?: string }) => void) => void; removeListener: (fn: (msg: { type?: string }) => void) => void } } } }).chrome;
-    if (winChrome?.runtime?.onMessage) {
-      const listener = (msg: { type?: string }) => {
-        if (msg?.type === "REFRESH_MEMORY_FEED") {
-          loadMemoryFeed(true);
-        }
-      };
-      winChrome.runtime.onMessage.addListener(listener);
-      return () => {
-        clearInterval(interval);
-        window.removeEventListener("focus", handleFocus);
-        document.removeEventListener("visibilitychange", handleFocus);
-        winChrome.runtime?.onMessage?.removeListener(listener);
-      };
-    }
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("focus", handleFocus);
-      document.removeEventListener("visibilitychange", handleFocus);
-    };
-  }, [loadMemoryFeed]);
-
-  const handleDeleteItem = async (id: string) => {
-    try {
-      await deleteMemoryItem(id);
-      setItems((prev) => prev.filter((item) => item.id !== id));
-      setTotalCount((prev) => Math.max(0, prev - 1));
-      if (selectedItem?.id === id) {
-        setSelectedItem(null);
-      }
-    } catch (err) {
-      console.error("Error deleting memory item:", err);
-      alert("Could not delete memory item. Please try again.");
+  const onDeleteItem = async (id: string) => {
+    const deleted = await handleDeleteItem(id);
+    if (deleted && selectedItem?.id === id) {
+      setSelectedItem(null);
     }
   };
 
@@ -135,61 +85,6 @@ export default function DashboardHome() {
       return true;
     });
   }, [items, selectedFilter, searchQuery]);
-
-  // Dynamic source type counts (case-insensitive)
-  const webpageCount = useMemo(
-    () => items.filter((i) => i.source_type?.toLowerCase() === "webpage").length,
-    [items],
-  );
-  const pdfCount = useMemo(
-    () => items.filter((i) => i.source_type?.toLowerCase() === "pdf").length,
-    [items],
-  );
-  const youtubeCount = useMemo(
-    () => items.filter((i) => i.source_type?.toLowerCase() === "youtube").length,
-    [items],
-  );
-
-  // Active source channels count
-  const activeSourcesCount = useMemo(() => {
-    const typesPresent = new Set(items.map((i) => i.source_type));
-    return Math.max(typesPresent.size, 1);
-  }, [items]);
-
-  // Dynamic storage size calculation from actual memory items content & metadata
-  const calculatedStorageString = useMemo(() => {
-    if (!items || items.length === 0) return "0 KB";
-    let totalBytes = 0;
-    for (const item of items) {
-      const text = (item.title || "") + (item.content || "") + (item.url || "") + (item.summary || "");
-      totalBytes += new Blob([text]).size + 512;
-    }
-    if (totalBytes < 1024 * 1024) {
-      return `${(totalBytes / 1024).toFixed(1)} KB`;
-    } else if (totalBytes < 1024 * 1024 * 1024) {
-      return `${(totalBytes / (1024 * 1024)).toFixed(1)} MB`;
-    } else {
-      return `${(totalBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-    }
-  }, [items]);
-
-  // Dynamic relative time string for most recent capture
-  const lastCaptureTimeFormatted = useMemo(() => {
-    if (!items || items.length === 0 || !items[0]?.captured_at) return "None";
-    try {
-      const date = new Date(items[0].captured_at);
-      const now = new Date();
-      const diffSecs = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-      if (diffSecs < 60) return "Just now";
-      if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)}m ago`;
-      if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)}h ago`;
-      if (diffSecs < 172800) return "Yesterday";
-      return `${Math.floor(diffSecs / 86400)}d ago`;
-    } catch {
-      return "Recently";
-    }
-  }, [items]);
 
   return (
     <div className="relative flex h-screen w-screen overflow-hidden bg-parchment-0 text-ink-900 font-sans selection:bg-moss-100 selection:text-moss-700">
@@ -226,9 +121,9 @@ export default function DashboardHome() {
           </div>
 
           <div className="flex items-center gap-2.5">
-            {syncToast && (
+            {toast && (
               <span className="text-[11px] font-bold text-moss-600 bg-moss-50 border border-moss-200/60 px-2.5 py-1 rounded-lg animate-fade-in">
-                ✓ {syncToast}
+                {toast}
               </span>
             )}
 
@@ -324,10 +219,21 @@ export default function DashboardHome() {
                 {/* Cards Feed */}
                 {isLoading ? (
                   <MemoryFeedSkeleton />
+                ) : loadError ? (
+                  <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-10 text-center space-y-3 shadow-card">
+                    <p className="text-base font-serif font-bold text-ink-900">Could not load memories</p>
+                    <p className="text-xs text-ink-500 leading-relaxed max-w-sm mx-auto">{loadError}</p>
+                    <button
+                      onClick={() => void loadMemoryFeed()}
+                      className="text-xs font-bold text-moss-600 hover:underline"
+                    >
+                      Try again
+                    </button>
+                  </div>
                 ) : filteredItems.length > 0 ? (
                   <div className="space-y-4">
                     {filteredItems.slice(0, 6).map((item) => (
-                      <MemoryCard key={item.id} item={item} onSelect={setSelectedItem} onDelete={handleDeleteItem} />
+                      <MemoryCard key={item.id} item={item} onSelect={setSelectedItem} onDelete={onDeleteItem} />
                     ))}
                   </div>
                 ) : (
@@ -590,7 +496,7 @@ export default function DashboardHome() {
       <MemoryDetailDrawer
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
-        onDelete={handleDeleteItem}
+        onDelete={onDeleteItem}
         onAskAnything={(item) => {
           setAskQuery(`What is "${item.title}" about?`);
           setAskMemoryId(item.id);

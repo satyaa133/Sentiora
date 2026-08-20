@@ -13,6 +13,7 @@ from app.schemas.memory_item import (
     MemoryItemListResponse,
     MemoryItemResponse,
 )
+from app.core.sensitive_domains import is_sensitive_url
 from app.services.content_normalizer import extract_domain, canonicalize_url, compute_content_hash, normalize_content
 from app.workers.queue import create_queues
 
@@ -30,6 +31,14 @@ class MemoryService:
     ) -> MemoryItemResponse:
         # Perform URL normalization & parameter filtering
         canonical_url = canonicalize_url(payload.url)
+        if is_sensitive_url(canonical_url, payload.source_type):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "CAPTURE_SENSITIVE_BLOCKED",
+                    "message": "This URL is protected and cannot be saved as a memory.",
+                },
+            )
         
         # Determine extraction metadata values
         ext_method = payload.extraction.method if payload.extraction else None

@@ -66,5 +66,13 @@ jobs:
           DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
         run: npm run test
 
+      - name: Install Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end API flow
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
+        run: npm run test:e2e
+
       - name: Build
         run: npm run build

@@ -23,8 +23,8 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.app_environment == "development" else None,
+    redoc_url="/redoc" if settings.app_environment == "development" else None,
 )
 
 
@@ -73,6 +73,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
             "error": {"code": code, "message": message, "details": None},
             "meta": _meta(request),
         },
+        headers=dict(exc.headers or {}),
     )
 
 

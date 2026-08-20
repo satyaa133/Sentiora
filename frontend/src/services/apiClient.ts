@@ -1,4 +1,5 @@
 import axios, { type AxiosError } from "axios";
+import { clearAuthStorage, getAccessToken, getRefreshToken, setAuthTokens } from "./authStorage";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -10,7 +11,7 @@ const apiClient = axios.create({
 
 // Attach access token on every request
 apiClient.interceptors.request.use((config) => {
-  const token = sessionStorage.getItem("access_token") || localStorage.getItem("access_token");
+  const token = getAccessToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -63,7 +64,7 @@ apiClient.interceptors.response.use(
       if (originalRequest) originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = localStorage.getItem("refresh_token");
+      const refreshToken = getRefreshToken();
       if (!refreshToken) {
         isRefreshing = false;
         window.dispatchEvent(new Event("auth:logout"));
@@ -75,9 +76,7 @@ apiClient.interceptors.response.use(
           refresh_token: refreshToken,
         });
         const { access_token, refresh_token: newRefreshToken } = response.data.data;
-        sessionStorage.setItem("access_token", access_token);
-        localStorage.setItem("access_token", access_token);
-        localStorage.setItem("refresh_token", newRefreshToken);
+        setAuthTokens(access_token, newRefreshToken);
 
         processQueue(null, access_token);
         if (originalRequest) {
@@ -87,9 +86,7 @@ apiClient.interceptors.response.use(
         return apiClient(originalRequest!);
       } catch (refreshError) {
         processQueue(refreshError, null);
-        sessionStorage.removeItem("access_token");
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
+        clearAuthStorage();
         window.dispatchEvent(new Event("auth:logout"));
         return Promise.reject(refreshError);
       } finally {
@@ -112,6 +109,9 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
     };
     const code = response.data?.error?.code;
     const message = response.data?.error?.message;
+    if (response.status === 429 || code === "RATE_LIMITED" || code === "AUTH_LOGIN_THROTTLED") {
+      return message || "Too many attempts. Please wait a moment and try again.";
+    }
     if (code === "AUTH_INVALID_CREDENTIALS") {
       return "Invalid email or password. Please try again.";
     }

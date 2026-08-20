@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
+from app.core.login_backoff import login_backoff
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -64,12 +65,14 @@ class AuthService:
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> AuthTokenData:
+        login_backoff.precheck(req.email, ip_address)
         user = self.user_repo.get_by_email(req.email)
         if (
             not user
             or not user.password_hash
             or not verify_password(req.password, user.password_hash)
         ):
+            login_backoff.record_failure(req.email, ip_address)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={
@@ -86,6 +89,8 @@ class AuthService:
                     "message": "This account has been disabled.",
                 },
             )
+
+        login_backoff.record_success(req.email, ip_address)
 
         session_expires = datetime.now(UTC) + timedelta(
             days=settings.refresh_token_expire_days
