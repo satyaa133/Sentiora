@@ -3,6 +3,7 @@ import { APP_NAME } from "@shared/constants/app";
 import PopupAuth from "./PopupAuth";
 import { getAccessToken, getRefreshToken, getCachedUser, setCachedUser, clearAllAuthData, type CachedUser } from "../services/storage";
 import { extApiFetch, ExtApiError, attemptTokenRefresh } from "../services/extApiClient";
+import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
 import { sendCaptureMessage } from "../shared/captureUtils";
 import type { CapturePayload } from "../shared/types";
 
@@ -242,6 +243,11 @@ export default function App() {
     }
 
     const urlStr = tab.url.slice(0, 2048);
+    if (isUrlBlocked(urlStr, { allowLocalPdf: isPdfUrl(urlStr) })) {
+      setCaptureError("This page is protected and cannot be captured.");
+      setViewState("sensitive");
+      return false;
+    }
     const titleStr = tab.title.trim().slice(0, 1024);
     let sourceType: "webpage" | "youtube" | "pdf" = "webpage";
     let thumbnailUrl: string | undefined;
@@ -429,7 +435,7 @@ export default function App() {
         body: JSON.stringify({
           source_type: "webpage",
           title: noteTitle.trim(),
-          url: activeTabUrl || "https://sentiora.app/notes",
+          url: `https://sentiora.app/notes/${Date.now()}`,
           content: noteContent.trim() || noteTitle.trim(),
         }),
       });

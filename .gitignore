@@ -38,6 +38,9 @@ coverage/
 .turbo/
 .npm/
 .yarn/
+playwright-report/
+test-results/
+blob-report/
 *.tsbuildinfo
 vite.svg
 

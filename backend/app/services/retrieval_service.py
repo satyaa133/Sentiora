@@ -19,6 +19,23 @@ from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.services.embedding_service import get_embedding_adapter
 
+_DOCUMENT_CONTEXT_HINTS = (
+    "summarize",
+    "summary",
+    "key details",
+    "key points",
+    "explain",
+    "walk through",
+    "walk me through",
+)
+
+
+def needs_document_context(query: str) -> bool:
+    """True when the question needs more of a single source, not just a snippet."""
+    lower = (query or "").lower()
+    return any(hint in lower for hint in _DOCUMENT_CONTEXT_HINTS)
+
+
 logger = logging.getLogger(__name__)
 
 _STOPWORDS = {
@@ -140,18 +157,22 @@ class RetrievalService:
         if tokens:
             if lexical:
                 lexical_ids = {chunk.memory_id for chunk in lexical}
-                # Token hits are the relevance gate so a weak vector match cannot
-                # hide the memory that actually contains the asked-about terms.
                 semantic_keep = [chunk for chunk in semantic if chunk.memory_id in lexical_ids]
                 merged = self._deduplicate_chunks(semantic_keep + lexical)
-                return merged[:limit]
-            if semantic:
-                return self._deduplicate_chunks(semantic)[:limit]
-            return []
+            elif semantic:
+                merged = self._deduplicate_chunks(semantic)
+            else:
+                return []
+        else:
+            merged = self._deduplicate_chunks(
+                self._recent_chunks(user_id, limit, source_type, memory_id)
+            )
 
-        return self._deduplicate_chunks(
-            self._recent_chunks(user_id, limit, source_type, memory_id)
-        )[:limit]
+        if needs_document_context(query) and merged:
+            merged = self._expand_primary_memory(
+                user_id, merged, limit=max(limit, 8), source_type=source_type
+            )
+        return merged[: max(limit, 8) if needs_document_context(query) else limit]
 
     def _base_query(
         self,
@@ -287,6 +308,42 @@ class RetrievalService:
             self._base_query(user_id, source_type, memory_id)
             .order_by(MemoryItem.captured_at.desc(), MemoryChunk.chunk_index.asc())
             .limit(top_k)
+        )
+        rows = self.db.execute(stmt).all()
+        return [self._to_retrieved(chunk, item, None, lexical=True) for chunk, item in rows]
+
+    def _expand_primary_memory(
+        self,
+        user_id: UUID,
+        chunks: list[RetrievedChunk],
+        limit: int,
+        source_type: SourceType | None,
+    ) -> list[RetrievedChunk]:
+        """Pull additional chunks from the top-ranked memory for summary-style questions."""
+        primary_id = chunks[0].memory_id
+        extra = self._chunks_for_memory(user_id, primary_id, source_type, limit)
+        seen = {chunk.chunk_id for chunk in chunks}
+        expanded = list(chunks)
+        for chunk in extra:
+            if chunk.chunk_id in seen:
+                continue
+            expanded.append(chunk)
+            seen.add(chunk.chunk_id)
+            if len(expanded) >= limit:
+                break
+        return self._deduplicate_chunks(expanded)
+
+    def _chunks_for_memory(
+        self,
+        user_id: UUID,
+        memory_id: UUID,
+        source_type: SourceType | None,
+        limit: int,
+    ) -> list[RetrievedChunk]:
+        stmt = (
+            self._base_query(user_id, source_type, memory_id)
+            .order_by(MemoryChunk.chunk_index.asc())
+            .limit(limit)
         )
         rows = self.db.execute(stmt).all()
         return [self._to_retrieved(chunk, item, None, lexical=True) for chunk, item in rows]

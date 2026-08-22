@@ -15,6 +15,7 @@ export interface AskCitation {
   domain: string | null;
   heading: string | null;
   page_number: number | null;
+  source_available?: boolean;
 }
 
 export interface AskResponse {

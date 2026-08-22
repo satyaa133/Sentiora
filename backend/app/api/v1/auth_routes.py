@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.deps import get_current_user, get_db
+from app.core.rate_limit import limit_login, limit_register
 from app.models.user import User
 from app.schemas.auth import (
     AuthTokenData,
@@ -42,6 +43,7 @@ def register(
     db: Annotated[DBSession, Depends(get_db)],
 ) -> APIResponse[RegisterResponseData]:
     service = AuthService(db)
+    limit_register(request)
     data = service.register(req)
     return APIResponse(data=data, meta=_meta(request))
 
@@ -58,6 +60,7 @@ def login(
     db: Annotated[DBSession, Depends(get_db)],
 ) -> APIResponse[AuthTokenData]:
     service = AuthService(db)
+    limit_login(request)
     user_agent = request.headers.get("user-agent")
     ip_address = request.client.host if request.client else None
     # TestClient shim: FastAPI's TestClient reports client host as 'testclient'

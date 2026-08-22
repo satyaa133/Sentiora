@@ -1,4 +1,6 @@
-import { isUrlBlocked } from "../shared/blocklist";
+import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
+
+export type SensitivityReason = "blocked_url" | "noindex" | "password_field";
 
 function isVisiblePasswordField(): boolean {
   const passwordInputs = document.querySelectorAll<HTMLInputElement>('input[type="password"]');
@@ -11,23 +13,27 @@ function isVisiblePasswordField(): boolean {
   return false;
 }
 
-export function isCurrentPageSensitive(manualCapture = false): boolean {
+export function getPageSensitivityReason(): SensitivityReason | null {
   const url = window.location.href;
+  const allowLocalPdf = isPdfUrl(url);
 
-  if (isUrlBlocked(url)) {
-    return true;
+  if (isUrlBlocked(url, { allowLocalPdf })) {
+    return "blocked_url";
   }
 
   const noindexMeta = document.querySelector('meta[name="robots"][content*="noindex"]');
   if (noindexMeta) {
-    return true;
+    return "noindex";
   }
 
-  // Auto-capture only: skip pages with visible login/password fields.
-  // Manual "Capture Memory Now" bypasses this check.
-  if (!manualCapture && isVisiblePasswordField()) {
-    return true;
+  // Manual capture must not bypass password-field protection.
+  if (isVisiblePasswordField()) {
+    return "password_field";
   }
 
-  return false;
+  return null;
+}
+
+export function isCurrentPageSensitive(_manualCapture = false): boolean {
+  return getPageSensitivityReason() !== null;
 }

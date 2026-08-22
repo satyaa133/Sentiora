@@ -19,8 +19,8 @@
 | Phase 5: Frontend Dashboard | ✅ Completed | 100% | Memory Feed UI, compact timeline cards, detail drawer, stats, auto-sync |
 | Phase 6: Search | ✅ Completed | 100% | Semantic pgvector search, lexical fallback, user isolation |
 | Phase 7: AI / RAG Chat | ✅ Completed | 100% | Real LLM integration (OpenAI), grounded RAG pipeline, citations, 503 error handling, content dedup |
-| Phase 8: Testing | 🟡 In Progress | 75% | Pytest suites running; E2E Playwright pending |
-| Phase 9: Deployment & Launch | ⏳ Planned | 0% | Staging/Prod environments, monitoring, Web Store |
+| Phase 8: Testing | 🟡 In Progress | 90% | Pytest + Vitest coverage; Playwright API E2E added |
+| Phase 9: Deployment & Launch | 🟡 In Progress | 40% | Compose, env, indexes, extension description; Web Store listing still pending |
 
 
 ---

@@ -24,7 +24,7 @@ declare global {
 export async function extractCapturePayload(manualCapture = false): Promise<ExtractCaptureResult> {
   const started = performance.now();
 
-  if (isCurrentPageSensitive(manualCapture) && !manualCapture) {
+  if (isCurrentPageSensitive(manualCapture)) {
     console.info("[Sentiora] Page capture skipped: page flagged as sensitive or blocked.");
     return { status: "skipped", reason: "sensitive" };
   }
@@ -238,6 +238,9 @@ function initContentScript(): void {
 
   // 1. Listen for real-time postMessage & custom DOM auth events from Dashboard
   window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) {
+      return;
+    }
     if (event.data?.type === "SENTIORA_AUTH_SYNC") {
       syncAuth(event.data);
     } else if (event.data?.type === "SENTIORA_AUTH_LOGOUT") {

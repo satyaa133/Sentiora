@@ -3,7 +3,10 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "noEmit": true,
-    "types": ["node", "vite/client", "vitest/globals"]
+    "types": ["node", "vite/client", "vitest/globals"],
+    "paths": {
+      "@shared/*": ["../shared/src/*"]
+    }
   },
   "include": ["src", "vite.config.ts", "index.html"]
 }

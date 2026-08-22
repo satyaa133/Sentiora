@@ -202,6 +202,14 @@ export default function AskSentioraView({
         {lines.map((line, idx) => {
           if (!line.trim()) return <div key={idx} className="h-1" />;
 
+          if (line.startsWith("## ")) {
+            return (
+              <h3 key={idx} className="font-serif font-bold text-sm text-ink-900 mt-2 mb-1">
+                {formatInlineText(line.replace(/^##\s+/, ""))}
+              </h3>
+            );
+          }
+
           if (line.startsWith("### ")) {
             return (
               <h4 key={idx} className="font-serif font-bold text-xs sm:text-sm text-ink-900 mt-2 mb-1">
@@ -210,10 +218,10 @@ export default function AskSentioraView({
             );
           }
 
-          if (line.startsWith("• ") || line.startsWith("- ")) {
+          if (/^\d+\.\s+/.test(line) || line.startsWith("• ") || line.startsWith("- ")) {
             return (
               <li key={idx} className="ml-4 list-disc text-ink-800">
-                {formatInlineText(line.replace(/^[•-]\s*/, ""))}
+                {formatInlineText(line.replace(/^\d+\.\s+/, "").replace(/^[•-]\s*/, ""))}
               </li>
             );
           }
@@ -295,14 +303,14 @@ export default function AskSentioraView({
             className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
           >
             <div
-              className={`max-w-xl p-4 rounded-2xl text-xs leading-relaxed space-y-2 relative group transition-all ${
+              className={`p-4 rounded-2xl text-xs leading-relaxed space-y-2 relative group transition-all ${
                 msg.sender === "user"
-                  ? "bg-moss-600/95 text-white rounded-br-none shadow-md"
+                  ? "max-w-xl bg-moss-600/95 text-white rounded-br-none shadow-md"
                   : msg.isError
-                  ? "bg-rose-50/90 border border-rose-200/90 text-rose-950 rounded-bl-none shadow-card"
+                  ? "max-w-2xl bg-rose-50/90 border border-rose-200/90 text-rose-950 rounded-bl-none shadow-card"
                   : msg.isNotFound
-                  ? "bg-amber-50/90 border border-amber-200/90 text-amber-950 rounded-bl-none shadow-card"
-                  : "bg-white/90 backdrop-blur-md border border-parchment-200/80 text-ink-900 rounded-bl-none shadow-card hover:shadow-md"
+                  ? "max-w-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 rounded-bl-none shadow-card"
+                  : "max-w-2xl bg-white/90 backdrop-blur-md border border-parchment-200/80 text-ink-900 rounded-bl-none shadow-card hover:shadow-md"
               }`}
             >
               {msg.sender === "ai" && (
@@ -341,7 +349,7 @@ export default function AskSentioraView({
                   {msg.citations.map((c, i) => (
                     <a
                       key={i}
-                      href={c.url}
+                      href={c.source_available === false || c.url.startsWith("file:") ? undefined : c.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-between p-2 rounded-lg bg-parchment-50/90 backdrop-blur-xs border border-parchment-200/80 text-[11px] text-moss-600 hover:underline font-medium transition-colors"
@@ -349,6 +357,7 @@ export default function AskSentioraView({
                       <span className="truncate">
                         [{i + 1}] {c.title}
                         {c.page_number ? ` · p.${c.page_number}` : ""}
+                        {c.source_available === false || c.url.startsWith("file:") ? " · original unavailable" : ""}
                       </span>
                       <svg className="w-3 h-3 text-moss-600 shrink-0 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
