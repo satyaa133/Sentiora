@@ -22,7 +22,7 @@ interface IntegrationChannel {
   description: string;
   type: "Automatic" | "Manual" | "Sync Integration";
   category: "browser" | "docs" | "social" | "developer" | "ai";
-  status: "Active" | "Paused" | "Ready to Connect";
+  status: "Active" | "Paused" | "Ready to Connect" | "YouTube Capture in Progress";
   count?: number;
   lastSync?: string;
 }
@@ -96,7 +96,7 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
         description: source.description,
         type: source.type,
         category: source.category,
-        status: statusToUiLabel(persistedStatus),
+        status: source.id === "youtube" ? "YouTube Capture in Progress" : statusToUiLabel(persistedStatus),
         count,
         lastSync: memoryType ? getLatestSyncTime(memoryType) : "Ready to sync",
       };
@@ -142,6 +142,9 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
 
     try {
       for (const file of Array.from(files)) {
+        if (file.size > 50 * 1024 * 1024) {
+          throw new Error(`${file.name} exceeds the 50 MB upload limit.`);
+        }
         let textContent = "";
         let structuredNodes = undefined;
 
@@ -288,6 +291,8 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
                     className={`text-xs font-semibold px-2.5 py-1 rounded-full backdrop-blur-xs ${
                       src.status === "Active"
                         ? "bg-moss-100/90 text-moss-700"
+                        : src.status === "YouTube Capture in Progress"
+                          ? "bg-amber-100/90 text-amber-700"
                         : "bg-rose-100/90 text-rose-700"
                     }`}
                   >
@@ -295,10 +300,12 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
                   </span>
                   <button
                     onClick={() => toggleSourceStatus(src.id)}
-                    disabled={isUpdating === src.id}
+                    disabled={isUpdating === src.id || src.status === "YouTube Capture in Progress"}
                     className="text-xs text-ink-700 hover:text-ink-900 underline font-medium disabled:opacity-50"
                   >
-                    {isUpdating === src.id
+                    {src.status === "YouTube Capture in Progress"
+                      ? "In progress"
+                      : isUpdating === src.id
                       ? "Saving…"
                       : src.status === "Active"
                         ? "Pause"

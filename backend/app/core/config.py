@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Self
 
 from pydantic import Field, field_validator, model_validator
@@ -8,12 +9,15 @@ DEFAULT_JWT_SECRET_KEY = "DEV_SECRET_KEY_CHANGE_IN_PRODUCTION_SENTIORA_2026"
 DEFAULT_DATABASE_URL = (
     "postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora"
 )
+BACKEND_DIR = Path(__file__).resolve().parents[2]
+ROOT_ENV_FILE = BACKEND_DIR.parent / ".env"
+BACKEND_ENV_FILE = BACKEND_DIR / ".env"
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Load repo-root .env first, then backend/.env so local backend settings win.
-        env_file=("../.env", ".env"),
+        env_file=(ROOT_ENV_FILE, BACKEND_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -25,6 +29,7 @@ class Settings(BaseSettings):
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://localhost:6379/0"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    trusted_proxy_ips: list[str] = Field(default_factory=list)
     # MUST be overridden via JWT_SECRET_KEY env var in staging/production.
     jwt_secret_key: str = DEFAULT_JWT_SECRET_KEY
     jwt_algorithm: str = "HS256"

@@ -16,3 +16,7 @@ def test_health_endpoint_returns_ok() -> None:
     assert payload["data"]["service"] == "Sentiora Backend"
     assert payload["meta"]["request_id"].startswith("req_")
     assert "timestamp" in payload["meta"]
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["content-security-policy"] == "default-src 'self'"

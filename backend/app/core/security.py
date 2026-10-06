@@ -1,7 +1,7 @@
 import hashlib
 import uuid
 from datetime import datetime, timedelta, UTC
-from typing import Any
+from typing import Any, cast
 
 import bcrypt
 import jwt
@@ -81,6 +81,6 @@ def decode_jwt_token(token: str) -> dict[str, Any]:
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        return payload
+        return cast(dict[str, Any], payload)
     except jwt.PyJWTError as e:
         raise ValueError(f"Invalid token: {e}") from e

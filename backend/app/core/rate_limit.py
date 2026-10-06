@@ -40,14 +40,16 @@ class SlidingWindowLimiter:
 limiter = SlidingWindowLimiter()
 
 
-def client_ip(request: Request) -> str:
+def client_ip(request: Request, settings: Settings | None = None) -> str:
+    cfg = settings or get_settings()
+    client_host = request.client.host if request.client else None
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
+    if forwarded and client_host in cfg.trusted_proxy_ips:
         return forwarded.split(",")[0].strip()
-    if request.client and request.client.host:
-        if request.client.host == "testclient":
+    if client_host:
+        if client_host == "testclient":
             return "127.0.0.1"
-        return request.client.host
+        return client_host
     return "unknown"
 
 
@@ -67,7 +69,7 @@ def enforce_rate_limit(key: str, limit: int, window_seconds: int) -> None:
 def limit_login(request: Request, settings: Settings | None = None) -> None:
     cfg = settings or get_settings()
     enforce_rate_limit(
-        f"login:ip:{client_ip(request)}",
+        f"login:ip:{client_ip(request, cfg)}",
         cfg.rate_limit_login_per_minute,
         60,
     )
@@ -76,7 +78,7 @@ def limit_login(request: Request, settings: Settings | None = None) -> None:
 def limit_register(request: Request, settings: Settings | None = None) -> None:
     cfg = settings or get_settings()
     enforce_rate_limit(
-        f"register:ip:{client_ip(request)}",
+        f"register:ip:{client_ip(request, cfg)}",
         cfg.rate_limit_register_per_minute,
         60,
     )
@@ -84,7 +86,7 @@ def limit_register(request: Request, settings: Settings | None = None) -> None:
 
 def limit_chat(request: Request, user_id: str, settings: Settings | None = None) -> None:
     cfg = settings or get_settings()
-    ip = client_ip(request)
+    ip = client_ip(request, cfg)
     enforce_rate_limit(f"chat:ip:{ip}", cfg.rate_limit_chat_per_minute, 60)
     enforce_rate_limit(
         f"chat:user:{user_id}",
