@@ -123,6 +123,7 @@ export interface AuthSyncPayload {
 }
 
 export type ExtensionMessage =
+  | { type: "GET_YOUTUBE_PLAYER_RESPONSE"; videoId: string }
   | { type: "CAPTURE_WEBPAGE"; payload: WebpageCapturePayload }
   | { type: "CAPTURE_YOUTUBE"; payload: YoutubeCapturePayload }
   | { type: "CAPTURE_PDF"; payload: PdfCapturePayload }

@@ -34,6 +34,13 @@ async function markUrlCaptured(url: string): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
+  if (message.type === "GET_YOUTUBE_PLAYER_RESPONSE") {
+    getYoutubePlayerResponse(message.videoId, sender.tab?.id, sender.frameId ?? 0)
+      .then((playerResponse) => sendResponse({ success: Boolean(playerResponse), playerResponse }))
+      .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+
   if (message.type === "CHECK_FILE_ACCESS") {
     chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
       sendResponse({ isAllowed });
@@ -110,6 +117,71 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     return true;
   }
 });
+
+async function getYoutubePlayerResponse(
+  videoId: string,
+  tabId: number | undefined,
+  frameId: number,
+): Promise<unknown | null> {
+  if (tabId == null) return null;
+
+  const maxAttempts = 25;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frameId] },
+        world: "MAIN",
+        func: (expectedVideoId: string) => {
+          const url = new URL(location.href);
+          const pathParts = url.pathname.split("/").filter(Boolean);
+          const currentVideoId =
+            url.searchParams.get("v") ||
+            (pathParts[0] === "shorts" || pathParts[0] === "embed" ? pathParts[1] : null) ||
+            (location.hostname === "youtu.be" ? pathParts[0] : null);
+          if (currentVideoId !== expectedVideoId) return null;
+
+          const player = document.querySelector("#movie_player") as {
+            getPlayerResponse?: () => {
+              videoDetails?: { videoId?: string; title?: string; author?: string };
+              captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: unknown[] } };
+            };
+          } | null;
+          const response = player?.getPlayerResponse?.() || (window as any).ytInitialPlayerResponse;
+          if (response?.videoDetails?.videoId !== expectedVideoId) return null;
+
+          return {
+            videoDetails: {
+              videoId: response.videoDetails.videoId,
+              title: response.videoDetails.title,
+              author: response.videoDetails.author,
+            },
+            captions: {
+              playerCaptionsTracklistRenderer: {
+                captionTracks: (response.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []).map((track: any) => ({
+                  baseUrl: track.baseUrl,
+                  languageCode: track.languageCode,
+                  kind: track.kind,
+                })),
+              },
+            },
+          };
+        },
+        args: [videoId],
+      });
+      const result = injected[0]?.result;
+      if (result) {
+        console.info("[Sentiora Capture] Main-world player response ready:", videoId);
+        return result;
+      }
+    } catch (err) {
+      console.warn("[Sentiora Capture] Main-world player response attempt failed:", err);
+    }
+    if (attempt < maxAttempts - 1) await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  console.warn("[Sentiora Capture] Main-world player response timed out:", videoId);
+  return null;
+}
 
 const inFlightCaptures = new Set<string>();
 

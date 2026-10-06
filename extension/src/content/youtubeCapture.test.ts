@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildPlainTextFromNodes } from "../shared/captureUtils";
 import {
   groupTranscriptSegments,
@@ -7,8 +7,15 @@ import {
   parseTimedTextXml,
   decodeHtmlEntities,
   parseYoutubeVideoUrl,
+  pickCaptionTracks,
+  fetchCaptionUrl,
+  getPlayerResponse,
 } from "./youtubeCapture";
 import type { StructuredNode } from "../shared/types";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -178,6 +185,24 @@ describe("YouTube timedtext XML parsing", () => {
 });
 
 describe("YouTube caption track parsing", () => {
+  it("requests the current player response through the background bridge", async () => {
+    const sendMessage = vi.fn((_message: unknown, callback: (response: unknown) => void) => {
+      callback({ playerResponse: { videoDetails: { videoId: "abc123" } } });
+    });
+    vi.stubGlobal("chrome", {
+      runtime: { sendMessage, lastError: undefined },
+      scripting: { executeScript: vi.fn() },
+    });
+
+    await expect(getPlayerResponse("abc123")).resolves.toMatchObject({
+      videoDetails: { videoId: "abc123" },
+    });
+    expect(sendMessage).toHaveBeenCalledWith(
+      { type: "GET_YOUTUBE_PLAYER_RESPONSE", videoId: "abc123" },
+      expect.any(Function),
+    );
+  });
+
   it("reads captionTracks from ytInitialPlayerResponse", () => {
     const tracks = parseCaptionTracks({
       captions: {
@@ -217,5 +242,20 @@ describe("YouTube caption track parsing", () => {
     const content = buildPlainTextFromNodes(nodes);
     expect(content.split(/\s+/).length).toBeGreaterThan(3);
     expect(content).toContain("binary search");
+  });
+
+  it("ranks manual English captions ahead of auto-generated captions", () => {
+    const tracks = pickCaptionTracks([
+      { baseUrl: "auto", languageCode: "en", kind: "asr" },
+      { baseUrl: "manual-fr", languageCode: "fr" },
+      { baseUrl: "manual-en", languageCode: "en" },
+    ]);
+    expect(tracks[0]!.baseUrl).toBe("manual-en");
+    expect(tracks[1]!.baseUrl).toBe("manual-fr");
+  });
+
+  it("treats an HTTP 200 empty caption body as a failed fetch", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => "" }));
+    await expect(fetchCaptionUrl("https://www.youtube.com/api/timedtext?v=abc123")).resolves.toBeNull();
   });
 });
