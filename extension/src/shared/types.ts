@@ -130,7 +130,9 @@ export type ExtensionMessage =
   | { type: "SYNC_AUTH_TOKENS"; payload: AuthSyncPayload }
   | { type: "CLEAR_AUTH_TOKENS" }
   | { type: "FETCH_PDF_BYTES"; url: string }
-  | { type: "CHECK_FILE_ACCESS" };
+  | { type: "CHECK_FILE_ACCESS" }
+  | { type: "YOUTUBE_VIDEO_ENDED"; url: string }
+  | { type: "CAPTURE_SUCCEEDED"; url: string };
 
 export interface ExtensionState {
   readonly isReady: boolean;

@@ -12,6 +12,7 @@ interface MemoryDetailDrawerProps {
 export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnything }: MemoryDetailDrawerProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isContentExpanded, setIsContentExpanded] = useState(false);
 
   if (!item) return null;
 
@@ -28,11 +29,30 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnyth
     }
   }
 
-  function handleCopyText() {
+  async function handleCopyText() {
     if (!item?.content) return;
-    navigator.clipboard.writeText(item.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(item.content);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = item.content;
+        textarea.setAttribute("readonly", "true");
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        if (!copied) throw new Error("Clipboard copy was rejected.");
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.warn("Could not copy extracted content:", error);
+      setCopied(false);
+    }
   }
 
   let domain = "";
@@ -44,6 +64,10 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnyth
 
   const readingTimeMin = Math.max(1, Math.ceil(item.reading_time_seconds / 60));
   const formatted = formatExtractedContent(item);
+  const visibleParagraphs = isContentExpanded
+    ? formatted.paragraphs
+    : formatted.paragraphs.slice(0, 6);
+  const hasMoreContent = formatted.paragraphs.length > 6;
 
   return (
     <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
@@ -134,16 +158,28 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnyth
                   {formatted.sourceLabel}
                 </span>
               </div>
-              <button
-                onClick={handleCopyText}
-                className="text-xs text-moss-600 hover:underline font-semibold flex items-center gap-1"
-              >
-                {copied ? "Copied!" : "Copy Text"}
-              </button>
+              <div className="flex items-center gap-3">
+                {hasMoreContent && (
+                  <button
+                    type="button"
+                    onClick={() => setIsContentExpanded((expanded) => !expanded)}
+                    className="text-xs text-ink-600 hover:text-moss-700 hover:underline font-semibold"
+                  >
+                    {isContentExpanded ? "Less" : "More"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void handleCopyText()}
+                  className="text-xs text-moss-600 hover:underline font-semibold flex items-center gap-1"
+                >
+                  {copied ? "Copied!" : "Copy Text"}
+                </button>
+              </div>
             </div>
 
             <div className="p-5 bg-white border border-parchment-200 rounded-xl text-ink-900 text-sm leading-relaxed space-y-4 font-sans shadow-card">
-              {formatted.paragraphs.map((para, idx) => (
+              {visibleParagraphs.map((para, idx) => (
                 <p key={idx} className="text-xs md:text-sm text-ink-800 leading-relaxed font-sans">
                   {para}
                 </p>

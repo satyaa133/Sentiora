@@ -11,11 +11,16 @@ import type {
 } from "../shared/types";
 
 export function isYoutubeWatchPage(): boolean {
-  return (
-    window.location.hostname.includes("youtube.com") &&
-    window.location.pathname === "/watch" &&
-    new URLSearchParams(window.location.search).has("v")
-  );
+  const info = parseYoutubeVideoUrl(window.location.href);
+  return Boolean(info && !info.isEmbed && !info.isShorts && new URL(window.location.href).pathname === "/watch");
+}
+
+export function isYoutubeVideoPage(): boolean {
+  return parseYoutubeVideoUrl(window.location.href) !== null;
+}
+
+export function isYoutubeHost(): boolean {
+  return YOUTUBE_HOSTS.has(window.location.hostname.toLowerCase());
 }
 
 export function decodeHtmlEntities(text: string): string {
@@ -47,6 +52,48 @@ export interface CaptionTrack {
   baseUrl: string;
   languageCode: string;
   kind?: string;
+}
+
+export interface YoutubeVideoInfo {
+  videoId: string;
+  url: string;
+  isEmbed: boolean;
+  isShorts: boolean;
+}
+
+const YOUTUBE_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "youtube-nocookie.com",
+  "www.youtube-nocookie.com",
+  "youtu.be",
+]);
+
+export function parseYoutubeVideoUrl(value: string): YoutubeVideoInfo | null {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    if (!YOUTUBE_HOSTS.has(hostname)) return null;
+
+    let videoId: string | null = null;
+    let isEmbed = false;
+    const isShorts = url.pathname.startsWith("/shorts/");
+
+    if (hostname === "youtu.be") {
+      videoId = url.pathname.split("/").filter(Boolean)[0] ?? null;
+    } else if (url.pathname === "/watch") {
+      videoId = url.searchParams.get("v");
+    } else if (isShorts || url.pathname.startsWith("/embed/")) {
+      videoId = url.pathname.split("/").filter(Boolean)[1] ?? null;
+      isEmbed = url.pathname.startsWith("/embed/");
+    }
+
+    if (!videoId || !/^[A-Za-z0-9_-]{6,}$/.test(videoId)) return null;
+    return { videoId, url: url.href, isEmbed, isShorts };
+  } catch {
+    return null;
+  }
 }
 
 export function parseTimedTextXml(xmlText: string): TranscriptSegment[] | null {
@@ -180,10 +227,17 @@ async function fetchCaptionUrl(url: string): Promise<TranscriptSegment[] | null>
  */
 function getPlayerResponseFromElement(targetVideoId: string): unknown | null {
   try {
-    const playerEl = document.querySelector("#movie_player") as any;
-    if (typeof playerEl?.getPlayerResponse !== "function") return null;
-    const resp = playerEl.getPlayerResponse();
-    if (resp?.videoDetails?.videoId === targetVideoId) return resp;
+    const playerElements = [
+      document.querySelector("#movie_player"),
+      document.querySelector("ytd-player"),
+      document.querySelector("video")?.closest("#movie_player"),
+    ];
+    for (const playerEl of playerElements) {
+      const candidate = playerEl as any;
+      if (typeof candidate?.getPlayerResponse !== "function") continue;
+      const resp = candidate.getPlayerResponse();
+      if (resp?.videoDetails?.videoId === targetVideoId) return resp;
+    }
   } catch {
     // ignore
   }
@@ -220,25 +274,91 @@ function getLegacyPlayerResponse(targetVideoId: string): unknown | null {
   return null;
 }
 
+function parseJsonObjectAt(text: string, start: number): unknown | null {
+  if (text[start] !== "{") return null;
+  let depth = 0;
+  let quote: '"' | null = null;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const character = text[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '"') {
+      quote = '"';
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}" && --depth === 0) {
+      try {
+        return JSON.parse(text.slice(start, index + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * YouTube serializes the current player response in a script tag. Reading the
+ * DOM copy works from the extension isolated world when page globals do not.
+ */
+function getPlayerResponseFromScripts(targetVideoId: string): unknown | null {
+  for (const script of Array.from(document.scripts)) {
+    const text = script.textContent ?? "";
+    for (const marker of ["ytInitialPlayerResponse", "PLAYER_RESPONSE"]) {
+      const markerIndex = text.indexOf(marker);
+      if (markerIndex < 0) continue;
+      const objectStart = text.indexOf("{", markerIndex);
+      const response = parseJsonObjectAt(text, objectStart);
+      const responseVideoId = (response as { videoDetails?: { videoId?: string } } | null)?.videoDetails?.videoId;
+      if (responseVideoId === targetVideoId) return response;
+    }
+  }
+  return null;
+}
+
 /**
  * Poll all three strategies for up to maxWaitMs.
  * The player element strategy (Strategy 1) is authoritative for SPA navigation.
  */
-async function getPlayerResponse(targetVideoId: string, maxWaitMs = 10000): Promise<unknown> {
+async function getPlayerResponse(targetVideoId: string, maxWaitMs = 45000): Promise<unknown> {
   const start = performance.now();
   while (performance.now() - start < maxWaitMs) {
     const resp =
       getPlayerResponseFromElement(targetVideoId) ??
       getInitialPlayerResponse(targetVideoId) ??
-      getLegacyPlayerResponse(targetVideoId);
+      getLegacyPlayerResponse(targetVideoId) ??
+      getPlayerResponseFromScripts(targetVideoId);
     if (resp) return resp;
     await new Promise(resolve => setTimeout(resolve, 400));
   }
   return null;
 }
 
+async function waitForVideoElement(maxWaitMs = 10000): Promise<HTMLVideoElement> {
+  const start = performance.now();
+  while (performance.now() - start < maxWaitMs) {
+    const video = document.querySelector("video");
+    if (video instanceof HTMLVideoElement) {
+      console.info("[Sentiora Capture] Video element detected:", video.videoWidth, "x", video.videoHeight);
+      return video;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throwError("YOUTUBE_PLAYER_UNREADY", "YouTube video player is still loading.");
+}
 
 async function fetchTranscriptFromPlayer(videoId: string): Promise<TranscriptSegment[]> {
+  await waitForVideoElement();
   const playerResponse = await getPlayerResponse(videoId);
   if (!playerResponse) {
     throwError("YOUTUBE_PLAYER_UNREADY", "YouTube player is not ready or navigated too quickly.");
@@ -266,15 +386,45 @@ async function fetchTranscriptFromPlayer(videoId: string): Promise<TranscriptSeg
   throwError("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "Failed to parse YouTube transcript data.");
 }
 
+function getYoutubeDescription(): string {
+  const descriptionElement =
+    document.querySelector("#description-inline-expander") ||
+    document.querySelector("ytd-text-inline-expander#description") ||
+    document.querySelector("meta[name='description']");
+  if (!descriptionElement) return "";
+  const description =
+    (descriptionElement as HTMLElement).innerText ||
+    (descriptionElement as HTMLMetaElement).content ||
+    "";
+  return description.replace(/\s+/g, " ").trim();
+}
+
+function buildDescriptionFallback(videoId: string): TranscriptSegment[] | null {
+  const description = getYoutubeDescription();
+  if (description.split(/\s+/).filter(Boolean).length < 12) return null;
+  console.info("[Sentiora Capture] Using YouTube description fallback:", videoId);
+  return [{ text: description, start: 0, end: 0 }];
+}
+
 export async function captureYoutube(isForce = false): Promise<YoutubeCapturePayload> {
   const started = performance.now();
-  const urlParams = new URLSearchParams(window.location.search);
-  const videoId = urlParams.get("v");
-  if (!videoId) {
+  const videoInfo = parseYoutubeVideoUrl(window.location.href);
+  console.info("[Sentiora Capture] Active URL:", window.location.href);
+  console.info("[Sentiora Capture] YouTube detected:", Boolean(videoInfo));
+  if (!videoInfo) {
     throwError("YOUTUBE_PLAYER_UNREADY", "Could not find video ID in the URL.");
   }
+  const { videoId } = videoInfo;
+  console.info("[Sentiora Capture] Video ID:", videoId);
 
-  const segments = await fetchTranscriptFromPlayer(videoId);
+  let segments: TranscriptSegment[];
+  try {
+    segments = await fetchTranscriptFromPlayer(videoId);
+  } catch (error) {
+    const fallback = buildDescriptionFallback(videoId);
+    if (!fallback) throw error;
+    segments = fallback;
+  }
   const nodes = groupTranscriptSegments(segments);
   const status: ExtractionStatus = nodes.length > 0 ? "success" : "insufficient_content";
 
@@ -316,7 +466,7 @@ export async function captureYoutube(isForce = false): Promise<YoutubeCapturePay
 
   return {
     source_type: "youtube",
-    url: window.location.href.slice(0, 2048),
+    url: videoInfo.url.slice(0, 2048),
     title,
     content,
     author,

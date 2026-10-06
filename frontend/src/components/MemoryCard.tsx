@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { MemoryItem } from "../types/memory";
 import { formatExtractedContent } from "../utils/contentFormatter";
 
@@ -8,6 +9,7 @@ interface MemoryCardProps {
 }
 
 export default function MemoryCard({ item, onSelect, onDelete }: MemoryCardProps) {
+  const [isExcerptExpanded, setIsExcerptExpanded] = useState(false);
   // Format relative time (e.g. Saved 2 hours ago)
   function getRelativeTimeString(dateStr: string): string {
     try {
@@ -83,9 +85,23 @@ export default function MemoryCard({ item, onSelect, onDelete }: MemoryCardProps
 
         {/* Excerpt */}
         {formatted.cleanText && (
-          <p className="text-xs text-ink-700 line-clamp-2 leading-relaxed">
-            {formatted.cleanText}
-          </p>
+          <div>
+            <p className={`text-xs text-ink-700 leading-relaxed ${isExcerptExpanded ? "" : "line-clamp-2"}`}>
+              {formatted.cleanText}
+            </p>
+            {formatted.cleanText.length > 180 && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setIsExcerptExpanded((expanded) => !expanded);
+                }}
+                className="mt-1 text-[11px] font-semibold text-moss-600 hover:text-moss-700 hover:underline"
+              >
+                {isExcerptExpanded ? "Less" : "More"}
+              </button>
+            )}
+          </div>
         )}
       </div>
 

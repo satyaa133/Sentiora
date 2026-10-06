@@ -6,6 +6,7 @@ import {
   parseTimedTextJson3,
   parseTimedTextXml,
   decodeHtmlEntities,
+  parseYoutubeVideoUrl,
 } from "./youtubeCapture";
 import type { StructuredNode } from "../shared/types";
 
@@ -56,6 +57,23 @@ describe("isYoutubeWatchPage", () => {
       url.pathname === "/watch" &&
       url.searchParams.has("v");
     expect(result).toBe(false);
+  });
+});
+
+describe("parseYoutubeVideoUrl", () => {
+  it.each([
+    ["https://www.youtube.com/watch?v=abc123", false, false],
+    ["https://youtu.be/abc123?t=30", false, false],
+    ["https://www.youtube.com/shorts/abc123", false, true],
+    ["https://www.youtube.com/embed/abc123", true, false],
+    ["https://www.youtube-nocookie.com/embed/abc123", true, false],
+  ])("recognizes %s", (url, isEmbed, isShorts) => {
+    expect(parseYoutubeVideoUrl(url)).toMatchObject({ videoId: "abc123", isEmbed, isShorts });
+  });
+
+  it("rejects non-video YouTube URLs and malformed IDs", () => {
+    expect(parseYoutubeVideoUrl("https://www.youtube.com/channel/abc123")).toBeNull();
+    expect(parseYoutubeVideoUrl("https://youtu.be/no")).toBeNull();
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   capExtractedContent,
+  MAX_CONTENT_LENGTH,
   normalizeExtractedText,
   sanitizeCapturePayload,
   buildPlainTextFromNodes,
@@ -39,7 +40,7 @@ describe("capture content limits", () => {
       title: "Example Article",
       content: "paragraph ".repeat(20_000),
     });
-    expect(payload.content.length).toBeLessThanOrEqual(80_000);
+    expect(payload.content.length).toBeLessThanOrEqual(MAX_CONTENT_LENGTH);
     expect(payload.title).toBe("Example Article");
     expect(payload.url).toBe("https://example.com/article");
   });

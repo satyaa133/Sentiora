@@ -53,12 +53,18 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     return true;
   }
 
+  if (message.type === "YOUTUBE_VIDEO_ENDED") {
+    notifyIfCapturedAfterVideoEnded(message.url);
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (
     message.type === "CAPTURE_WEBPAGE" ||
     message.type === "CAPTURE_YOUTUBE" ||
     message.type === "CAPTURE_PDF"
   ) {
-    handleCaptureMessage(message.payload)
+    handleCaptureMessage(message.payload, sender)
       .then((result) => {
         sendResponse(result);
       })
@@ -109,7 +115,9 @@ const inFlightCaptures = new Set<string>();
 
 async function handleCaptureMessage(
   payload: CapturePayload,
+  sender?: chrome.runtime.MessageSender,
 ): Promise<{ success: boolean; deduplicated?: boolean; error?: string }> {
+  console.info("[Sentiora Capture] Upload started:", payload.source_type, payload.url);
   const sanitized = sanitizeCapturePayload(payload);
   const allowLocalPdf = sanitized.source_type === "pdf" && isPdfUrl(sanitized.url);
   if (isUrlBlocked(sanitized.url, { allowLocalPdf })) {
@@ -143,16 +151,43 @@ async function handleCaptureMessage(
     );
 
     if (!result.success) {
-      console.error("[Sentiora Background] API post memory-item error:", result.error);
+      console.error("[Sentiora Capture] Capture failed:", result.error);
       return { success: false, error: result.error };
     }
 
     await markUrlCaptured(sanitized.url);
+    if (sanitized.source_type === "youtube" && sender?.tab?.id) {
+      chrome.tabs.sendMessage(sender.tab.id, { type: "CAPTURE_SUCCEEDED", url: sanitized.url }, { frameId: 0 }, () => {
+        if (chrome.runtime.lastError) {
+          /* The tab may have navigated after extraction. */
+        }
+      });
+    }
+    console.info("[Sentiora Capture] Upload successful:", sanitized.url);
     showBadgeSuccess();
     notifyDashboardTabs();
     return { success: true };
   } finally {
     inFlightCaptures.delete(sanitized.url);
+  }
+}
+
+async function notifyIfCapturedAfterVideoEnded(url: string): Promise<void> {
+  if (!(await isUrlCapturedRecently(url))) return;
+
+  const key = `capture_notified_${url}`;
+  try {
+    const existing = await chrome.storage.session.get(key);
+    if (existing[key]) return;
+    await chrome.storage.session.set({ [key]: Date.now() });
+    chrome.notifications.create(`sentiora-${Date.now()}`, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icon-128.svg"),
+      title: "Sentiora capture complete",
+      message: "The YouTube video ended and its transcript was saved to your vault.",
+    });
+  } catch {
+    // Notifications are optional; capture success must not depend on them.
   }
 }
 

@@ -19,7 +19,7 @@ type PopupView =
   | "settings";
 
 const EXTRACT_TIMEOUT_MS = 8_000;
-const PDF_YOUTUBE_EXTRACT_TIMEOUT_MS = 25_000;
+const PDF_YOUTUBE_EXTRACT_TIMEOUT_MS = 60_000;
 const SAVE_TIMEOUT_MS = 8_000;
 const PING_TIMEOUT_MS = 400;
 
@@ -60,7 +60,7 @@ interface ForceCaptureResponse {
 
 function requestForceCapture(tabId: number): Promise<ForceCaptureResponse> {
   return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, { type: "FORCE_CAPTURE" }, (response) => {
+    chrome.tabs.sendMessage(tabId, { type: "FORCE_CAPTURE" }, { frameId: 0 }, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
@@ -68,6 +68,19 @@ function requestForceCapture(tabId: number): Promise<ForceCaptureResponse> {
       resolve((response ?? {}) as ForceCaptureResponse);
     });
   });
+}
+
+function isYoutubeCaptureUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    return (
+      ["youtube.com", "www.youtube.com", "m.youtube.com", "youtube-nocookie.com", "www.youtube-nocookie.com", "youtu.be"].includes(host) &&
+      (host === "youtu.be" || url.pathname === "/watch" || url.pathname.startsWith("/shorts/") || url.pathname.startsWith("/embed/"))
+    );
+  } catch {
+    return false;
+  }
 }
 
 export default function App() {
@@ -156,7 +169,7 @@ export default function App() {
           try {
             const urlObj = new URL(urlStr);
             setActiveTabUrl(urlObj.hostname + (urlObj.pathname.length > 1 ? urlObj.pathname.substring(0, 18) + "..." : ""));
-            if (urlObj.hostname.includes("youtube.com")) {
+            if (isYoutubeCaptureUrl(urlStr)) {
               setActiveTabType("youtube");
             } else if (urlStr.endsWith(".pdf") || urlObj.pathname.endsWith(".pdf")) {
               setActiveTabType("pdf");
@@ -252,7 +265,7 @@ export default function App() {
     let sourceType: "webpage" | "youtube" | "pdf" = "webpage";
     let thumbnailUrl: string | undefined;
 
-    if (urlStr.includes("youtube.com")) {
+    if (isYoutubeCaptureUrl(urlStr)) {
       sourceType = "youtube";
       try {
         const urlParams = new URL(urlStr).searchParams;
@@ -336,7 +349,7 @@ export default function App() {
       try {
         response = await withTimeout(
           requestForceCapture(activeTab.id),
-          activeTabType === "webpage" ? EXTRACT_TIMEOUT_MS : PDF_YOUTUBE_EXTRACT_TIMEOUT_MS,
+          activeTabType === "webpage" && !isYoutubeCaptureUrl(activeTab.url ?? "") ? EXTRACT_TIMEOUT_MS : PDF_YOUTUBE_EXTRACT_TIMEOUT_MS,
           "Extraction timed out. The page is too large or still loading.",
         );
       } catch (err) {
@@ -407,6 +420,18 @@ export default function App() {
       );
 
       if (saved) {
+        if (response?.payload?.source_type === "youtube") {
+          chrome.tabs.sendMessage(
+            activeTab.id,
+            { type: "CAPTURE_SUCCEEDED", url: response.payload.url },
+            { frameId: 0 },
+            () => {
+              if (chrome.runtime.lastError) {
+                // The tab may have navigated after the upload completed.
+              }
+            },
+          );
+        }
         setViewState("saved");
         fetchItemCount();
       } else {
