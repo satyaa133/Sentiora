@@ -11,7 +11,9 @@ const MAX_URL_LENGTH = 2048;
 const MAX_TITLE_LENGTH = 1024;
 const MAX_AUTHOR_LENGTH = 512;
 const MAX_IMAGE_URL_LENGTH = 2048;
-export const MAX_CONTENT_LENGTH = 80_000;
+// Keep the client limit aligned with the backend capture schema so long
+// transcripts are not truncated before they reach the vault.
+export const MAX_CONTENT_LENGTH = 500_000;
 
 export function normalizeExtractedText(rawText: string): string {
   if (!rawText) return "";

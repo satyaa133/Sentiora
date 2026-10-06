@@ -34,6 +34,13 @@ async function markUrlCaptured(url: string): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
+  if (message.type === "GET_YOUTUBE_PLAYER_RESPONSE") {
+    getYoutubePlayerResponse(message.videoId, sender.tab?.id, sender.frameId ?? 0)
+      .then((playerResponse) => sendResponse({ success: Boolean(playerResponse), playerResponse }))
+      .catch((err) => sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }));
+    return true;
+  }
+
   if (message.type === "CHECK_FILE_ACCESS") {
     chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
       sendResponse({ isAllowed });
@@ -53,12 +60,18 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     return true;
   }
 
+  if (message.type === "YOUTUBE_VIDEO_ENDED") {
+    notifyIfCapturedAfterVideoEnded(message.url);
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (
     message.type === "CAPTURE_WEBPAGE" ||
     message.type === "CAPTURE_YOUTUBE" ||
     message.type === "CAPTURE_PDF"
   ) {
-    handleCaptureMessage(message.payload)
+    handleCaptureMessage(message.payload, sender)
       .then((result) => {
         sendResponse(result);
       })
@@ -105,11 +118,78 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
   }
 });
 
+async function getYoutubePlayerResponse(
+  videoId: string,
+  tabId: number | undefined,
+  frameId: number,
+): Promise<unknown | null> {
+  if (tabId == null) return null;
+
+  const maxAttempts = 25;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frameId] },
+        world: "MAIN",
+        func: (expectedVideoId: string) => {
+          const url = new URL(location.href);
+          const pathParts = url.pathname.split("/").filter(Boolean);
+          const currentVideoId =
+            url.searchParams.get("v") ||
+            (pathParts[0] === "shorts" || pathParts[0] === "embed" ? pathParts[1] : null) ||
+            (location.hostname === "youtu.be" ? pathParts[0] : null);
+          if (currentVideoId !== expectedVideoId) return null;
+
+          const player = document.querySelector("#movie_player") as {
+            getPlayerResponse?: () => {
+              videoDetails?: { videoId?: string; title?: string; author?: string };
+              captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: unknown[] } };
+            };
+          } | null;
+          const response = player?.getPlayerResponse?.() || (window as any).ytInitialPlayerResponse;
+          if (response?.videoDetails?.videoId !== expectedVideoId) return null;
+
+          return {
+            videoDetails: {
+              videoId: response.videoDetails.videoId,
+              title: response.videoDetails.title,
+              author: response.videoDetails.author,
+            },
+            captions: {
+              playerCaptionsTracklistRenderer: {
+                captionTracks: (response.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []).map((track: any) => ({
+                  baseUrl: track.baseUrl,
+                  languageCode: track.languageCode,
+                  kind: track.kind,
+                })),
+              },
+            },
+          };
+        },
+        args: [videoId],
+      });
+      const result = injected[0]?.result;
+      if (result) {
+        console.info("[Sentiora Capture] Main-world player response ready:", videoId);
+        return result;
+      }
+    } catch (err) {
+      console.warn("[Sentiora Capture] Main-world player response attempt failed:", err);
+    }
+    if (attempt < maxAttempts - 1) await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+
+  console.warn("[Sentiora Capture] Main-world player response timed out:", videoId);
+  return null;
+}
+
 const inFlightCaptures = new Set<string>();
 
 async function handleCaptureMessage(
   payload: CapturePayload,
+  sender?: chrome.runtime.MessageSender,
 ): Promise<{ success: boolean; deduplicated?: boolean; error?: string }> {
+  console.info("[Sentiora Capture] Upload started:", payload.source_type, payload.url);
   const sanitized = sanitizeCapturePayload(payload);
   const allowLocalPdf = sanitized.source_type === "pdf" && isPdfUrl(sanitized.url);
   if (isUrlBlocked(sanitized.url, { allowLocalPdf })) {
@@ -143,16 +223,43 @@ async function handleCaptureMessage(
     );
 
     if (!result.success) {
-      console.error("[Sentiora Background] API post memory-item error:", result.error);
+      console.error("[Sentiora Capture] Capture failed:", result.error);
       return { success: false, error: result.error };
     }
 
     await markUrlCaptured(sanitized.url);
+    if (sanitized.source_type === "youtube" && sender?.tab?.id) {
+      chrome.tabs.sendMessage(sender.tab.id, { type: "CAPTURE_SUCCEEDED", url: sanitized.url }, { frameId: 0 }, () => {
+        if (chrome.runtime.lastError) {
+          /* The tab may have navigated after extraction. */
+        }
+      });
+    }
+    console.info("[Sentiora Capture] Upload successful:", sanitized.url);
     showBadgeSuccess();
     notifyDashboardTabs();
     return { success: true };
   } finally {
     inFlightCaptures.delete(sanitized.url);
+  }
+}
+
+async function notifyIfCapturedAfterVideoEnded(url: string): Promise<void> {
+  if (!(await isUrlCapturedRecently(url))) return;
+
+  const key = `capture_notified_${url}`;
+  try {
+    const existing = await chrome.storage.session.get(key);
+    if (existing[key]) return;
+    await chrome.storage.session.set({ [key]: Date.now() });
+    chrome.notifications.create(`sentiora-${Date.now()}`, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icon-128.svg"),
+      title: "Sentiora capture complete",
+      message: "The YouTube video ended and its transcript was saved to your vault.",
+    });
+  } catch {
+    // Notifications are optional; capture success must not depend on them.
   }
 }
 

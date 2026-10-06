@@ -1,9 +1,8 @@
 import { isCurrentPageSensitive } from "./sensitiveGuard";
-import { isYoutubeWatchPage, captureYoutube } from "./youtubeCapture";
+import { isYoutubeHost, isYoutubeVideoPage, captureYoutube } from "./youtubeCapture";
 import { isPdfDocument, capturePdf } from "./pdfCapture";
 import { captureWebpageTimed } from "./webpageCapture";
-import { sendCaptureMessage } from "../shared/captureUtils";
-import type { CapturePayload, ExtensionMessage, CaptureErrorCode } from "../shared/types";
+import type { CapturePayload, CaptureErrorCode } from "../shared/types";
 
 export type CapturePipelineResult =
   | { status: "saved"; deduplicated?: boolean }
@@ -29,7 +28,7 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
     return { status: "skipped", reason: "sensitive" };
   }
 
-  if (isYoutubeWatchPage()) {
+  if (isYoutubeVideoPage()) {
     try {
       const payload = await captureYoutube(manualCapture);
       if (!payload) {
@@ -39,6 +38,10 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
     } catch (err: any) {
       return { status: "failed", errorCode: err.code || "UNKNOWN_ERROR", error: err.message || String(err) };
     }
+  }
+
+  if (isYoutubeHost()) {
+    return { status: "skipped", reason: "no_payload" };
   }
 
   if (isPdfDocument()) {
@@ -67,66 +70,55 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
   }
 }
 
-async function submitExtractedPayload(payload: CapturePayload): Promise<CapturePipelineResult> {
-  const messageType: ExtensionMessage["type"] =
-    payload.source_type === "youtube"
-      ? "CAPTURE_YOUTUBE"
-      : payload.source_type === "pdf"
-        ? "CAPTURE_PDF"
-        : "CAPTURE_WEBPAGE";
-
-  const result = await sendCaptureMessage({ type: messageType, payload } as ExtensionMessage);
-  if (!result.success) {
-    return { status: "failed", error: result.error ?? "Capture API failed." };
-  }
-  return { status: "saved", deduplicated: result.deduplicated };
-}
-
-async function runAutoCapturePipeline(): Promise<CapturePipelineResult> {
-  const extracted = await extractCapturePayload(false);
-  if (extracted.status === "skipped") {
-    return { status: "skipped", reason: extracted.reason };
-  }
-  if (extracted.status === "failed") {
-    return { status: "failed", error: extracted.error };
-  }
-  return submitExtractedPayload(extracted.payload);
-}
-
 function initContentScript(): void {
   if (window.__sentioraContentLoaded) {
     return;
   }
   window.__sentioraContentLoaded = true;
 
-  let autoCaptureQueued = false;
-  let extractInFlight = false;
-
-  function queueAutoCapture(): void {
-    if (autoCaptureQueued) return;
-    autoCaptureQueued = true;
-    setTimeout(async () => {
-      autoCaptureQueued = false;
-      if (extractInFlight) return;
-      extractInFlight = true;
+  function findYoutubeEmbed(): HTMLIFrameElement | null {
+    for (const iframe of Array.from(document.querySelectorAll("iframe"))) {
+      const src = iframe.getAttribute("src");
+      if (!src) continue;
       try {
-        await runAutoCapturePipeline();
-      } finally {
-        extractInFlight = false;
+        const parsed = new URL(src, window.location.href);
+        if (parsed.hostname === "www.youtube.com" || parsed.hostname === "youtube.com" || parsed.hostname === "www.youtube-nocookie.com") {
+          if (parsed.pathname.startsWith("/embed/")) return iframe;
+        }
+      } catch {
+        // Ignore malformed iframe URLs.
       }
-    }, 1000);
+    }
+    return null;
   }
 
-  if (document.readyState === "complete") {
-    queueAutoCapture();
-  } else {
-    window.addEventListener("load", queueAutoCapture);
+  function requestEmbeddedCapture(): Promise<ExtractCaptureResult> | null {
+    const iframe = findYoutubeEmbed();
+    const iframeWindow = iframe?.contentWindow;
+    if (!iframeWindow) return null;
+
+    return new Promise((resolve) => {
+      const timeoutId = window.setTimeout(() => {
+        window.removeEventListener("message", handleResponse);
+        resolve({ status: "failed", errorCode: "YOUTUBE_PLAYER_UNREADY", error: "Embedded YouTube player did not respond." });
+      }, 60_000);
+
+      function handleResponse(event: MessageEvent): void {
+        if (event.source !== iframeWindow || event.data?.type !== "SENTIORA_EMBED_CAPTURE_RESULT") return;
+        window.clearTimeout(timeoutId);
+        window.removeEventListener("message", handleResponse);
+        resolve(event.data.result as ExtractCaptureResult);
+      }
+
+      window.addEventListener("message", handleResponse);
+      iframeWindow.postMessage({ type: "SENTIORA_EMBED_CAPTURE" }, "*");
+    });
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "FORCE_CAPTURE") {
-      extractInFlight = true;
-      extractCapturePayload(true)
+      const extraction = isYoutubeVideoPage() ? extractCapturePayload(true) : requestEmbeddedCapture() ?? extractCapturePayload(true);
+      extraction
         .then((result) => {
           if (result.status === "ok") {
             sendResponse({
@@ -156,9 +148,6 @@ function initContentScript(): void {
             success: false,
             error: err instanceof Error ? err.message : String(err),
           });
-        })
-        .finally(() => {
-          extractInFlight = false;
         });
       return true;
     }
@@ -169,27 +158,42 @@ function initContentScript(): void {
     }
   });
 
-  let lastCapturedUrl = window.location.href;
-  function checkYoutubeUrlChange(): void {
-    if (window.location.href !== lastCapturedUrl) {
-      lastCapturedUrl = window.location.href;
-      if (isYoutubeWatchPage()) {
-        setTimeout(() => {
-          void runAutoCapturePipeline();
-        }, 1500);
-      }
-    }
-  }
-
-  if (window.location.hostname.includes("youtube.com")) {
-    window.addEventListener("yt-navigate-finish", () => {
-      setTimeout(() => {
-        void runAutoCapturePipeline();
-      }, 1500);
+  window.addEventListener("message", (event) => {
+    if (event.data?.type !== "SENTIORA_EMBED_CAPTURE" || !isYoutubeVideoPage()) return;
+    extractCapturePayload(true).then((result) => {
+      (event.source as Window | null)?.postMessage(
+        { type: "SENTIORA_EMBED_CAPTURE_RESULT", result },
+        { targetOrigin: "*" },
+      );
     });
-    window.addEventListener("popstate", checkYoutubeUrlChange);
-    setInterval(checkYoutubeUrlChange, 2500);
-  }
+  });
+
+  const observedVideos = new WeakSet<HTMLVideoElement>();
+  const watchVideoEnd = (video: HTMLVideoElement): void => {
+    if (observedVideos.has(video)) return;
+    observedVideos.add(video);
+    video.addEventListener("ended", () => {
+      if (!isYoutubeVideoPage()) return;
+      chrome.runtime.sendMessage({ type: "YOUTUBE_VIDEO_ENDED", url: window.location.href });
+    });
+  };
+
+  const observeVideoPlayer = (): void => {
+    for (const video of Array.from(document.querySelectorAll("video"))) {
+      watchVideoEnd(video);
+    }
+  };
+  observeVideoPlayer();
+  const videoObserver = new MutationObserver(observeVideoPlayer);
+  videoObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type !== "CAPTURE_SUCCEEDED" || !isYoutubeVideoPage()) return;
+    const video = document.querySelector("video");
+    if (video instanceof HTMLVideoElement && video.ended) {
+      chrome.runtime.sendMessage({ type: "YOUTUBE_VIDEO_ENDED", url: message.url });
+    }
+  });
 
   const isDashboardHost =
     window.location.hostname === "localhost" ||

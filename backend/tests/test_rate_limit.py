@@ -1,9 +1,24 @@
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from app.core.config import get_settings
+from app.core.rate_limit import client_ip
 from app.main import app
 
 client = TestClient(app)
+
+
+def test_forwarded_for_is_ignored_without_trusted_proxy() -> None:
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/health",
+            "headers": [(b"x-forwarded-for", b"203.0.113.10")],
+            "client": ("testclient", 1234),
+        }
+    )
+    assert client_ip(request) == "127.0.0.1"
 
 
 def test_login_rate_limit_returns_429(monkeypatch) -> None:  # type: ignore[no-untyped-def]

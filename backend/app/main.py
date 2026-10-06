@@ -33,6 +33,12 @@ async def attach_request_id(request: Request, call_next):  # type: ignore[no-unt
     request.state.request_id = f"req_{uuid.uuid4().hex[:8]}"
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = "default-src 'self'"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
@@ -40,7 +46,6 @@ if settings.cors_origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_origin_regex=r"chrome-extension://.*",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

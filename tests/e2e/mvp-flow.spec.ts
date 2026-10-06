@@ -37,6 +37,18 @@ test("register, capture, search, ask, and delete memory", async ({ request }) =>
   const itemId = created.data.id as string;
   expect(created.data.status).toMatch(/pending|ready/);
 
+  let processedStatus = created.data.status as string;
+  await expect
+    .poll(
+      async () => {
+        const current = await request.get(`${API}/api/v1/memory-items/${itemId}`, { headers: auth });
+        processedStatus = ((await current.json()).data.status as string) ?? "unknown";
+        return processedStatus;
+      },
+      { timeout: 15_000, intervals: [250, 500, 1000] },
+    )
+    .toBe("ready");
+
   const listed = await request.get(`${API}/api/v1/memory-items`, { headers: auth });
   expect(listed.status()).toBe(200);
   const items = (await listed.json()).data.items as Array<{ id: string; title: string }>;
