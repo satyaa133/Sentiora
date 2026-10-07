@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Sentiora Backend"
-    app_environment: str = "production"
+    app_environment: str = "development"
     app_version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
