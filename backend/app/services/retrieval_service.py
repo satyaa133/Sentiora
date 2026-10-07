@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Select, or_, select
+from typing import Any
+
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
@@ -179,7 +181,7 @@ class RetrievalService:
         user_id: UUID,
         source_type: SourceType | None,
         memory_id: UUID | None,
-    ) -> Select[tuple[MemoryChunk, MemoryItem]]:
+    ) -> Any:
         stmt = (
             select(MemoryChunk, MemoryItem)
             .join(MemoryItem, MemoryChunk.memory_id == MemoryItem.id)
