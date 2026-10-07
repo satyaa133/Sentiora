@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from typing import Any
 
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session as DBSession
