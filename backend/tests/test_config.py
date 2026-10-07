@@ -1,4 +1,3 @@
-import os
 import pytest
 from pydantic_core import ValidationError
 
