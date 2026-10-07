@@ -114,6 +114,8 @@ def test_chat_returns_grounded_answer_and_citations(monkeypatch) -> None:  # typ
                 "llm_provider": "openai",
                 "openai_api_key": "sk-test",
                 "gemini_api_key": "gk-test",
+                "openrouter_api_key": "ok-test",
+                "openrouter_chat_model": "anthropic/claude-3-haiku",
                 "openai_chat_model": "gpt-4o-mini",
                 "rag_top_k": 8,
                 "rag_max_distance": 0.65,
@@ -161,6 +163,8 @@ def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  #
                 "llm_provider": "openai",
                 "openai_api_key": "sk-test",
                 "gemini_api_key": "gk-test",
+                "openrouter_api_key": "ok-test",
+                "openrouter_chat_model": "anthropic/claude-3-haiku",
                 "openai_chat_model": "gpt-4o-mini",
                 "rag_top_k": 8,
                 "rag_max_distance": 0.65,
@@ -229,6 +233,8 @@ def test_chat_uses_grounded_fallback_when_llm_not_configured(monkeypatch) -> Non
                 "llm_provider": "openai",
                 "openai_api_key": None,
                 "gemini_api_key": None,
+    "openrouter_api_key": None,
+    "openrouter_chat_model": "anthropic/claude-3-haiku",
                 "openai_chat_model": "gpt-4o-mini",
                 "rag_top_k": 8,
                 "rag_max_distance": 0.65,
@@ -270,6 +276,8 @@ def test_chat_generic_question_answers_from_ready_memory(monkeypatch) -> None:  
                 "llm_provider": "openai",
                 "openai_api_key": None,
                 "gemini_api_key": None,
+    "openrouter_api_key": None,
+    "openrouter_chat_model": "anthropic/claude-3-haiku",
                 "openai_chat_model": "gpt-4o-mini",
                 "rag_top_k": 8,
                 "rag_max_distance": 0.65,
@@ -310,6 +318,8 @@ def test_chat_falls_back_when_llm_completion_fails(monkeypatch) -> None:  # type
                 "llm_provider": "openai",
                 "openai_api_key": "sk-test",
                 "gemini_api_key": None,
+    "openrouter_api_key": None,
+    "openrouter_chat_model": "anthropic/claude-3-haiku",
                 "openai_chat_model": "gpt-4o-mini",
                 "rag_top_k": 8,
                 "rag_max_distance": 0.65,
@@ -382,6 +392,8 @@ _FALLBACK_SETTINGS = {
     "llm_provider": "openai",
     "openai_api_key": None,
     "gemini_api_key": None,
+    "openrouter_api_key": None,
+    "openrouter_chat_model": "anthropic/claude-3-haiku",
     "openai_chat_model": "gpt-4o-mini",
     "rag_top_k": 8,
     "rag_max_distance": 0.65,
@@ -405,7 +417,7 @@ def _index_with_headers(
         },
         headers=headers,
     )
-    item_id = create_resp.json()["data"]["id"]
+    item_id = str(create_resp.json()["data"]["id"])
     process_capture(item_id)
     db = SessionLocal()
     try:

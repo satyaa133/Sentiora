@@ -1,5 +1,8 @@
+import os
 import pytest
 
+# Ensure the app environment is set to development for tests before any app modules are imported
+os.environ.setdefault("APP_ENVIRONMENT", "development")
 from app.core.config import get_settings
 from app.core.login_backoff import login_backoff
 from app.core.rate_limit import limiter

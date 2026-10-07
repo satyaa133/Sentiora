@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "Sentiora Backend"
-    app_environment: str = "development"
+    app_environment: str = "production"
     app_version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
@@ -37,12 +37,14 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_embedding_model: str = "text-embedding-004"
     gemini_chat_model: str = "gemini-2.5-flash"
+    openrouter_api_key: str | None = None
+    openrouter_chat_model: str = "anthropic/claude-haiku-4.5"
     # RAG retrieval tuning
-    rag_top_k: int = 8
+    rag_top_k: int = 15
     rag_max_distance: float = 0.65
     # Maximum total characters of retrieved chunk content sent to the LLM.
     # Keeps prompt size predictable and within token budget.
-    rag_max_context_chars: int = 6000
+    rag_max_context_chars: int = 12000
     # Output budget for Ask answers. Sized for structured multi-point
     # explanations without encouraging rambling dumps.
     rag_max_output_tokens: int = 900
@@ -68,14 +70,16 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_non_development_secrets(self) -> Self:
-        if (
-            self.app_environment != "development"
-            and self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY
-        ):
-            raise ValueError(
-                "jwt_secret_key must be set via JWT_SECRET_KEY when "
-                "app_environment is not 'development'"
-            )
+        if self.app_environment != "development":
+            if not self.jwt_secret_key or not self.jwt_secret_key.strip():
+                raise ValueError(
+                    "jwt_secret_key cannot be empty when app_environment is not 'development'"
+                )
+            if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
+                raise ValueError(
+                    "jwt_secret_key must be set via JWT_SECRET_KEY when "
+                    "app_environment is not 'development'"
+                )
         return self
 
 
