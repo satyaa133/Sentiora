@@ -13,7 +13,7 @@ from uuid import UUID
 
 from typing import Any
 
-from sqlalchemy import or_, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
@@ -181,7 +181,7 @@ class RetrievalService:
         user_id: UUID,
         source_type: SourceType | None,
         memory_id: UUID | None,
-    ) -> Any:
+    ) -> Select[tuple[MemoryChunk, MemoryItem]]:
         stmt = (
             select(MemoryChunk, MemoryItem)
             .join(MemoryItem, MemoryChunk.memory_id == MemoryItem.id)
@@ -196,7 +196,8 @@ class RetrievalService:
             stmt = stmt.where(MemoryChunk.source_type == source_type)
         if memory_id is not None:
             stmt = stmt.where(MemoryChunk.memory_id == memory_id)
-        return stmt
+        from typing import cast
+        return cast(Select[tuple[MemoryChunk, MemoryItem]], stmt)
 
     def _to_retrieved(
         self,
