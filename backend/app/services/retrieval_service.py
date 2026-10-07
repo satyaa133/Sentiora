@@ -259,7 +259,7 @@ class RetrievalService:
             return []
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
-            if dist is not None and float(dist) > self.settings.rag_max_distance:
+            if dist is None or float(dist) > self.settings.rag_max_distance:
                 continue
             results.append(self._to_retrieved(chunk, item, float(dist), lexical=False))
         return results
