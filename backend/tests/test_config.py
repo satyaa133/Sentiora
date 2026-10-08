@@ -1,4 +1,3 @@
-# mypy: ignore-errors
 import pytest
 from pydantic_core import ValidationError
 

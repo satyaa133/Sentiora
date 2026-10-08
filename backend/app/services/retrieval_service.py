@@ -7,6 +7,7 @@ User A can never retrieve User B's memories.
 from __future__ import annotations
 
 import logging
+from typing import cast
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -195,7 +196,6 @@ class RetrievalService:
             stmt = stmt.where(MemoryChunk.source_type == source_type)
         if memory_id is not None:
             stmt = stmt.where(MemoryChunk.memory_id == memory_id)
-        from typing import cast
         return cast(Select[tuple[MemoryChunk, MemoryItem]], stmt)
 
     def _to_retrieved(
@@ -253,7 +253,7 @@ class RetrievalService:
                 .order_by(distance)
                 .limit(top_k)
             )
-            rows = self.db.execute(stmt).all()
+            rows = cast(list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all())
         except Exception:
             logger.exception("Semantic retrieval failed; continuing with lexical search")
             return []
@@ -289,7 +289,7 @@ class RetrievalService:
             .where(or_(*filters))
             .limit(candidate_limit)
         )
-        rows = self.db.execute(stmt).all()
+        rows = cast(list[tuple[MemoryChunk, MemoryItem]], self.db.execute(stmt).all())
         scored: list[RetrievedChunk] = []
         for chunk, item in rows:
             rank = _lexical_rank(item.title, chunk.content, tokens)
@@ -311,7 +311,7 @@ class RetrievalService:
             .order_by(MemoryItem.captured_at.desc(), MemoryChunk.chunk_index.asc())
             .limit(top_k)
         )
-        rows = self.db.execute(stmt).all()
+        rows = cast(list[tuple[MemoryChunk, MemoryItem]], self.db.execute(stmt).all())
         return [self._to_retrieved(chunk, item, None, lexical=True) for chunk, item in rows]
 
     def _expand_primary_memory(
@@ -347,7 +347,7 @@ class RetrievalService:
             .order_by(MemoryChunk.chunk_index.asc())
             .limit(limit)
         )
-        rows = self.db.execute(stmt).all()
+        rows = cast(list[tuple[MemoryChunk, MemoryItem]], self.db.execute(stmt).all())
         return [self._to_retrieved(chunk, item, None, lexical=True) for chunk, item in rows]
 
     @staticmethod
