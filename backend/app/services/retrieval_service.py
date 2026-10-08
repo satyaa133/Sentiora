@@ -7,9 +7,11 @@ User A can never retrieve User B's memories.
 from __future__ import annotations
 
 import logging
+from typing import cast
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
+
 
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session as DBSession
@@ -194,7 +196,7 @@ class RetrievalService:
             stmt = stmt.where(MemoryChunk.source_type == source_type)
         if memory_id is not None:
             stmt = stmt.where(MemoryChunk.memory_id == memory_id)
-        return stmt
+        return cast(Select[tuple[MemoryChunk, MemoryItem]], stmt)
 
     def _to_retrieved(
         self,
@@ -251,13 +253,13 @@ class RetrievalService:
                 .order_by(distance)
                 .limit(top_k)
             )
-            rows = self.db.execute(stmt).all()
+            rows = cast(list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all())
         except Exception:
             logger.exception("Semantic retrieval failed; continuing with lexical search")
             return []
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
-            if dist is not None and float(dist) > self.settings.rag_max_distance:
+            if dist is None or float(dist) > self.settings.rag_max_distance:
                 continue
             results.append(self._to_retrieved(chunk, item, float(dist), lexical=False))
         return results
@@ -287,7 +289,7 @@ class RetrievalService:
             .where(or_(*filters))
             .limit(candidate_limit)
         )
-        rows = self.db.execute(stmt).all()
+        rows = cast(list[tuple[MemoryChunk, MemoryItem]], self.db.execute(stmt).all())
         scored: list[RetrievedChunk] = []
         for chunk, item in rows:
             rank = _lexical_rank(item.title, chunk.content, tokens)
@@ -309,7 +311,7 @@ class RetrievalService:
             .order_by(MemoryItem.captured_at.desc(), MemoryChunk.chunk_index.asc())
             .limit(top_k)
         )
-        rows = self.db.execute(stmt).all()
+        rows = cast(list[tuple[MemoryChunk, MemoryItem]], self.db.execute(stmt).all())
         return [self._to_retrieved(chunk, item, None, lexical=True) for chunk, item in rows]
 
     def _expand_primary_memory(
@@ -345,7 +347,7 @@ class RetrievalService:
             .order_by(MemoryChunk.chunk_index.asc())
             .limit(limit)
         )
-        rows = self.db.execute(stmt).all()
+        rows = cast(list[tuple[MemoryChunk, MemoryItem]], self.db.execute(stmt).all())
         return [self._to_retrieved(chunk, item, None, lexical=True) for chunk, item in rows]
 
     @staticmethod
