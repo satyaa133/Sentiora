@@ -128,12 +128,12 @@ Apply Alembic migrations to create PostgreSQL tables (`users`, `memory_items`, `
 
 ```bash
 # Mac / Linux
-backend/.venv/bin/python3 -m alembic -c backend/alembic.ini upgrade head
+cd backend && .venv/bin/alembic upgrade head
 ```
 
 ```bat
 REM Windows
-backend\.venv\Scripts\python -m alembic -c backend\alembic.ini upgrade head
+cd backend && .venv\Scripts\alembic upgrade head
 ```
 
 ### Step 7 — Configure AI (Optional for Ask Sentiora)
