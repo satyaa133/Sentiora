@@ -48,6 +48,9 @@ class MemoryService:
 
         # Build clean plain text content
         raw_text = payload.content or ""
+        if not raw_text and payload.structured_content:
+            raw_text = "\n\n".join(node.text for node in payload.structured_content if node.text)
+
         normalized_content = normalize_content(raw_text, payload.source_type)
 
         # Basic verification: do not treat fabricated fallback content as a meaningful capture

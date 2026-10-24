@@ -15,75 +15,77 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<SignUp />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route
-            path="/onboarding"
-            element={
-              <OnboardingRoute>
-                <Onboarding />
-              </OnboardingRoute>
-            }
-          />
-          <Route
-            path="/dashboard"
-            element={
-              <ProtectedRoute>
-                <DashboardHome />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/timeline"
-            element={
-              <ProtectedRoute>
-                <DashboardHome />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/search"
-            element={
-              <ProtectedRoute>
-                <DashboardHome />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/ask"
-            element={
-              <ProtectedRoute>
-                <DashboardHome />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/sources"
-            element={
-              <ProtectedRoute>
-                <DashboardHome />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/privacy"
-            element={
-              <ProtectedRoute>
-                <DashboardHome />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <DashboardHome />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/">
+            <Route index element={<LandingPage />} />
+            <Route path="login" element={<Login />} />
+            <Route path="signup" element={<SignUp />} />
+            <Route path="forgot-password" element={<ForgotPassword />} />
+            <Route
+              path="onboarding"
+              element={
+                <OnboardingRoute>
+                  <Onboarding />
+                </OnboardingRoute>
+              }
+            />
+            <Route
+              path="dashboard"
+              element={
+                <ProtectedRoute>
+                  <DashboardHome />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="timeline"
+              element={
+                <ProtectedRoute>
+                  <DashboardHome />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="search"
+              element={
+                <ProtectedRoute>
+                  <DashboardHome />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="ask"
+              element={
+                <ProtectedRoute>
+                  <DashboardHome />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="sources"
+              element={
+                <ProtectedRoute>
+                  <DashboardHome />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="privacy"
+              element={
+                <ProtectedRoute>
+                  <DashboardHome />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="settings"
+              element={
+                <ProtectedRoute>
+                  <DashboardHome />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
         </Routes>
       </AuthProvider>
     </BrowserRouter>

@@ -240,3 +240,38 @@ def test_create_memory_item_deduplication(clean_db: None) -> None:
     dedupe_items = [i for i in items if i["url"] == "https://example.com/dedupe-test"]
     assert len(dedupe_items) == 1
 
+
+def test_capture_v2_empty_content_fallback(clean_db: None) -> None:
+    headers = _auth_headers("test_capture_v2_fallback@example.com")
+
+    payload: dict[str, Any] = {
+        "source_type": "webpage",
+        "url": "https://example.com/fallback-test",
+        "title": "Fallback Test",
+        "content": None,
+        "author": "Jane Doe",
+        "structured_content": [
+            {
+                "id": "node-1",
+                "type": "heading",
+                "text": "Fallback Heading",
+                "order": 0
+            },
+            {
+                "id": "node-2",
+                "type": "paragraph",
+                "text": "Fallback paragraph content.",
+                "order": 1,
+                "parent_id": "node-1"
+            }
+        ]
+    }
+
+    resp = client.post("/api/v1/memory-items", json=payload, headers=headers)
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+
+    # Verify that content is correctly built from structured_content
+    assert data["content"] == "Fallback Heading\nFallback paragraph content."
+    assert data["raw_content_length"] > 0
+

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, UTC
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ENUM, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -24,6 +24,13 @@ class MemoryChunk(Base):
     __tablename__ = "memory_chunks"
     __table_args__ = (
         UniqueConstraint("memory_id", "chunk_index", name="uq_memory_chunks_memory_index"),
+        Index("ix_memory_chunks_user_memory", "user_id", "memory_id"),
+        Index(
+            "ix_memory_chunks_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
