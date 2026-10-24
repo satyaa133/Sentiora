@@ -37,6 +37,18 @@ test("register, capture, search, ask, and delete memory", async ({ request }) =>
   const itemId = created.data.id as string;
   expect(created.data.status).toMatch(/pending|ready/);
 
+  // With a live RQ worker the capture is processed asynchronously; wait for READY
+  // before searching (CI has no Redis, so the API processes it inline instead).
+  await expect
+    .poll(
+      async () => {
+        const item = await request.get(`${API}/api/v1/memory-items/${itemId}`, { headers: auth });
+        return (await item.json()).data.status as string;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe("ready");
+
   const listed = await request.get(`${API}/api/v1/memory-items`, { headers: auth });
   expect(listed.status()).toBe(200);
   const items = (await listed.json()).data.items as Array<{ id: string; title: string }>;

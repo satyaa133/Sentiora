@@ -15,7 +15,11 @@ client = TestClient(app)
 def clean_db() -> None:
     db = SessionLocal()
     try:
-        db.query(MemoryItem).delete(synchronize_session=False)
+        # Only remove data owned by test users; never touch real local memories.
+        test_user_ids = db.query(User.id).filter(User.email.like("test_%@example.com"))
+        db.query(MemoryItem).filter(MemoryItem.user_id.in_(test_user_ids)).delete(
+            synchronize_session=False
+        )
         db.query(User).filter(User.email.like("test_%@example.com")).delete(synchronize_session=False)
         db.commit()
     finally:

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar, { type NavTab } from "../components/Sidebar";
 import MemoryCard from "../components/MemoryCard";
 import MemoryDetailDrawer from "../components/MemoryDetailDrawer";
@@ -15,8 +16,33 @@ import { useMemoryStats } from "../hooks/useMemoryStats";
 import type { MemoryItem, SourceType } from "../types/memory";
 import { formatExtractedContent } from "../utils/contentFormatter";
 
+const NAV_TABS: readonly NavTab[] = [
+  "dashboard",
+  "timeline",
+  "search",
+  "ask",
+  "sources",
+  "privacy",
+  "settings",
+];
+
+function tabFromPath(pathname: string): NavTab {
+  const segment = pathname.replace(/^\/+|\/+$/g, "");
+  return (NAV_TABS as readonly string[]).includes(segment) ? (segment as NavTab) : "dashboard";
+}
+
 export default function DashboardHome() {
-  const [activeTab, setActiveTab] = useState<NavTab>("dashboard");
+  // The URL is the source of truth so deep links (/ask, /timeline, ...) and
+  // browser back/forward open the matching view.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeTab = tabFromPath(location.pathname);
+  const setActiveTab = useCallback(
+    (tab: NavTab) => {
+      if (tabFromPath(window.location.pathname) !== tab) navigate(`/${tab}`);
+    },
+    [navigate],
+  );
   const {
     items,
     totalCount,
@@ -56,7 +82,7 @@ export default function DashboardHome() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [setActiveTab]);
 
   const onDeleteItem = async (id: string) => {
     const deleted = await handleDeleteItem(id);
