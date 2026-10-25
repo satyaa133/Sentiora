@@ -1,9 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import Echo, { type EchoState } from "@shared/ui/Echo";
 import Logo from "@shared/ui/Logo";
 import { IconSearch } from "@shared/ui/icons";
+
+afterEach(cleanup);
 
 const STATES: EchoState[] = ["idle", "saving", "happy", "faded", "guarding"];
 

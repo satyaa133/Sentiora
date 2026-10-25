@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), "../src/ui/tokens.css"),
   "utf8",
-);
+).replace(/\r\n/g, "\n");
 
 type Tokens = Record<string, string>;
 
@@ -24,10 +24,10 @@ function parseBlock(selector: string): Tokens {
 }
 
 const light = {
-  ...parseBlock(':root,\n:root[data-theme="light"]'),
+  ...parseBlock(':root,\n[data-theme="light"]'),
   ...parseBlock(":root {\n  --badge"),
 };
-const darkExplicit = parseBlock(':root[data-theme="dark"]');
+const darkExplicit = parseBlock('\n[data-theme="dark"]');
 const darkSystem = parseBlock(':root:not([data-theme="light"])');
 const dark = { ...light, ...darkExplicit };
 

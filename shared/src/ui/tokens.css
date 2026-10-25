@@ -2,11 +2,13 @@
  * Sentiora design tokens (Graphite & Coral). Source of truth: docs/DESIGN.md §2–3.
  *
  * Theme follows the OS by default. Setting data-theme="light" | "dark" on <html>
- * overrides it (see theme.ts). Components must use these variables, never raw hex.
+ * overrides it (see theme.ts). The same attribute on any element scopes a theme to
+ * that subtree (used by /dev/components to show both themes side by side).
+ * Components must use these variables, never raw hex.
  */
 
 :root,
-:root[data-theme="light"] {
+[data-theme="light"] {
   color-scheme: light;
 
   --bg: #f4f4f3;
@@ -30,6 +32,7 @@
 
   --shadow-float: 0 30px 60px -30px rgba(17, 17, 17, 0.25);
   --shadow-pop: 0 12px 32px -12px rgba(17, 17, 17, 0.18);
+  --overlay: rgba(17, 17, 17, 0.45);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -53,10 +56,11 @@
 
     --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
     --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+    --overlay: rgba(0, 0, 0, 0.65);
   }
 }
 
-:root[data-theme="dark"] {
+[data-theme="dark"] {
   color-scheme: dark;
 
   --bg: #111111;
@@ -76,6 +80,7 @@
 
   --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
   --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  --overlay: rgba(0, 0, 0, 0.65);
 }
 
 /* Source-type badges keep the same pair in both modes (DESIGN.md §2). */
@@ -96,6 +101,10 @@
   --font-display:
     -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+[data-theme] {
+  color: var(--text);
 }
 
 html {
@@ -153,6 +162,21 @@ body {
 
 .echo-float {
   animation: echo-float 250ms var(--ease) both;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.drawer-in {
+  animation: drawer-in 220ms var(--ease) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
