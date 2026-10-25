@@ -11,7 +11,9 @@ const MAX_URL_LENGTH = 2048;
 const MAX_TITLE_LENGTH = 1024;
 const MAX_AUTHOR_LENGTH = 512;
 const MAX_IMAGE_URL_LENGTH = 2048;
-export const MAX_CONTENT_LENGTH = 80_000;
+// Aligned with the backend capture schema (content max_length=500_000) so long
+// transcripts are not truncated before they reach the vault.
+export const MAX_CONTENT_LENGTH = 500_000;
 
 export function normalizeExtractedText(rawText: string): string {
   if (!rawText) return "";
@@ -210,6 +212,8 @@ export interface CapturePostResult {
   success: boolean;
   deduplicated?: boolean;
   error?: string;
+  /** Server processing status of the memory: pending | processing | ready | failed. */
+  status?: string;
 }
 
 export async function postCapturePayload(
@@ -255,6 +259,7 @@ export function sendCaptureMessage(
         success: Boolean(response.success),
         deduplicated: Boolean(response.deduplicated),
         error: response.error ? String(response.error) : undefined,
+        status: typeof response.status === "string" ? response.status : undefined,
       });
     });
   });

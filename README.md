@@ -109,6 +109,8 @@ python -m venv backend\.venv
 backend\.venv\Scripts\pip install -e ".\backend[dev]"
 ```
 
+The npm scripts (`dev:backend`, `dev:worker`, `test:backend`, ...) always use `backend/.venv` (see `scripts/run-python.mjs`).
+
 ### Step 5 — Start Infrastructure Containers (Postgres + Redis)
 
 Ensure **Docker Desktop** is running, then start database services (or use `npm run compose:up`):
@@ -116,6 +118,8 @@ Ensure **Docker Desktop** is running, then start database services (or use `npm 
 ```bash
 docker compose up -d postgres redis
 ```
+
+Only start the services you need: `docker compose up -d` would also start containerised `backend`/`worker`, which compete with the host processes for port 8000 and the capture queue.
 
 > **Mac / Linux Docker socket tip**: If you get a socket permission error, run:
 > ```bash
@@ -138,7 +142,9 @@ cd backend && .venv\Scripts\alembic upgrade head
 
 ### Step 7 — Configure AI (Optional for Ask Sentiora)
 
-Set `LLM_PROVIDER` plus `OPENAI_API_KEY` or `GEMINI_API_KEY` in `backend/.env` (see `.env.example`). Docker backend and worker read that file.
+Set `LLM_PROVIDER` (`openai`, `gemini`, or `openrouter`) plus its key in `backend/.env` (see `.env.example`). Docker backend and worker read that file.
+
+**Semantic search needs an embedding key.** OpenRouter provides chat only, so with `LLM_PROVIDER=openrouter` set `OPENAI_API_KEY` or `GEMINI_API_KEY` as well. `EMBEDDING_PROVIDER=auto` (default) picks the provider; `GEMINI_EMBEDDING_MODEL` must output 1536 dimensions (`gemini-embedding-001`). Restart the API and worker after changing keys. Vectors are model-specific, so re-capture after switching embedding models.
 
 Without a provider key:
 
@@ -201,8 +207,31 @@ npm run dev:extension      # Watch mode for Chrome Extension build
 # Run unit & integration test suites
 npm run test:frontend      # Vitest frontend tests
 npm run test:extension     # Vitest extension tests
-npm run test:backend       # Pytest backend tests
+npm run test:backend       # Pytest backend tests (dedicated test database)
+npm run test:e2e           # Playwright: API + real-UI flows on an isolated stack
+
+# Release tooling
+npm run package:extension  # Chrome Web Store ZIP (needs VITE_API_BASE_URL=https://...)
 ```
+
+---
+
+## Testing and Data Safety
+
+Tests never touch the development database:
+
+- **pytest** points the app at `TEST_DATABASE_URL`, or derives `sentiora_test` on the same server from `DATABASE_URL`. It creates and migrates that database automatically and empties it at the start of each run. It aborts if the target database name lacks `test`, equals the development database, or `APP_ENVIRONMENT=production`. Real provider keys are blanked for the test session, so no live AI calls are made.
+- **Playwright** (`npm run test:e2e`) starts its own stack instead of reusing dev servers: API on `:8100` and an RQ worker against the test database and Redis DB 15, plus the frontend on `:5180`. It runs the API-level flow and browser-driven UI flows (sign up → add memory → processed → cited answer; failed capture shows its reason). Without Redis (as in CI), the API processes captures inline.
+- `npm run test:db:prepare` creates and migrates the test database on its own.
+- Opt-in live checks (skipped by default): `SENTIORA_LIVE_YOUTUBE=1 npx vitest run src/content/youtubeCapture.live.test.ts` in `extension/`, and `npm run verify:youtube-extension`.
+
+## YouTube Capture
+
+Watch, Shorts, and live URLs are saved under one canonical watch URL. The transcript comes from official caption tracks, or from YouTube's own transcript panel (opened only on a manual popup capture). Segment timestamps are kept, and chunks carry their time range. Nothing is saved without a real transcript; users get a typed reason instead. YouTube increasingly blocks caption downloads outside its player, so verify transcript capture in your own signed-in Chrome profile. Details: [docs/RELEASE.md](docs/RELEASE.md#3-youtube-capture-behaviour-and-limits).
+
+## Production and Chrome Web Store
+
+See [docs/RELEASE.md](docs/RELEASE.md): `docker-compose.prod.yml` (non-root images, one-shot migrations, internal-only DB/Redis, nginx same-origin proxy, fail-fast secrets) and the extension packaging checklist (permission justifications, outstanding human decisions).
 
 ---
 
@@ -251,13 +280,14 @@ npm run test:backend       # Pytest backend tests
 - LLM answers when a provider key is configured; otherwise a grounded local fallback from retrieved memory
 - Frontend Ask Sentiora view distinguishes empty vault, indexing, fallback answers, auth, and system errors
 
-### 🟡 Phase 8 — Testing *(In Progress)*
-- Backend pytest suites for auth, capture, search, and Ask/RAG behavior
-- Frontend, extension, and shared Vitest coverage
-- End-to-end Playwright automation pending
+### ✅ Phase 8 — Testing
+- Backend pytest suites for auth, authorization, capture, YouTube transcripts, search, Ask/RAG and security, on a dedicated test database
+- Frontend, extension (including service-worker messaging), and shared Vitest coverage
+- Playwright API and browser-driven UI flows on an isolated stack
 
-### ⏳ Phase 9 — Deployment & Launch *(Planned)*
-- Staging/production environments, monitoring, and Chrome Web Store release
+### 🟡 Phase 9 — Deployment & Launch *(In Progress)*
+- Production Docker Compose stack validated locally; extension packaging script and store checklist
+- Pending: real deployment target, monitoring, brand icons/store assets, privacy policy, Web Store submission
 
 ---
 
@@ -283,6 +313,7 @@ All canonical engineering specifications live in `docs/`:
 | File | Description |
 |---|---|
 | `docs/TASKS.md` | Live engineering progress tracker and deliverables |
+| `docs/RELEASE.md` | Production deployment, Chrome Web Store packaging, YouTube capture limits |
 | `docs/01_PRD_v2.1_FINAL.pdf` | Product Requirements Document |
 | `docs/02_SRS_v1.0.pdf` | Software Requirements Specification |
 | `docs/03_Backend_Technical_Specification_v1.2.pdf` | Backend technical architecture |

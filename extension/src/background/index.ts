@@ -2,7 +2,7 @@ import { extApiFetch } from "../services/extApiClient";
 import { setAccessToken, setRefreshToken, setCachedUser, clearAllAuthData } from "../services/storage";
 import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
 import { postCapturePayload, sanitizeCapturePayload } from "../shared/captureUtils";
-import type { ExtensionMessage, CapturePayload } from "../shared/types";
+import type { ExtensionMessage, CapturePayload, YoutubePlayerResponse } from "../shared/types";
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info("Sentiora extension background initialized.");
@@ -38,6 +38,15 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     chrome.extension.isAllowedFileSchemeAccess((isAllowed) => {
       sendResponse({ isAllowed });
     });
+    return true;
+  }
+
+  if (message.type === "GET_YOUTUBE_PLAYER_RESPONSE") {
+    getYoutubePlayerResponse(message.videoId, sender.tab?.id, sender.frameId ?? 0)
+      .then((playerResponse) => sendResponse({ success: Boolean(playerResponse), playerResponse }))
+      .catch((err) =>
+        sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) }),
+      );
     return true;
   }
 
@@ -107,37 +116,48 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
 
 const inFlightCaptures = new Set<string>();
 
-async function handleCaptureMessage(
-  payload: CapturePayload,
-): Promise<{ success: boolean; deduplicated?: boolean; error?: string }> {
+type CaptureMessageResult = {
+  success: boolean;
+  deduplicated?: boolean;
+  error?: string;
+  /** Server-side processing status of the saved memory (pending → processing → ready/failed). */
+  status?: string;
+  memoryId?: string;
+};
+
+export async function handleCaptureMessage(payload: CapturePayload): Promise<CaptureMessageResult> {
   const sanitized = sanitizeCapturePayload(payload);
   const allowLocalPdf = sanitized.source_type === "pdf" && isPdfUrl(sanitized.url);
   if (isUrlBlocked(sanitized.url, { allowLocalPdf })) {
     return { success: false, error: "This page is protected and cannot be captured." };
   }
 
+  // Claim the URL before any await so concurrent messages for the same page
+  // (e.g. YouTube SPA events firing twice) cannot both reach the API.
   if (inFlightCaptures.has(sanitized.url)) {
     console.info("[Sentiora Background] Skipping capture, URL currently in-flight:", sanitized.url);
     return { success: true, deduplicated: true };
   }
-
-  // Check rate limit / deduplication unless user explicitly forced capture
-  if (!payload.is_force) {
-    const recent = await isUrlCapturedRecently(sanitized.url);
-    if (recent) {
-      console.info("[Sentiora Background] Skipping automatic capture, URL captured recently:", sanitized.url);
-      return { success: true, deduplicated: true };
-    }
-  }
-
   inFlightCaptures.add(sanitized.url);
+
   try {
+    // Check rate limit / deduplication unless user explicitly forced capture
+    if (!payload.is_force) {
+      const recent = await isUrlCapturedRecently(sanitized.url);
+      if (recent) {
+        console.info("[Sentiora Background] Skipping automatic capture, URL captured recently:", sanitized.url);
+        return { success: true, deduplicated: true };
+      }
+    }
+
+    let created: { id?: string; status?: string } | undefined;
     const result = await postCapturePayload(
       async (capturePayload) => {
-        await extApiFetch("/memory-items", {
+        const resp = await extApiFetch<{ id?: string; status?: string }>("/memory-items", {
           method: "POST",
           body: JSON.stringify(capturePayload),
         });
+        created = resp.data;
       },
       sanitized,
     );
@@ -150,7 +170,7 @@ async function handleCaptureMessage(
     await markUrlCaptured(sanitized.url);
     showBadgeSuccess();
     notifyDashboardTabs();
-    return { success: true };
+    return { success: true, status: created?.status, memoryId: created?.id };
   } finally {
     inFlightCaptures.delete(sanitized.url);
   }
@@ -238,4 +258,73 @@ function showBadgeSuccess(): void {
   } catch {
     // Ignore badge errors if action UI is disabled
   }
+}
+
+/**
+ * Runs in the page's MAIN world (content scripts live in an isolated world and
+ * cannot see YouTube's player globals). Must be self-contained: it is
+ * serialized by chrome.scripting. Returns only a small JSON-safe subset.
+ */
+export function readYoutubePlayerResponseInPage(expectedVideoId: string): YoutubePlayerResponse | null {
+  type PlayerEl = { getPlayerResponse?: () => YoutubePlayerResponse | null };
+  const candidates: (YoutubePlayerResponse | null | undefined)[] = [];
+  for (const selector of ["#movie_player", "#shorts-player"]) {
+    try {
+      candidates.push((document.querySelector(selector) as PlayerEl | null)?.getPlayerResponse?.());
+    } catch {
+      // player not ready
+    }
+  }
+  candidates.push((window as unknown as { ytInitialPlayerResponse?: YoutubePlayerResponse }).ytInitialPlayerResponse);
+
+  const match = candidates.find((resp) => resp?.videoDetails?.videoId === expectedVideoId);
+  if (!match) return null;
+  const details = match.videoDetails ?? {};
+  return {
+    videoDetails: {
+      videoId: details.videoId,
+      title: details.title,
+      author: details.author,
+      channelId: details.channelId,
+      lengthSeconds: details.lengthSeconds,
+      isLive: details.isLive,
+      thumbnail: { thumbnails: (details.thumbnail?.thumbnails ?? []).slice(-3) },
+    },
+    playabilityStatus: {
+      status: match.playabilityStatus?.status,
+      reason: match.playabilityStatus?.reason,
+    },
+    captions: {
+      playerCaptionsTracklistRenderer: {
+        captionTracks: (match.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []).map(
+          (track) => ({ baseUrl: track.baseUrl, languageCode: track.languageCode, kind: track.kind }),
+        ),
+      },
+    },
+  };
+}
+
+export async function getYoutubePlayerResponse(
+  videoId: string,
+  tabId: number | undefined,
+  frameId: number,
+): Promise<YoutubePlayerResponse | null> {
+  if (tabId == null || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) return null;
+  // The player can lag behind SPA navigation; poll briefly (~6s).
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    try {
+      const injected = await chrome.scripting.executeScript({
+        target: { tabId, frameIds: [frameId] },
+        world: "MAIN",
+        func: readYoutubePlayerResponseInPage,
+        args: [videoId],
+      });
+      const result = injected[0]?.result as YoutubePlayerResponse | null | undefined;
+      if (result) return result;
+    } catch {
+      return null; // tab closed, navigated to a restricted page, or no host access
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  return null;
 }

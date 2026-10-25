@@ -7,16 +7,78 @@ import type {
   YoutubeCapturePayload,
   StructuredNode,
   ExtractionStatus,
-  CaptureErrorCode
+  CaptureErrorCode,
+  YoutubePlayerResponse,
 } from "../shared/types";
 
-export function isYoutubeWatchPage(): boolean {
-  return (
-    window.location.hostname.includes("youtube.com") &&
-    window.location.pathname === "/watch" &&
-    new URLSearchParams(window.location.search).has("v")
-  );
+// ──────────────────────────────────────────────
+// URL handling
+// ──────────────────────────────────────────────
+
+export type YoutubePageKind = "watch" | "shorts" | "live";
+
+export interface YoutubeVideoRef {
+  videoId: string;
+  kind: YoutubePageKind;
 }
+
+const YOUTUBE_PAGE_HOSTS = new Set(["youtube.com", "www.youtube.com", "m.youtube.com"]);
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+/** Video pages the content script can capture (embeds and youtu.be redirects excluded). */
+export function parseYoutubeVideoUrl(href: string): YoutubeVideoRef | null {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  if (!YOUTUBE_PAGE_HOSTS.has(url.hostname.toLowerCase())) return null;
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  let ref: YoutubeVideoRef | null = null;
+  if (url.pathname === "/watch") {
+    const id = url.searchParams.get("v");
+    if (id) ref = { videoId: id, kind: "watch" };
+  } else if (parts.length >= 2 && (parts[0] === "shorts" || parts[0] === "live")) {
+    ref = { videoId: parts[1] as string, kind: parts[0] as YoutubePageKind };
+  }
+  return ref && VIDEO_ID_RE.test(ref.videoId) ? ref : null;
+}
+
+export function canonicalYoutubeUrl(videoId: string): string {
+  return `https://www.youtube.com/watch?v=${videoId}`;
+}
+
+export function isYoutubeHost(hostname = window.location.hostname): boolean {
+  return YOUTUBE_PAGE_HOSTS.has(hostname.toLowerCase());
+}
+
+export function isYoutubeVideoPage(href = window.location.href): boolean {
+  return parseYoutubeVideoUrl(href) !== null;
+}
+
+// ──────────────────────────────────────────────
+// Errors
+// ──────────────────────────────────────────────
+
+export class YoutubeCaptureError extends Error {
+  constructor(
+    readonly code: CaptureErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "YoutubeCaptureError";
+  }
+}
+
+function fail(code: CaptureErrorCode, message: string): never {
+  throw new YoutubeCaptureError(code, message);
+}
+
+// ──────────────────────────────────────────────
+// Caption parsing
+// ──────────────────────────────────────────────
 
 export function decodeHtmlEntities(text: string): string {
   return text
@@ -31,12 +93,6 @@ export function decodeHtmlEntities(text: string): string {
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)));
 }
 
-function throwError(code: CaptureErrorCode, message: string): never {
-  const err = new Error(message) as any;
-  err.code = code;
-  throw err;
-}
-
 export interface TranscriptSegment {
   text: string;
   start: number;
@@ -49,6 +105,8 @@ export interface CaptionTrack {
   kind?: string;
 }
 
+const round1 = (value: number) => Math.round(value * 10) / 10;
+
 export function parseTimedTextXml(xmlText: string): TranscriptSegment[] | null {
   if (!xmlText.includes("<text")) return null;
   const parser = new DOMParser();
@@ -58,11 +116,12 @@ export function parseTimedTextXml(xmlText: string): TranscriptSegment[] | null {
   for (let i = 0; i < textNodes.length; i++) {
     const node = textNodes[i];
     if (!node?.textContent) continue;
-    const raw = decodeHtmlEntities(node.textContent.trim());
+    const raw = decodeHtmlEntities(node.textContent.replace(/\s+/g, " ").trim());
     if (!raw) continue;
     const start = parseFloat(node.getAttribute("start") ?? "0");
     const dur = parseFloat(node.getAttribute("dur") ?? "0");
-    segments.push({ text: raw, start, end: Math.round((start + dur) * 10) / 10 });
+    if (!Number.isFinite(start)) continue;
+    segments.push({ text: raw, start, end: round1(start + (Number.isFinite(dur) ? dur : 0)) });
   }
   return segments.length > 0 ? segments : null;
 }
@@ -77,12 +136,12 @@ export function parseTimedTextJson3(raw: string): TranscriptSegment[] | null {
       const text = (event.segs ?? [])
         .map((seg) => seg.utf8 ?? "")
         .join("")
-        .replace(/\n/g, " ")
+        .replace(/\s+/g, " ")
         .trim();
       if (!text) continue;
       const start = (event.tStartMs ?? 0) / 1000;
       const dur = (event.dDurationMs ?? 0) / 1000;
-      segments.push({ text, start, end: Math.round((start + dur) * 10) / 10 });
+      segments.push({ text, start, end: round1(start + dur) });
     }
     return segments.length > 0 ? segments : null;
   } catch {
@@ -91,16 +150,10 @@ export function parseTimedTextJson3(raw: string): TranscriptSegment[] | null {
 }
 
 export function parseCaptionTracks(playerResponse: unknown): CaptionTrack[] {
-  const root = playerResponse as {
-    captions?: {
-      playerCaptionsTracklistRenderer?: {
-        captionTracks?: { baseUrl?: string; languageCode?: string; kind?: string }[];
-      };
-    };
-  };
+  const root = playerResponse as YoutubePlayerResponse | null;
   const tracks = root?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? [];
   return tracks
-    .filter((track) => typeof track.baseUrl === "string" && track.baseUrl.length > 0)
+    .filter((track) => typeof track?.baseUrl === "string" && track.baseUrl.length > 0)
     .map((track) => ({
       baseUrl: track.baseUrl as string,
       languageCode: track.languageCode ?? "",
@@ -108,6 +161,17 @@ export function parseCaptionTracks(playerResponse: unknown): CaptionTrack[] {
     }));
 }
 
+/** Manual English tracks first, then other manual tracks, then auto-generated (asr). */
+export function pickCaptionTracks(tracks: CaptionTrack[], limit = 3): CaptionTrack[] {
+  const preferred = ["en", "en-US", "en-GB"];
+  const score = (track: CaptionTrack) => {
+    const pref = preferred.indexOf(track.languageCode);
+    return (track.kind === "asr" ? 100 : 0) + (pref >= 0 ? pref : 50);
+  };
+  return [...tracks].sort((a, b) => score(a) - score(b)).slice(0, limit);
+}
+
+/** Group short caption cues into searchable paragraphs that keep their time range. */
 export function groupTranscriptSegments(
   segments: TranscriptSegment[],
   maxChars = 420,
@@ -133,11 +197,12 @@ export function groupTranscriptSegments(
     buffer = [];
   };
 
-  for (const segment of segments) {
+  const ordered = [...segments].sort((a, b) => a.start - b.start);
+  for (const segment of ordered) {
     if (buffer.length === 0) {
       groupStart = segment.start;
     }
-    groupEnd = segment.end;
+    groupEnd = Math.max(segment.end, segment.start);
     buffer.push(segment.text);
     if (buffer.join(" ").length >= maxChars) {
       flush();
@@ -147,185 +212,345 @@ export function groupTranscriptSegments(
   return nodes;
 }
 
-function pickCaptionTracks(tracks: CaptionTrack[]): CaptionTrack[] {
-  const preferred = ["en", "en-US", "en-GB"];
-  const ranked = [...tracks].sort((a, b) => {
-    const aPref = preferred.indexOf(a.languageCode);
-    const bPref = preferred.indexOf(b.languageCode);
-    const aScore = (aPref >= 0 ? aPref : 50) + (a.kind === "asr" ? 10 : 0);
-    const bScore = (bPref >= 0 ? bPref : 50) + (b.kind === "asr" ? 10 : 0);
-    return aScore - bScore;
+// ──────────────────────────────────────────────
+// Transcript panel (page-provided transcript, read from the DOM)
+// ──────────────────────────────────────────────
+
+const SEGMENT_SELECTOR = "ytd-transcript-segment-renderer, transcript-segment-view-model";
+const TIMESTAMP_RE = /^(?:(\d+):)?(\d{1,2}):(\d{2})$/;
+
+export function parseTimestamp(value: string): number | null {
+  const match = TIMESTAMP_RE.exec(value.trim());
+  if (!match) return null;
+  const [, h, m, s] = match;
+  return (h ? parseInt(h, 10) * 3600 : 0) + parseInt(m as string, 10) * 60 + parseInt(s as string, 10);
+}
+
+/** Read YouTube's own transcript panel if it is rendered. */
+export function readTranscriptPanel(
+  root: Document | Element = document,
+  durationSeconds?: number,
+): TranscriptSegment[] | null {
+  const raw: { start: number; text: string }[] = [];
+  for (const el of Array.from(root.querySelectorAll(SEGMENT_SELECTOR))) {
+    const stampEl = el.querySelector(
+      ".segment-timestamp, [class*='Timestamp'], [class*='timestamp']",
+    );
+    const stampText = (stampEl?.textContent ?? "").trim();
+    const start = parseTimestamp(stampText);
+    if (start === null) continue;
+    const textEl = el.querySelector(".segment-text, [class*='segment-text'], [class*='SegmentText']");
+    let text = (textEl?.textContent ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (!textEl && stampText && text.startsWith(stampText)) {
+      text = text.slice(stampText.length).trim();
+    }
+    if (text) raw.push({ start, text });
+  }
+  if (raw.length === 0) return null;
+  raw.sort((a, b) => a.start - b.start);
+  return raw.map((seg, i) => {
+    const next = raw[i + 1]?.start;
+    const end = next ?? (durationSeconds && durationSeconds > seg.start ? durationSeconds : seg.start + 5);
+    return { text: seg.text, start: seg.start, end };
   });
-  return ranked.slice(0, 6);
 }
 
-async function fetchCaptionUrl(url: string): Promise<TranscriptSegment[] | null> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-    const resp = await fetch(url, { signal: controller.signal, credentials: "include" });
-    window.clearTimeout(timeoutId);
-    if (!resp.ok) return null;
-    const raw = await resp.text();
-    return parseTimedTextJson3(raw) ?? parseTimedTextXml(raw);
-  } catch {
-    return null;
-  }
+function findTranscriptButton(root: Document | Element): HTMLElement | null {
+  return (
+    (root.querySelector(
+      "ytd-video-description-transcript-section-renderer button",
+    ) as HTMLElement | null) ??
+    (root.querySelector("button[aria-label*='transcript' i]") as HTMLElement | null)
+  );
 }
+
+// ──────────────────────────────────────────────
+// Player response
+// ──────────────────────────────────────────────
 
 /**
- * Strategy 1: read from the YouTube player element's internal API.
- * The <ytd-player> / #movie_player element exposes getPlayerResponse()
- * which IS updated on SPA navigation (unlike ytInitialPlayerResponse).
+ * Fallback for when the main-world bridge is unavailable: parse the inline
+ * `ytInitialPlayerResponse` script. Only valid for the initial page load, so
+ * the video ID is always verified.
  */
-function getPlayerResponseFromElement(targetVideoId: string): unknown | null {
-  try {
-    const playerEl = document.querySelector("#movie_player") as any;
-    if (typeof playerEl?.getPlayerResponse !== "function") return null;
-    const resp = playerEl.getPlayerResponse();
-    if (resp?.videoDetails?.videoId === targetVideoId) return resp;
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-/**
- * Strategy 2: ytInitialPlayerResponse — valid for the INITIAL page load only.
- * On SPA navigation this becomes stale, so we must verify the video ID.
- */
-function getInitialPlayerResponse(targetVideoId: string): unknown | null {
-  try {
-    const w = window as any;
-    const resp = w.ytInitialPlayerResponse;
-    if (resp?.videoDetails?.videoId === targetVideoId) return resp;
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-/**
- * Strategy 3: ytplayer.config.args.raw_player_response (legacy path).
- */
-function getLegacyPlayerResponse(targetVideoId: string): unknown | null {
-  try {
-    const ytplayer = (window as any).ytplayer;
-    if (!ytplayer?.config?.args?.raw_player_response) return null;
-    const resp = JSON.parse(ytplayer.config.args.raw_player_response);
-    if (resp?.videoDetails?.videoId === targetVideoId) return resp;
-  } catch {
-    // ignore parse error
-  }
-  return null;
-}
-
-/**
- * Poll all three strategies for up to maxWaitMs.
- * The player element strategy (Strategy 1) is authoritative for SPA navigation.
- */
-async function getPlayerResponse(targetVideoId: string, maxWaitMs = 10000): Promise<unknown> {
-  const start = performance.now();
-  while (performance.now() - start < maxWaitMs) {
-    const resp =
-      getPlayerResponseFromElement(targetVideoId) ??
-      getInitialPlayerResponse(targetVideoId) ??
-      getLegacyPlayerResponse(targetVideoId);
-    if (resp) return resp;
-    await new Promise(resolve => setTimeout(resolve, 400));
-  }
-  return null;
-}
-
-
-async function fetchTranscriptFromPlayer(videoId: string): Promise<TranscriptSegment[]> {
-  const playerResponse = await getPlayerResponse(videoId);
-  if (!playerResponse) {
-    throwError("YOUTUBE_PLAYER_UNREADY", "YouTube player is not ready or navigated too quickly.");
-  }
-
-  const tracks = pickCaptionTracks(parseCaptionTracks(playerResponse));
-  if (tracks.length === 0) {
-    throwError("YOUTUBE_CAPTIONS_UNAVAILABLE", "No captions available for this video.");
-  }
-
-  let lastError = null;
-  for (const track of tracks) {
-    const withFmt = track.baseUrl.includes("fmt=") ? track.baseUrl : `${track.baseUrl}&fmt=json3`;
+export function extractInlinePlayerResponse(
+  doc: Document,
+  videoId: string,
+): YoutubePlayerResponse | null {
+  const marker = "ytInitialPlayerResponse";
+  for (const script of Array.from(doc.querySelectorAll("script"))) {
+    const source = script.textContent ?? "";
+    const at = source.indexOf(marker);
+    if (at < 0) continue;
+    const open = source.indexOf("{", at);
+    if (open < 0) continue;
+    const json = sliceBalancedObject(source, open);
+    if (!json) continue;
     try {
-      const segments = (await fetchCaptionUrl(withFmt)) ?? (await fetchCaptionUrl(track.baseUrl));
-      if (segments) return segments;
-    } catch (err) {
-      lastError = err;
+      const parsed = JSON.parse(json) as YoutubePlayerResponse;
+      if (parsed?.videoDetails?.videoId === videoId) return parsed;
+    } catch {
+      // keep looking
     }
   }
-
-  if (lastError) {
-    throwError("YOUTUBE_TRANSCRIPT_FETCH_FAILED", "Failed to fetch transcript from YouTube servers.");
-  }
-  throwError("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "Failed to parse YouTube transcript data.");
+  return null;
 }
 
-export async function captureYoutube(isForce = false): Promise<YoutubeCapturePayload> {
-  const started = performance.now();
-  const urlParams = new URLSearchParams(window.location.search);
-  const videoId = urlParams.get("v");
-  if (!videoId) {
-    throwError("YOUTUBE_PLAYER_UNREADY", "Could not find video ID in the URL.");
+function sliceBalancedObject(source: string, open: number): string | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = open; i < source.length; i++) {
+    const ch = source[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(open, i + 1);
+    }
+  }
+  return null;
+}
+
+/** Ask the background worker to read the player response from the page's main world. */
+export function requestPlayerResponseFromBackground(
+  videoId: string,
+): Promise<YoutubePlayerResponse | null> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "GET_YOUTUBE_PLAYER_RESPONSE", videoId }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+        resolve((response?.playerResponse as YoutubePlayerResponse | undefined) ?? null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+// ──────────────────────────────────────────────
+// Metadata
+// ──────────────────────────────────────────────
+
+export interface YoutubeVideoMetadata {
+  videoId: string;
+  canonicalUrl: string;
+  title: string;
+  author?: string;
+  channelId?: string;
+  durationSeconds?: number;
+  thumbnailUrl: string;
+  isLive: boolean;
+}
+
+export function extractVideoMetadata(
+  videoId: string,
+  playerResponse: YoutubePlayerResponse | null,
+  doc: Document = document,
+): YoutubeVideoMetadata {
+  const details = playerResponse?.videoDetails;
+  const domTitle =
+    doc.querySelector("h1.ytd-watch-metadata yt-formatted-string")?.textContent ??
+    doc.querySelector("meta[property='og:title']")?.getAttribute("content") ??
+    doc.querySelector("meta[name='title']")?.getAttribute("content") ??
+    doc.title.replace(/\s*-\s*YouTube\s*$/i, "");
+  const title = (details?.title || domTitle || "YouTube Video").trim().slice(0, 1024);
+
+  const domAuthor =
+    doc.querySelector("#owner #channel-name a")?.textContent ??
+    doc.querySelector("ytd-channel-name a")?.textContent ??
+    undefined;
+  const author = (details?.author || domAuthor || "").trim().slice(0, 512) || undefined;
+
+  const length = Number(details?.lengthSeconds);
+  const thumbnails = details?.thumbnail?.thumbnails ?? [];
+  const largest = [...thumbnails]
+    .filter((t) => typeof t?.url === "string")
+    .sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0];
+
+  return {
+    videoId,
+    canonicalUrl: canonicalYoutubeUrl(videoId),
+    title,
+    author,
+    channelId: details?.channelId,
+    durationSeconds: Number.isFinite(length) && length > 0 ? length : undefined,
+    thumbnailUrl: largest?.url ?? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+    isLive: Boolean(details?.isLive),
+  };
+}
+
+// ──────────────────────────────────────────────
+// Capture
+// ──────────────────────────────────────────────
+
+export interface YoutubeCaptureDeps {
+  href: string;
+  doc: Document;
+  requestPlayerResponse: (videoId: string) => Promise<YoutubePlayerResponse | null>;
+  fetchText: (url: string) => Promise<string | null>;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+}
+
+async function defaultFetchText(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+  try {
+    const resp = await fetch(url, { signal: controller.signal, credentials: "include" });
+    if (!resp.ok) return null;
+    const raw = await resp.text();
+    return raw.trim() ? raw : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function defaultDeps(): YoutubeCaptureDeps {
+  return {
+    href: window.location.href,
+    doc: document,
+    requestPlayerResponse: requestPlayerResponseFromBackground,
+    fetchText: defaultFetchText,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: () => performance.now(),
+  };
+}
+
+async function fetchCaptionTrack(
+  track: CaptionTrack,
+  fetchText: YoutubeCaptureDeps["fetchText"],
+): Promise<TranscriptSegment[] | null> {
+  const json3Url = track.baseUrl.includes("fmt=") ? track.baseUrl : `${track.baseUrl}&fmt=json3`;
+  const json3 = await fetchText(json3Url);
+  const fromJson = json3 ? (parseTimedTextJson3(json3) ?? parseTimedTextXml(json3)) : null;
+  if (fromJson) return fromJson;
+  if (json3Url === track.baseUrl) return null;
+  const xml = await fetchText(track.baseUrl);
+  return xml ? (parseTimedTextXml(xml) ?? parseTimedTextJson3(xml)) : null;
+}
+
+async function readPanelTranscript(
+  deps: YoutubeCaptureDeps,
+  allowOpen: boolean,
+  durationSeconds?: number,
+): Promise<TranscriptSegment[] | null> {
+  const existing = readTranscriptPanel(deps.doc, durationSeconds);
+  if (existing || !allowOpen) return existing;
+  const button = findTranscriptButton(deps.doc);
+  if (!button) return null;
+  button.click();
+  for (let waited = 0; waited < 6000; waited += 250) {
+    await deps.sleep(250);
+    const segments = readTranscriptPanel(deps.doc, durationSeconds);
+    if (segments) return segments;
+  }
+  return null;
+}
+
+const UNAVAILABLE_STATUSES = new Set(["ERROR", "UNPLAYABLE", "LOGIN_REQUIRED", "CONTENT_CHECK_REQUIRED", "AGE_CHECK_REQUIRED"]);
+
+/**
+ * Extract a YouTube transcript capture. Throws YoutubeCaptureError when no real
+ * transcript is accessible: metadata alone is never returned as a capture.
+ *
+ * @param isForce manual capture from the popup. Only manual captures may open
+ *   YouTube's transcript panel; automatic captures never touch the page UI.
+ */
+export async function captureYoutube(
+  isForce = false,
+  overrides: Partial<YoutubeCaptureDeps> = {},
+): Promise<YoutubeCapturePayload> {
+  const deps = { ...defaultDeps(), ...overrides };
+  const started = deps.now();
+  const ref = parseYoutubeVideoUrl(deps.href);
+  if (!ref) {
+    fail("YOUTUBE_PLAYER_UNREADY", "This is not a supported YouTube video page.");
   }
 
-  const segments = await fetchTranscriptFromPlayer(videoId);
+  const playerResponse =
+    (await deps.requestPlayerResponse(ref.videoId)) ??
+    extractInlinePlayerResponse(deps.doc, ref.videoId);
+
+  const playability = playerResponse?.playabilityStatus?.status;
+  if (playability && UNAVAILABLE_STATUSES.has(playability)) {
+    fail(
+      "YOUTUBE_VIDEO_UNAVAILABLE",
+      `This video is not accessible (${playability.toLowerCase().replace(/_/g, " ")}). Nothing was saved.`,
+    );
+  }
+
+  const metadata = extractVideoMetadata(ref.videoId, playerResponse, deps.doc);
+  const tracks = pickCaptionTracks(parseCaptionTracks(playerResponse));
+
+  let segments: TranscriptSegment[] | null = null;
+  let source: "captions" | "panel" | null = null;
+  for (const track of tracks) {
+    segments = await fetchCaptionTrack(track, deps.fetchText);
+    if (segments) {
+      source = "captions";
+      break;
+    }
+  }
+  if (!segments) {
+    segments = await readPanelTranscript(deps, isForce, metadata.durationSeconds);
+    if (segments) source = "panel";
+  }
+
+  if (!segments) {
+    if (!playerResponse && tracks.length === 0) {
+      fail(
+        "YOUTUBE_PLAYER_UNREADY",
+        "The YouTube player is still loading. Wait for the video to start, then try again.",
+      );
+    }
+    if (tracks.length === 0) {
+      fail(
+        "YOUTUBE_CAPTIONS_UNAVAILABLE",
+        `"${metadata.title}" has no accessible captions or transcript, so nothing was saved.`,
+      );
+    }
+    fail(
+      "YOUTUBE_TRANSCRIPT_FETCH_FAILED",
+      isForce
+        ? "Captions exist but YouTube did not return the transcript. Open the video's transcript panel and try again."
+        : "Captions exist but YouTube did not return the transcript. Use Capture in the Sentiora popup to retry.",
+    );
+  }
+
   const nodes = groupTranscriptSegments(segments);
-  const status: ExtractionStatus = nodes.length > 0 ? "success" : "insufficient_content";
-
-  if (nodes.length === 0) {
-    throwError("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "Transcript fetched but contained no selectable text.");
-  }
-
-  const rawContent = buildPlainTextFromNodes(nodes);
-  const content = capExtractedContent(rawContent);
+  const content = capExtractedContent(buildPlainTextFromNodes(nodes));
   if (content.split(/\s+/).filter(Boolean).length < 12) {
-    throwError("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "Transcript is too short to be meaningful.");
+    fail("YOUTUBE_TRANSCRIPT_PARSE_FAILED", "The transcript is too short to be meaningful. Nothing was saved.");
   }
 
-  const titleEl =
-    document.querySelector("h1.ytd-watch-metadata yt-formatted-string") ||
-    document.querySelector("h1.title ytd-formatted-string") ||
-    document.querySelector("meta[name='title']");
-
-  const rawTitle = titleEl
-    ? (titleEl as HTMLElement).innerText ||
-      (titleEl as HTMLMetaElement).content ||
-      "YouTube Video"
-    : document.title;
-  const title = rawTitle.trim().slice(0, 1024);
-
-  const authorEl =
-    document.querySelector("#owner #channel-name a") ||
-    document.querySelector("ytd-channel-name a");
-  const rawAuthor = authorEl ? (authorEl as HTMLElement).innerText.trim() : undefined;
-  const author = rawAuthor ? rawAuthor.slice(0, 512) : undefined;
-  const thumbnailUrl = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
-
-  const durationMs = Math.round(performance.now() - started);
-  const { quality_score, quality_reasons } = scoreExtractionQuality(
-    nodes,
-    "youtube_transcript",
-    status,
-  );
+  const status: ExtractionStatus = "success";
+  const { quality_score, quality_reasons } = scoreExtractionQuality(nodes, "youtube_transcript", status);
+  if (source === "panel") quality_reasons.push("transcript_from_panel");
 
   return {
     source_type: "youtube",
-    url: window.location.href.slice(0, 2048),
-    title,
+    url: metadata.canonicalUrl,
+    title: metadata.title,
     content,
-    author,
-    thumbnail_url: thumbnailUrl,
+    author: metadata.author,
+    thumbnail_url: metadata.thumbnailUrl,
     captured_at: new Date().toISOString(),
     structured_content: nodes.slice(0, 5000),
     extraction: {
       method: "youtube_transcript",
-      duration_ms: durationMs,
+      duration_ms: Math.max(0, Math.round(deps.now() - started)),
       status,
       quality_score,
       quality_reasons,

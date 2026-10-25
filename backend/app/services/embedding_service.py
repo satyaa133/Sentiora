@@ -1,4 +1,4 @@
-"""OpenAI embeddings for MemoryChunk vectors. Never writes synthetic vectors."""
+"""OpenAI/Gemini embeddings for MemoryChunk vectors. Never writes synthetic vectors."""
 
 from __future__ import annotations
 
@@ -72,16 +72,46 @@ class GeminiEmbeddingAdapter(EmbeddingPort):
         return vectors
 
 
-def get_embedding_adapter() -> EmbeddingPort | None:
+EMBEDDING_PROVIDERS = ("auto", "openai", "gemini", "none")
+
+
+def resolve_embedding_provider() -> str | None:
+    """Return "openai", "gemini", or None (lexical-only search)."""
     settings = get_settings()
+    choice = (settings.embedding_provider or "auto").strip().lower()
+    if choice not in EMBEDDING_PROVIDERS:
+        logger.error(
+            "Unknown EMBEDDING_PROVIDER=%r; expected one of %s. Semantic search disabled.",
+            choice,
+            ", ".join(EMBEDDING_PROVIDERS),
+        )
+        return None
+    if choice == "none":
+        return None
+    if choice == "openai":
+        return "openai" if settings.openai_api_key else None
+    if choice == "gemini":
+        return "gemini" if settings.gemini_api_key else None
+    # auto
+    if settings.llm_provider == "gemini":
+        return "gemini" if settings.gemini_api_key else None
+    if settings.llm_provider == "openai":
+        return "openai" if settings.openai_api_key else None
+    if settings.openai_api_key:
+        return "openai"
+    if settings.gemini_api_key:
+        return "gemini"
+    return None
+
+
+def get_embedding_adapter() -> EmbeddingPort | None:
     try:
-        if settings.llm_provider == "gemini":
-            if not settings.gemini_api_key:
-                return None
+        provider = resolve_embedding_provider()
+        if provider == "gemini":
             return GeminiEmbeddingAdapter()
-        if not settings.openai_api_key:
-            return None
-        return OpenAIEmbeddingAdapter()
+        if provider == "openai":
+            return OpenAIEmbeddingAdapter()
+        return None
     except Exception:
         logger.exception("Failed to initialize embedding adapter")
         return None

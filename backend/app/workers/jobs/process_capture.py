@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session as DBSession
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.memory_chunk import MemoryChunk
-from app.models.memory_item import ItemStatus, MemoryItem
+from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.repositories.chunk_repository import ChunkRepository
-from app.services.chunking import chunk_content
+from app.services.chunking import chunk_content, chunk_transcript
 from app.services.content_normalizer import (
     calculate_reading_time,
     calculate_word_count,
@@ -142,7 +142,12 @@ def process_capture(memory_item_id_str: str) -> None:
             )
 
         logger.info("memory_id=%s stage=chunk words=%d", memory_item_id_str, word_count)
-        drafts = chunk_content(normalized, item.source_type, title=item.title)
+        drafts = []
+        if item.source_type == SourceType.youtube:
+            # Timestamped transcript segments keep their time range per chunk.
+            drafts = chunk_transcript(item.structured_content, title=item.title)
+        if not drafts:
+            drafts = chunk_content(normalized, item.source_type, title=item.title)
         if not drafts:
             raise CaptureProcessingError("Chunking produced no searchable units.")
 
