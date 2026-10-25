@@ -1,3 +1,5 @@
+import { isTrustedAppUrl } from "./appUrl";
+
 /**
  * Default domain and pattern blocklist for excluding sensitive sites
  * (banking, medical, tax, private portals, internal browser URLs).
@@ -59,7 +61,7 @@ export function isSentioraAppUrl(urlStr: string): boolean {
       return false;
     }
 
-    if (host.includes("sentiora")) {
+    if (isTrustedAppUrl(urlStr) || host.includes("sentiora")) {
       return true;
     }
 

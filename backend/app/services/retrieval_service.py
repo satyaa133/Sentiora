@@ -7,6 +7,7 @@ User A can never retrieve User B's memories.
 from __future__ import annotations
 
 import logging
+import math
 from typing import cast
 from dataclasses import dataclass
 from datetime import datetime
@@ -126,15 +127,27 @@ def _query_tokens(query: str) -> list[str]:
     ]
 
 
+def _min_token_matches(token_count: int) -> int:
+    """Short queries need one hit; longer ones need real overlap, not one stray word."""
+    if token_count <= 2:
+        return 1
+    return max(2, math.ceil(token_count / 3))
+
+
 def _lexical_rank(title: str, content: str, tokens: list[str]) -> float:
     title_l = (title or "").lower()
     content_l = (content or "").lower()
     score = 0.0
+    matched = 0
     for token in tokens:
         if token in title_l:
             score += 3.0
+            matched += 1
         elif token in content_l:
             score += 1.0
+            matched += 1
+    if matched < _min_token_matches(len(tokens)):
+        return 0.0
     return score
 
 

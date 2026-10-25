@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.memory_item import ItemStatus, SourceType
 
+ALLOWED_URL_SCHEMES = frozenset({"http", "https", "file"})
+
 
 class NodeMetadata(BaseModel):
     level: int | None = None
@@ -60,7 +62,12 @@ class MemoryItemCreate(BaseModel):
     def sanitize_url(cls, v: object) -> str:
         if not isinstance(v, str) or not v.strip():
             return "https://unknown"
-        return v.strip()[:2048]
+        url = v.strip()[:2048]
+        # Stored URLs are rendered as links: never accept javascript:/data: etc.
+        scheme = url.split(":", 1)[0].lower() if ":" in url else ""
+        if scheme not in ALLOWED_URL_SCHEMES:
+            raise ValueError("url must use http, https, or file")
+        return url
 
     @field_validator("title", mode="before")
     @classmethod

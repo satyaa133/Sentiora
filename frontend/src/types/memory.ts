@@ -67,6 +67,16 @@ export interface MemoryItem {
   processing_error?: string | null;
   captured_at: string;
   created_at: string;
+  /** Capture v2 structure; YouTube transcript nodes carry real start/end seconds. */
+  structured_content?: StructuredContentNode[] | null;
+}
+
+export interface StructuredContentNode {
+  id: string;
+  type: string;
+  text: string;
+  order: number;
+  metadata?: { start_seconds?: number | null; end_seconds?: number | null; page_number?: number | null } | null;
 }
 
 export interface MemoryItemListResponse {

@@ -191,7 +191,8 @@ export default function MemoryTimelineView({
                 {group.items.map((item) => {
                   const formatted = formatExtractedContent(item);
                   const cleanWords = formatted.cleanText.split(/\s+/).filter(Boolean).length;
-                  const wordCount = item.word_count > 0 ? item.word_count : cleanWords;
+                  const wordCount =
+                    item.word_count > 0 || item.status === "failed" ? item.word_count : cleanWords;
                   const readMin = Math.max(1, Math.ceil(wordCount / 200));
 
                   return (
@@ -211,6 +212,18 @@ export default function MemoryTimelineView({
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             {renderSourceBadge(item.source_type)}
+                            {item.status && item.status !== "ready" && (
+                              <span
+                                title={item.processing_error || undefined}
+                                className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
+                                  item.status === "failed"
+                                    ? "bg-rose-50 text-rose-700"
+                                    : "bg-amberBadge-100 text-amberBadge-600"
+                                }`}
+                              >
+                                {item.status === "failed" ? "Failed" : "Processing..."}
+                              </span>
+                            )}
                             <span className="text-[11px] text-ink-500 font-semibold flex items-center gap-1">
                               <span>⏰</span>
                               <span>{getTimeString(item.captured_at)}</span>

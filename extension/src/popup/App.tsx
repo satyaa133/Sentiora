@@ -5,6 +5,7 @@ import { getAccessToken, getRefreshToken, getCachedUser, setCachedUser, clearAll
 import { extApiFetch, ExtApiError, attemptTokenRefresh } from "../services/extApiClient";
 import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
 import { sendCaptureMessage } from "../shared/captureUtils";
+import { appPageUrl } from "../shared/appUrl";
 import type { CapturePayload } from "../shared/types";
 
 type PopupView =
@@ -42,7 +43,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 function pingTab(tabId: number): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = window.setTimeout(() => resolve(false), PING_TIMEOUT_MS);
-    chrome.tabs.sendMessage(tabId, { type: "PING" }, () => {
+    chrome.tabs.sendMessage(tabId, { type: "PING" }, { frameId: 0 }, () => {
       window.clearTimeout(timer);
       resolve(!chrome.runtime.lastError);
     });
@@ -60,7 +61,8 @@ interface ForceCaptureResponse {
 
 function requestForceCapture(tabId: number): Promise<ForceCaptureResponse> {
   return new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(tabId, { type: "FORCE_CAPTURE" }, (response) => {
+    // Target the top frame only: a broadcast can be answered (or closed) by other frames.
+    chrome.tabs.sendMessage(tabId, { type: "FORCE_CAPTURE" }, { frameId: 0 }, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
@@ -77,6 +79,8 @@ export default function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [viewState, setViewState] = useState<PopupView>("ready");
   const [captureError, setCaptureError] = useState<string | null>(null);
+  // Server processing status of the last saved memory; only "ready" means indexed.
+  const [savedStatus, setSavedStatus] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState(false);
   const [capturePhase, setCapturePhase] = useState<"extracting" | "saving">("extracting");
   const captureGenerationRef = useRef(0);
@@ -121,6 +125,7 @@ export default function App() {
       setCaptureError(result.error ?? "Capture request failed.");
       return false;
     }
+    setSavedStatus(result.status ?? null);
     return true;
   }
 
@@ -298,6 +303,7 @@ export default function App() {
     const generation = ++captureGenerationRef.current;
     setIsCapturing(true);
     setCaptureError(null);
+    setSavedStatus(null);
     setCapturePhase("extracting");
     setViewState("capturing");
 
@@ -428,6 +434,7 @@ export default function App() {
     if (!noteTitle.trim() || isCapturing) return;
     setIsCapturing(true);
     setCaptureError(null);
+    setSavedStatus(null);
     setViewState("capturing");
     try {
       await extApiFetch("/memory-items", {
@@ -455,9 +462,9 @@ export default function App() {
 
   function openDashboard() {
     if (typeof chrome !== "undefined" && chrome.tabs) {
-      chrome.tabs.create({ url: "http://localhost:5173/dashboard" });
+      chrome.tabs.create({ url: appPageUrl("/dashboard") });
     } else {
-      window.open("http://localhost:5173/dashboard", "_blank");
+      window.open(appPageUrl("/dashboard"), "_blank");
     }
   }
 
@@ -683,7 +690,11 @@ export default function App() {
             </div>
             <div>
               <h2 className="font-serif text-base font-bold text-[#1F2421]">Memory Saved to Vault!</h2>
-              <p className="text-[11px] text-[#60706A]">Indexed and ready for RAG AI retrieval.</p>
+              <p className="text-[11px] text-[#60706A]">
+                {savedStatus === "ready"
+                  ? "Indexed and ready for RAG AI retrieval."
+                  : "Queued for processing. It becomes searchable once indexing finishes; check its status on the dashboard."}
+              </p>
             </div>
 
             <div className="p-3 bg-white border border-[#E5DFD0] rounded-2xl text-left space-y-1 shadow-xs">

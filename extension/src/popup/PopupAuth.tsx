@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { extApiFetch, ExtApiError } from "../services/extApiClient";
+import { API_DISPLAY_URL, extApiFetch, ExtApiError } from "../services/extApiClient";
+import { appPageUrl } from "../shared/appUrl";
 import {
   setAccessToken,
   setRefreshToken,
@@ -92,9 +93,9 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
 
       if (mode === "register") {
         if (typeof chrome !== "undefined" && chrome.tabs) {
-          chrome.tabs.create({ url: "http://localhost:5173/onboarding" });
+          chrome.tabs.create({ url: appPageUrl("/onboarding") });
         } else {
-          window.open("http://localhost:5173/onboarding", "_blank");
+          window.open(appPageUrl("/onboarding"), "_blank");
         }
       }
     } catch (err) {
@@ -107,7 +108,7 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
           setError(err.message || "Authentication request failed.");
         }
       } else {
-        setError("Unable to connect to backend server. Ensure http://localhost:8000 is online.");
+        setError(`Unable to connect to the Sentiora server at ${API_DISPLAY_URL}. Make sure it is running and reachable.`);
       }
     } finally {
       setIsLoading(false);

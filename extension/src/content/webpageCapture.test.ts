@@ -6,6 +6,7 @@ import {
   getExtractionRoot,
   stripNonContentNodes,
   extractPageMetadata,
+  captureWebpage,
 } from "../content/webpageCapture";
 
 // ──────────────────────────────────────────────
@@ -261,5 +262,26 @@ describe("extractPageMetadata", () => {
     document.title = "geeksforgeeks.org";
     const meta = extractPageMetadata(document);
     expect(meta.title).toBe("Binary Search Guide");
+  });
+});
+
+describe("captureWebpage — long articles", () => {
+  it("uses Readability (not the fallback scraper) for long articles with in-page menus", () => {
+    const languages = Array.from({ length: 80 }, (_, i) => `<li><a href="/l${i}">Language ${i}</a></li>`).join("");
+    const paragraphs = Array.from(
+      { length: 600 },
+      (_, i) =>
+        `<p>Zebrafish fact ${i}: the <b>heart</b> <i>regenerates</i> after <span>injury</span> in <em>adult</em> fish.</p>`,
+    ).join("");
+    document.title = "Zebrafish - Wikipedia";
+    document.body.innerHTML = `<main><div class="vector-dropdown"><ul>${languages}</ul></div>
+      <div id="bodyContent"><h1>Zebrafish</h1>${paragraphs}</div></main>`;
+    expect(document.getElementsByTagName("*").length).toBeGreaterThan(2500);
+
+    const payload = captureWebpage();
+
+    expect(payload?.extraction?.method).toBe("readability");
+    expect(payload?.content).toContain("Zebrafish fact 0");
+    expect(payload?.content.slice(0, 200)).not.toContain("Language 1");
   });
 });
