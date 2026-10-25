@@ -1,5 +1,26 @@
-import { useMemo, useCallback, useRef, useState, type DragEvent, type ChangeEvent } from "react";
+import {
+  useMemo,
+  useCallback,
+  useRef,
+  useState,
+  type DragEvent,
+  type ChangeEvent,
+} from "react";
+import {
+  Button,
+  Card,
+  IconCheck,
+  IconFile,
+  IconLink,
+  IconPlus,
+  IconSearch,
+  IconUpload,
+  Input,
+  Modal,
+  cx,
+} from "@shared/ui";
 import type { MemoryItem, SourceType } from "../../types/memory";
+import { SOURCE_ICONS } from "../sourceIcons";
 import { useAuth } from "../../context/AuthContext";
 import { createMemoryItem } from "../../services/memoryService";
 import { parsePdf } from "../../utils/pdfParser";
@@ -18,7 +39,6 @@ interface ConnectedSourcesViewProps {
 interface IntegrationChannel {
   id: SourceId;
   name: string;
-  icon: string;
   description: string;
   type: "Automatic" | "Manual" | "Sync Integration";
   category: "browser" | "docs" | "social" | "developer" | "ai";
@@ -44,7 +64,10 @@ const MEMORY_SOURCE_MAP: Partial<Record<SourceId, SourceType>> = {
   youtube: "youtube",
 };
 
-export default function ConnectedSourcesView({ items = [], onRefreshFeed }: ConnectedSourcesViewProps) {
+export default function ConnectedSourcesView({
+  items = [],
+  onRefreshFeed,
+}: ConnectedSourcesViewProps) {
   const { user, updateSourcePreference } = useAuth();
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
   const [modalSearch, setModalSearch] = useState("");
@@ -55,44 +78,59 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const getLatestSyncTime = useCallback((type: SourceType): string => {
-    const typeItems = items.filter((i) => i.source_type === type);
-    if (typeItems.length === 0 || !typeItems[0]?.captured_at) return "Ready to sync";
-    try {
-      const date = new Date(typeItems[0].captured_at);
-      const now = new Date();
-      const diffSecs = Math.floor((now.getTime() - date.getTime()) / 1000);
-      if (diffSecs < 60) return "Just now";
-      if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)} mins ago`;
-      if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)} hours ago`;
-      return `${Math.floor(diffSecs / 86400)} days ago`;
-    } catch {
-      return "Recently";
-    }
-  }, [items]);
+  const getLatestSyncTime = useCallback(
+    (type: SourceType): string => {
+      const typeItems = items.filter((i) => i.source_type === type);
+      if (typeItems.length === 0 || !typeItems[0]?.captured_at) return "Ready to sync";
+      try {
+        const date = new Date(typeItems[0].captured_at);
+        const now = new Date();
+        const diffSecs = Math.floor((now.getTime() - date.getTime()) / 1000);
+        if (diffSecs < 60) return "Just now";
+        if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)} mins ago`;
+        if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)} hours ago`;
+        const days = Math.floor(diffSecs / 86400);
+        return `${days} ${days === 1 ? "day" : "days"} ago`;
+      } catch {
+        return "Recently";
+      }
+    },
+    [items],
+  );
 
-  const webpageCount = useMemo(() => items.filter((i) => i.source_type === "webpage").length, [items]);
-  const pdfCount = useMemo(() => items.filter((i) => i.source_type === "pdf").length, [items]);
-  const youtubeCount = useMemo(() => items.filter((i) => i.source_type === "youtube").length, [items]);
+  const webpageCount = useMemo(
+    () => items.filter((i) => i.source_type === "webpage").length,
+    [items],
+  );
+  const pdfCount = useMemo(
+    () => items.filter((i) => i.source_type === "pdf").length,
+    [items],
+  );
+  const youtubeCount = useMemo(
+    () => items.filter((i) => i.source_type === "youtube").length,
+    [items],
+  );
 
   const allAvailableSources: IntegrationChannel[] = useMemo(() => {
-    const preferences: Partial<Record<SourceId, SourceStatus>> = user?.source_preferences ?? {};
+    const preferences: Partial<Record<SourceId, SourceStatus>> =
+      user?.source_preferences ?? {};
 
     return SOURCE_CATALOG.map((source) => {
-      const persistedStatus = (preferences[source.id] ?? "not_connected") as SourceStatus;
+      const persistedStatus = (preferences[source.id] ??
+        "not_connected") as SourceStatus;
       const memoryType = MEMORY_SOURCE_MAP[source.id];
-      const count = memoryType === "webpage"
-        ? webpageCount
-        : memoryType === "pdf"
-          ? pdfCount
-          : memoryType === "youtube"
-            ? youtubeCount
-            : 0;
+      const count =
+        memoryType === "webpage"
+          ? webpageCount
+          : memoryType === "pdf"
+            ? pdfCount
+            : memoryType === "youtube"
+              ? youtubeCount
+              : 0;
 
       return {
         id: source.id,
         name: DISPLAY_NAMES[source.id],
-        icon: source.icon,
         description: source.description,
         type: source.type,
         category: source.category,
@@ -101,7 +139,13 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
         lastSync: memoryType ? getLatestSyncTime(memoryType) : "Ready to sync",
       };
     });
-  }, [user?.source_preferences, webpageCount, pdfCount, youtubeCount, getLatestSyncTime]);
+  }, [
+    user?.source_preferences,
+    webpageCount,
+    pdfCount,
+    youtubeCount,
+    getLatestSyncTime,
+  ]);
 
   const activeSourcesList = useMemo(() => {
     return allAvailableSources.filter((s) => s.status !== "Ready to Connect");
@@ -111,7 +155,8 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
     if (!modalSearch.trim()) return allAvailableSources;
     const q = modalSearch.toLowerCase();
     return allAvailableSources.filter(
-      (s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
+      (s) =>
+        s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q),
     );
   }, [allAvailableSources, modalSearch]);
 
@@ -179,12 +224,14 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
         });
       }
 
-      setUploadSuccess(`Successfully ingested ${files.length} document${files.length > 1 ? "s" : ""} into your memory vault!`);
+      setUploadSuccess(
+        `Added ${files.length} ${files.length > 1 ? "files" : "file"} to your memory.`,
+      );
       if (onRefreshFeed) onRefreshFeed();
       setTimeout(() => setUploadSuccess(null), 4000);
     } catch (err) {
       console.error("Error uploading file:", err);
-      setUploadSuccess("Error processing file upload. Please try again.");
+      setUploadSuccess("Could not add that file. Please try again.");
     } finally {
       setUploading(false);
     }
@@ -204,120 +251,120 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
     }
   }
 
+  const activeCount = activeSourcesList.filter((s) => s.status === "Active").length;
+
+  function actionLabel(channel: IntegrationChannel): string {
+    if (isUpdating === channel.id) return "Saving";
+    if (channel.status === "Active") return "Pause";
+    if (channel.status === "Paused") return "Resume";
+    return "Connect";
+  }
+
   return (
-    <div className="space-y-6 max-w-5xl font-sans">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-5 bg-white/85 backdrop-blur-md rounded-2xl border border-parchment-200/80 shadow-card">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-moss-100/80 text-moss-700 flex items-center justify-center text-lg font-bold">
-            🔌
-          </div>
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Card padding="sm" className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-btn bg-accent-soft text-accent-soft-fg">
+            <IconLink size={20} />
+          </span>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500">Connected Channels</p>
-            <p className="text-base font-serif font-bold text-ink-900">
-              {activeSourcesList.filter((s) => s.status === "Active").length} Active Channels
-            </p>
+            <p className="text-[15px] text-muted">Active sources</p>
+            <p className="text-[20px] font-semibold text-fg">{activeCount}</p>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-100/80 text-amber-700 flex items-center justify-center text-lg font-bold">
-            📦
-          </div>
+        </Card>
+        <Card padding="sm" className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-btn bg-accent-soft text-accent-soft-fg">
+            <IconFile size={20} />
+          </span>
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500">Total Indexed Memories</p>
-            <p className="text-base font-serif font-bold text-ink-900">{items.length} Vault Items</p>
+            <p className="text-[15px] text-muted">Memories saved</p>
+            <p className="text-[20px] font-semibold text-fg">{items.length}</p>
           </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-100/80 text-emerald-700 flex items-center justify-center text-lg font-bold">
-            ●
-          </div>
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500">Integration Health</p>
-            <p className="text-xs font-semibold text-emerald-700">All Sources Operational</p>
-          </div>
-        </div>
+        </Card>
       </div>
 
-      <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-6 shadow-card space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <Card as="section" aria-labelledby="sources-heading" padding="lg">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-serif text-xl font-bold text-ink-900">Connected Memory Sources</h2>
-            <p className="text-xs text-ink-500 mt-1">Manage active capture channels and document integrators.</p>
+            <h2 id="sources-heading" className="text-[20px] font-semibold text-fg">
+              Your sources
+            </h2>
+            <p className="mt-1 text-[15px] text-muted">
+              Pause or resume what Sentiora saves.
+            </p>
           </div>
-          <button
+          <Button
+            variant="inverse"
+            leadingIcon={<IconPlus size={18} />}
             onClick={() => setIsConnectModalOpen(true)}
-            className="px-4 py-2 bg-moss-600 hover:bg-moss-700 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm shrink-0"
           >
-            + Connect New Channel
-          </button>
+            Add a source
+          </Button>
         </div>
 
-        <div className="space-y-3 pt-2">
-          {activeSourcesList.length === 0 ? (
-            <p className="text-xs text-ink-500 text-center py-6">
-              No sources connected yet. Use onboarding or Connect New Channel to add sources.
-            </p>
-          ) : (
-            activeSourcesList.map((src) => (
-              <div
+        {activeSourcesList.length === 0 ? (
+          <p className="mt-6 rounded-btn bg-raised px-4 py-6 text-center text-[15px] text-muted">
+            No sources yet. Choose Add a source to pick what Sentiora saves.
+          </p>
+        ) : (
+          <ul className="mt-5 divide-y divide-line-soft">
+            {activeSourcesList.map((src) => (
+              <li
                 key={src.id}
-                className="p-4 bg-parchment-50/80 backdrop-blur-xs border border-parchment-200/80 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:bg-white hover:shadow-card"
+                className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div className="flex items-start gap-3">
-                  <span className="text-xl p-2 rounded-lg bg-white border border-parchment-200/60 shadow-xs">
-                    {src.icon}
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-btn bg-raised text-fg">
+                    {SOURCE_ICONS[src.id]}
                   </span>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-xs font-bold text-ink-900">{src.name}</h3>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-parchment-200/90 text-ink-700">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-[16px] font-semibold text-fg">{src.name}</h3>
+                      <span className="rounded-md bg-raised px-2 py-0.5 text-xs text-muted">
                         {src.type}
                       </span>
                     </div>
-                    <p className="text-[11px] text-ink-500 leading-snug max-w-lg">{src.description}</p>
-                    <p className="text-[11px] text-ink-500 font-medium">
-                      {src.count || 0} items indexed in vault · Last synced {src.lastSync || "Recently"}
+                    <p className="mt-0.5 text-[15px] text-muted">{src.description}</p>
+                    <p className="mt-0.5 text-sm text-muted">
+                      {src.count || 0} {src.count === 1 ? "memory" : "memories"}
+                      {src.lastSync && src.lastSync !== "Ready to sync"
+                        ? ` · last saved ${src.lastSync.toLowerCase()}`
+                        : ""}
                     </p>
                   </div>
                 </div>
-
-                <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
+                <div className="flex shrink-0 items-center gap-3 self-end sm:self-center">
                   <span
-                    className={`text-xs font-semibold px-2.5 py-1 rounded-full backdrop-blur-xs ${
-                      src.status === "Active"
-                        ? "bg-moss-100/90 text-moss-700"
-                        : "bg-rose-100/90 text-rose-700"
-                    }`}
+                    className={cx(
+                      "text-[15px] font-medium",
+                      src.status === "Active" ? "text-fg" : "text-muted",
+                    )}
                   >
                     {src.status}
                   </span>
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() => toggleSourceStatus(src.id)}
-                    disabled={isUpdating === src.id}
-                    className="text-xs text-ink-700 hover:text-ink-900 underline font-medium disabled:opacity-50"
+                    loading={isUpdating === src.id}
+                    aria-label={`${actionLabel(src)} ${src.name}`}
                   >
-                    {isUpdating === src.id
-                      ? "Saving…"
-                      : src.status === "Active"
-                        ? "Pause"
-                        : src.status === "Paused"
-                          ? "Resume"
-                          : "Connect"}
-                  </button>
+                    {actionLabel(src)}
+                  </Button>
                 </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
-      <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-6 shadow-card space-y-4">
-        <div>
-          <h2 className="font-serif text-xl font-bold text-ink-900">Upload PDF Documents & Research</h2>
-          <p className="text-xs text-ink-500 mt-1">Directly ingest local PDF research papers, eBooks, and text notes into your archive.</p>
-        </div>
+      <Card as="section" aria-labelledby="upload-heading" padding="lg">
+        <h2 id="upload-heading" className="text-[20px] font-semibold text-fg">
+          Upload files
+        </h2>
+        <p className="mt-1 text-[15px] text-muted">
+          Add PDFs, text or Markdown files from your computer.
+        </p>
 
         <input
           ref={fileInputRef}
@@ -326,9 +373,12 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
           multiple
           onChange={handleFileChange}
           className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
         />
 
-        <div
+        <button
+          type="button"
           onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => {
             e.preventDefault();
@@ -336,105 +386,93 @@ export default function ConnectedSourcesView({ items = [], onRefreshFeed }: Conn
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-2xl p-8 text-center space-y-3 transition-all cursor-pointer ${
-            dragOver ? "border-moss-600 bg-moss-100/40 backdrop-blur-md scale-[1.01]" : "border-parchment-200/80 bg-parchment-50/70 hover:bg-white backdrop-blur-xs"
-          }`}
-        >
-          <div className="h-12 w-12 rounded-full bg-parchment-200/90 text-moss-600 flex items-center justify-center mx-auto text-xl shadow-xs">
-            📄
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs font-bold text-ink-900">
-              {uploading ? "Ingesting & indexing document..." : "Drag & drop PDF files here, or click to browse"}
-            </p>
-            <p className="text-[11px] text-ink-500">Supports PDF, TXT, and Markdown files up to 50MB</p>
-          </div>
-          {uploadSuccess && (
-            <p className="text-xs font-bold text-moss-600 animate-fade-in">✓ {uploadSuccess}</p>
+          disabled={uploading}
+          aria-describedby="upload-status"
+          className={cx(
+            "mt-5 flex w-full flex-col items-center gap-3 rounded-card border-2 border-dashed px-6 py-10 text-center transition-colors",
+            dragOver
+              ? "border-accent bg-accent-soft"
+              : "border-line bg-raised hover:border-muted",
           )}
-        </div>
-      </div>
+        >
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-surface text-fg">
+            <IconUpload size={22} />
+          </span>
+          <span className="text-[16px] font-semibold text-fg">
+            {uploading ? "Adding your files…" : "Drop files here, or choose files"}
+          </span>
+          <span className="text-sm text-muted">PDF, TXT or Markdown</span>
+        </button>
+        <p
+          id="upload-status"
+          role="status"
+          className="mt-3 min-h-[24px] text-[15px] text-fg"
+        >
+          {uploadSuccess}
+        </p>
+      </Card>
 
-      {isConnectModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-parchment-200">
-            <div className="flex items-center justify-between border-b border-parchment-200 pb-3">
-              <div>
-                <h3 className="font-serif font-bold text-base text-ink-900">Connect New Integration Source</h3>
-                <p className="text-[11px] text-ink-500">Choose from familiar tools to auto-sync content into your vault.</p>
-              </div>
-              <button
-                onClick={() => setIsConnectModalOpen(false)}
-                className="text-ink-400 hover:text-ink-700 text-lg font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <input
-              type="text"
-              value={modalSearch}
-              onChange={(e) => setModalSearch(e.target.value)}
-              placeholder="Search integrations (Notion, ChatGPT, Twitter, GitHub...)..."
-              className="w-full bg-parchment-50 border border-parchment-200 rounded-xl px-3 py-2 text-xs text-ink-900 placeholder-ink-500 focus:outline-none focus:border-moss-600 font-medium"
-            />
-
-            <div className="max-h-[55vh] overflow-y-auto space-y-3 pr-1 text-xs">
-              {modalFilteredSources.map((channel) => (
-                <div
-                  key={channel.id}
-                  className="p-3 bg-parchment-50/90 hover:bg-parchment-50 rounded-xl border border-parchment-200/80 flex items-center justify-between gap-3 transition-colors"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="text-xl p-1.5 rounded-lg bg-white border border-parchment-200/60 shadow-xs">
-                      {channel.icon}
-                    </span>
-                    <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-ink-900">{channel.name}</h4>
-                        <span className="px-2 py-0.2 rounded text-[10px] font-semibold bg-parchment-200/80 text-ink-700">
-                          {channel.type}
-                        </span>
-                      </div>
-                      <p className="text-ink-500 text-[11px] leading-snug">{channel.description}</p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => toggleSourceStatus(channel.id)}
-                    disabled={isUpdating === channel.id}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all disabled:opacity-50 ${
-                      channel.status === "Active"
-                        ? "bg-moss-100 text-moss-700 border border-moss-200"
-                        : "bg-moss-600 hover:bg-moss-700 text-white shadow-xs"
-                    }`}
-                  >
-                    {isUpdating === channel.id
-                      ? "Saving…"
-                      : channel.status === "Active"
-                        ? "Connected ✓"
-                        : channel.status === "Paused"
-                          ? "Resume"
-                          : "+ Connect"}
-                  </button>
+      <Modal
+        open={isConnectModalOpen}
+        onClose={() => setIsConnectModalOpen(false)}
+        title="Add a source"
+        description="Choose what Sentiora should save."
+        size="lg"
+        footer={
+          <>
+            <span className="mr-auto self-center text-sm text-muted">
+              {allAvailableSources.length} sources
+            </span>
+            <Button onClick={() => setIsConnectModalOpen(false)}>Done</Button>
+          </>
+        }
+      >
+        <label htmlFor="sources-search" className="sr-only">
+          Search sources
+        </label>
+        <Input
+          id="sources-search"
+          value={modalSearch}
+          onChange={(e) => setModalSearch(e.target.value)}
+          placeholder="Search sources"
+          leadingIcon={<IconSearch size={18} />}
+        />
+        <ul className="mt-4 space-y-2">
+          {modalFilteredSources.map((channel) => (
+            <li
+              key={channel.id}
+              className="flex items-center justify-between gap-3 rounded-card border border-line p-3"
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-btn bg-raised text-fg">
+                  {SOURCE_ICONS[channel.id]}
+                </span>
+                <div className="min-w-0">
+                  <p className="font-semibold text-fg">{channel.name}</p>
+                  <p className="text-sm text-muted">{channel.description}</p>
                 </div>
-              ))}
-            </div>
-
-            <div className="pt-2 flex justify-between items-center border-t border-parchment-200">
-              <span className="text-[11px] text-ink-400 font-medium">
-                {allAvailableSources.length} integrations available
-              </span>
-              <button
-                onClick={() => setIsConnectModalOpen(false)}
-                className="px-4 py-2 bg-moss-600 hover:bg-moss-700 text-white rounded-xl text-xs font-semibold"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              </div>
+              {channel.status === "Active" ? (
+                <span className="inline-flex shrink-0 items-center gap-1 text-[15px] text-muted">
+                  <IconCheck size={16} />
+                  Added
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant={channel.status === "Paused" ? "secondary" : "primary"}
+                  onClick={() => toggleSourceStatus(channel.id)}
+                  loading={isUpdating === channel.id}
+                  aria-label={`${channel.status === "Paused" ? "Resume" : "Add"} ${channel.name}`}
+                  className="shrink-0"
+                >
+                  {channel.status === "Paused" ? "Resume" : "Add"}
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Modal>
     </div>
   );
 }

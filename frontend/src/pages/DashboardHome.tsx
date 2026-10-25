@@ -33,7 +33,7 @@ const PAGE_HEADINGS: Partial<Record<NavTab, { title: string; subtitle: string }>
     subtitle: "Choose what Sentiora saves, and upload files.",
   },
   privacy: { title: "Privacy", subtitle: "Blocked sites and exporting your memory." },
-  settings: { title: "Settings", subtitle: "Your profile and account security." },
+  settings: { title: "Settings", subtitle: "Your profile and preferences." },
 };
 
 function tabFromPath(pathname: string): NavTab {

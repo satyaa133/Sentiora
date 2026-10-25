@@ -7,7 +7,7 @@ export interface ChipProps extends Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
   "aria-pressed"
 > {
-  /** Selected chips are graphite (inverse) and expose aria-pressed. */
+  /** Selected chips flip to the text colour (graphite in light, paper in dark) and expose aria-pressed. */
   selected?: boolean;
   leadingIcon?: ReactNode;
 }
@@ -28,7 +28,7 @@ export function Chip({
       className={cx(
         "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors",
         selected
-          ? "border border-inverse-border bg-inverse text-on-inverse"
+          ? "border border-fg bg-fg text-bg"
           : "border border-line bg-surface text-fg hover:bg-raised",
         className,
       )}

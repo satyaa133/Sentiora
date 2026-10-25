@@ -15,6 +15,8 @@ export interface DrawerProps {
   children?: ReactNode;
   footer?: ReactNode;
   initialFocusRef?: RefObject<HTMLElement>;
+  /** "lg" fits reading content such as a saved article. */
+  size?: "md" | "lg";
 }
 
 /** Right-hand side panel (full width on phones), e.g. the memory detail view. */
@@ -26,6 +28,7 @@ export function Drawer({
   children,
   footer,
   initialFocusRef,
+  size = "md",
 }: DrawerProps) {
   const id = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -47,7 +50,7 @@ export function Drawer({
         aria-modal="true"
         aria-labelledby={`${id}-title`}
         tabIndex={-1}
-        className="drawer-in relative flex h-full w-full max-w-[520px] flex-col border-l border-line bg-surface text-fg shadow-float"
+        className={`drawer-in relative flex h-full w-full flex-col border-l border-line bg-surface text-fg shadow-float ${size === "lg" ? "max-w-2xl" : "max-w-[520px]"}`}
       >
         <div className="flex items-start gap-4 border-b border-line-soft px-5 py-4 sm:px-6">
           <div className="min-w-0 flex-1">
