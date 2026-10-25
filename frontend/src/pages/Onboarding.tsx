@@ -1,13 +1,68 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { APP_NAME } from "@shared/constants/app";
+
+import {
+  Button,
+  Echo,
+  Eyebrow,
+  IconArrowRight,
+  IconCheck,
+  IconDownload,
+  IconGlobe,
+  IconMessage,
+  IconSearch,
+  IconShield,
+  Logo,
+  SourceBadge,
+  Tag,
+  cx,
+} from "@shared/ui";
+
+import { SOURCE_BADGE, SOURCE_ICONS } from "../components/sourceIcons";
 import { useAuth } from "../context/AuthContext";
 import { createMemoryItem } from "../services/memoryService";
 import { SOURCE_CATALOG, type SourceId } from "../types/sourcePreferences";
 
+type Step = 1 | 2 | 3 | 4;
+
+const STEP_LABELS: Record<Step, string> = {
+  1: "Meet Sentiora",
+  2: "How saving works",
+  3: "Choose what to remember",
+  4: "Finish setup",
+};
+
+function PointList({
+  points,
+}: {
+  points: Array<{ icon: ReactNode; title: string; body: string }>;
+}) {
+  return (
+    <ul className="space-y-5">
+      {points.map((point) => (
+        <li key={point.title} className="flex gap-4">
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-btn bg-accent-soft text-accent-soft-fg">
+            {point.icon}
+          </span>
+          <div>
+            <p className="text-[17px] font-semibold text-fg">{point.title}</p>
+            <p className="mt-0.5 text-[16px] leading-relaxed text-muted">
+              {point.body}
+            </p>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export default function Onboarding() {
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
-  const [selectedSources, setSelectedSources] = useState<SourceId[]>(["webpages", "youtube"]);
+  const [step, setStep] = useState<Step>(1);
+  const [selectedSources, setSelectedSources] = useState<SourceId[]>([
+    "webpages",
+    "youtube",
+  ]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -59,222 +114,269 @@ export default function Onboarding() {
     }
   }
 
+  function continueFromSources() {
+    if (!isAuthenticated) {
+      navigate("/signup");
+      return;
+    }
+    setStep(4);
+  }
+
   return (
-    <div className="min-h-screen w-screen bg-[#FFFDF7] text-[#1F2421] font-sans flex flex-col justify-between p-8 selection:bg-moss-100 selection:text-moss-700">
-      <header className="text-center pt-4">
-        <h1 className="font-serif text-3xl font-bold text-[#1F2421] tracking-tight">{APP_NAME}</h1>
-      </header>
-
-      <main className="max-w-xl mx-auto w-full my-auto py-8 space-y-8">
-        {step === 1 && (
-          <div className="space-y-8 text-center">
-            <div className="space-y-2">
-              <h2 className="font-serif text-3xl font-bold text-[#1F2421]">Welcome to Sentiora</h2>
-              <p className="font-serif italic text-sm text-[#60706A]">Your personal digital memory</p>
-            </div>
-
-            <div className="bg-white border border-[#E5DFD0] rounded-2xl p-6 shadow-card space-y-5 text-left divide-y divide-[#E5DFD0]">
-              <div className="flex items-start gap-4 pt-1">
-                <div className="h-10 w-10 rounded-xl bg-[#DBE9DF] text-[#2C6F54] flex items-center justify-center shrink-0 font-bold text-base">
-                  📥
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-[#1F2421]">Save knowledge from any source</h3>
-                  <p className="text-xs text-[#60706A] mt-0.5 leading-relaxed">
-                    Capture web articles, research PDFs, YouTube videos, and your own custom thoughts.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4 pt-4">
-                <div className="h-10 w-10 rounded-xl bg-[#DBE9DF] text-[#2C6F54] flex items-center justify-center shrink-0 font-bold text-base">
-                  🔍
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-[#1F2421]">Search and revisit what matters</h3>
-                  <p className="text-xs text-[#60706A] mt-0.5 leading-relaxed">
-                    A living timeline of your personal reference archive, always organized and readable.
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-4 pt-4">
-                <div className="h-10 w-10 rounded-xl bg-[#DBE9DF] text-[#2C6F54] flex items-center justify-center shrink-0 font-bold text-base">
-                  💬
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold text-[#1F2421]">Ask questions about what you've saved</h3>
-                  <p className="text-xs text-[#60706A] mt-0.5 leading-relaxed">
-                    Synthesize your collected knowledge with an assistant that reads only from your vault.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setStep(2)}
-              className="w-full py-3.5 bg-[#2C6F54] hover:bg-[#235943] text-white rounded-xl font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2"
-            >
-              <span>Next</span>
-              <span>→</span>
-            </button>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="space-y-8 text-center">
-            <div className="h-16 w-16 bg-[#DBE9DF] text-[#2C6F54] rounded-full flex items-center justify-center mx-auto text-2xl">
-              🔒
-            </div>
-
-            <div className="space-y-2">
-              <h2 className="font-serif text-3xl font-bold text-[#1F2421]">You control what gets saved</h2>
-              <p className="text-xs text-[#60706A] max-w-md mx-auto leading-relaxed">
-                Sentiora never captures anything without your explicit, conscious permission.
-              </p>
-            </div>
-
-            <div className="bg-white border border-[#E5DFD0] rounded-2xl p-6 shadow-card space-y-4 text-left divide-y divide-[#E5DFD0]">
-              <div className="flex items-center gap-3 pt-1">
-                <span className="text-base text-[#2C6F54]">🙈</span>
-                <span className="text-xs font-semibold text-[#1F2421]">No background tracking or history recording</span>
-              </div>
-              <div className="flex items-center gap-3 pt-3">
-                <span className="text-base text-[#2C6F54]">🛡️</span>
-                <span className="text-xs font-semibold text-[#1F2421]">No third-party analytics or behavioral collection</span>
-              </div>
-              <div className="flex items-center gap-3 pt-3">
-                <span className="text-base text-[#2C6F54]">✓</span>
-                <span className="text-xs font-semibold text-[#1F2421]">You choose exactly what enters your digital archive</span>
-              </div>
-            </div>
-
-            <p className="font-serif italic text-xs font-bold text-[#2C6F54]">
-              "Your knowledge stays entirely yours."
+    <div className="grid min-h-screen grid-cols-1 bg-bg text-fg lg:grid-cols-[minmax(0,400px)_minmax(0,1fr)]">
+      <aside className="bg-inverse text-on-inverse">
+        <div className="flex flex-col px-6 py-5 lg:sticky lg:top-0 lg:h-screen lg:px-10 lg:py-10">
+          <div className="flex items-center justify-between">
+            <Logo tone="inverse" size={22} />
+            <p className="text-[15px] text-on-inverse-muted lg:hidden">
+              Step {step} of 4
             </p>
-
-            <button
-              onClick={() => setStep(3)}
-              className="w-full py-3.5 bg-[#2C6F54] hover:bg-[#235943] text-white rounded-xl font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2"
-            >
-              <span>Next</span>
-              <span>→</span>
-            </button>
           </div>
-        )}
-
-        {step === 3 && (
-          <div className="space-y-6 text-center">
-            <div className="space-y-2">
-              <h2 className="font-serif text-3xl font-bold text-[#1F2421]">
-                What would you like Sentiora to connect and read?
-              </h2>
-              <p className="text-xs text-[#60706A] max-w-md mx-auto leading-relaxed">
-                Choose the sources you want active in your vault. You can change these anytime in Connected Sources.
-              </p>
-            </div>
-
-            <div className="bg-white border border-[#E5DFD0] rounded-2xl p-4 shadow-card space-y-2 text-left max-h-[50vh] overflow-y-auto">
-              {SOURCE_CATALOG.map((source) => {
-                const isSelected = selectedSources.includes(source.id);
-                return (
-                  <label
-                    key={source.id}
-                    className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
-                      isSelected
-                        ? "border-[#2C6F54] bg-[#DBE9DF]/40"
-                        : "border-[#E5DFD0] bg-[#FFFDF7] hover:bg-white"
-                    }`}
+          <div className="hidden flex-1 items-center justify-center lg:flex">
+            <Echo state="happy" size={180} tone="inverse" />
+          </div>
+          <ol aria-label="Setup progress" className="hidden space-y-4 lg:block">
+            {([1, 2, 3, 4] as Step[]).map((s) => {
+              const done = s < step;
+              const current = s === step;
+              return (
+                <li
+                  key={s}
+                  aria-current={current ? "step" : undefined}
+                  className="flex items-center gap-3"
+                >
+                  <span
+                    className={cx(
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-full font-mono text-sm",
+                      current
+                        ? "bg-accent font-semibold text-on-accent"
+                        : "border border-on-inverse-muted text-on-inverse-muted",
+                    )}
                   >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleSource(source.id)}
-                      className="mt-1 accent-[#2C6F54]"
-                    />
-                    <span className="text-lg">{source.icon}</span>
-                    <div className="space-y-0.5">
-                      <p className="text-xs font-bold text-[#1F2421]">{source.name}</p>
-                      <p className="text-[11px] text-[#60706A] leading-snug">{source.description}</p>
-                    </div>
-                  </label>
-                );
-              })}
-            </div>
+                    {done ? <IconCheck size={16} title="Done" /> : s}
+                  </span>
+                  <span
+                    className={cx(
+                      "text-[17px]",
+                      current
+                        ? "font-semibold text-on-inverse"
+                        : "text-on-inverse-muted",
+                    )}
+                  >
+                    {STEP_LABELS[s]}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </aside>
 
-            <button
-              onClick={() => {
-                if (!isAuthenticated) {
-                  navigate("/signup");
-                  return;
-                }
-                setStep(4);
-              }}
-              disabled={selectedSources.length === 0}
-              className="w-full py-3.5 bg-[#2C6F54] hover:bg-[#235943] disabled:opacity-50 text-white rounded-xl font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2"
-            >
-              <span>{isAuthenticated ? "Confirm Selection" : "Create Account to Continue"}</span>
-              <span>→</span>
-            </button>
-          </div>
-        )}
+      <main className="flex items-center px-4 py-10 sm:px-8 lg:px-16">
+        <div className="mx-auto w-full max-w-2xl">
+          <Eyebrow>
+            Step {step} of 4 · {STEP_LABELS[step]}
+          </Eyebrow>
 
-        {step === 4 && (
-          <div className="space-y-6 text-center">
-            <div className="space-y-2">
-              <h2 className="font-serif text-3xl font-bold text-[#1F2421]">You're all set</h2>
-              <p className="text-xs text-[#60706A] max-w-md mx-auto leading-relaxed">
-                Your selected sources will appear as active channels in Connected Sources. You can pause or connect more at any time.
+          {step === 1 && (
+            <>
+              <h1 className="mt-3 font-display text-[34px] font-bold leading-tight tracking-tight sm:text-[44px]">
+                A memory for everything you read.
+              </h1>
+              <p className="mt-3 text-[18px] text-muted">
+                Sentiora keeps what you read and helps you find it again.
               </p>
-            </div>
-
-            <div className="bg-white border border-[#E5DFD0] rounded-2xl p-6 shadow-card text-left space-y-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[#60706A]">Selected sources</p>
-              <div className="flex flex-wrap gap-2">
-                {selectedSources.map((sourceId) => {
-                  const source = SOURCE_CATALOG.find((item) => item.id === sourceId);
-                  return (
-                    <span
-                      key={sourceId}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#DBE9DF] text-[#2C6F54] text-[11px] font-semibold"
-                    >
-                      <span>{source?.icon}</span>
-                      <span>{source?.name}</span>
-                    </span>
-                  );
-                })}
+              <div className="mt-8">
+                <PointList
+                  points={[
+                    {
+                      icon: <IconGlobe size={20} />,
+                      title: "Save articles, PDFs and videos",
+                      body: "Web pages, papers and YouTube transcripts, plus your own notes.",
+                    },
+                    {
+                      icon: <IconSearch size={20} />,
+                      title: "Search by meaning",
+                      body: "Find a page by what it said, even if you forgot the title.",
+                    },
+                    {
+                      icon: <IconMessage size={20} />,
+                      title: "Ask, with sources",
+                      body: "Answers come only from what you saved, each one linked back.",
+                    },
+                  ]}
+                />
               </div>
-            </div>
-
-            {error && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl p-3">
-                {error}
+              <div className="mt-10 flex justify-end">
+                <Button
+                  size="lg"
+                  trailingIcon={<IconArrowRight size={18} />}
+                  onClick={() => setStep(2)}
+                >
+                  Continue
+                </Button>
               </div>
-            )}
+            </>
+          )}
 
-            <button
-              onClick={handleComplete}
-              disabled={isSubmitting}
-              className="w-full py-3.5 bg-[#2C6F54] hover:bg-[#235943] disabled:opacity-50 text-white rounded-xl font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2"
-            >
-              <span>{isSubmitting ? "Saving preferences…" : "Go to Dashboard"}</span>
-              <span>→</span>
-            </button>
-          </div>
-        )}
+          {step === 2 && (
+            <>
+              <h1 className="mt-3 font-display text-[34px] font-bold leading-tight tracking-tight sm:text-[44px]">
+                You can see everything it keeps.
+              </h1>
+              <p className="mt-3 text-[18px] text-muted">
+                Here is what the extension does.
+              </p>
+              <div className="mt-8">
+                <PointList
+                  points={[
+                    {
+                      icon: <IconGlobe size={20} />,
+                      title: "Saves pages as you read",
+                      body: "While you're signed in, the extension saves the pages you open. You can also save one right away from the toolbar.",
+                    },
+                    {
+                      icon: <IconShield size={20} />,
+                      title: "Skips sensitive pages",
+                      body: "Banking, health, tax and sign-in pages are never saved. The check runs in your browser.",
+                    },
+                    {
+                      icon: <IconDownload size={20} />,
+                      title: "Yours to review",
+                      body: "Every save shows up in your timeline, where you can delete it, or export everything as JSON.",
+                    },
+                  ]}
+                />
+              </div>
+              <div className="mt-10 flex items-center justify-between gap-3">
+                <Button variant="ghost" onClick={() => setStep(1)}>
+                  Back
+                </Button>
+                <Button
+                  size="lg"
+                  trailingIcon={<IconArrowRight size={18} />}
+                  onClick={() => setStep(3)}
+                >
+                  Continue
+                </Button>
+              </div>
+            </>
+          )}
+
+          {step === 3 && (
+            <>
+              <h1 className="mt-3 font-display text-[34px] font-bold leading-tight tracking-tight sm:text-[44px]">
+                What should Echo remember?
+              </h1>
+              <p className="mt-3 text-[18px] text-muted">
+                Pick the kinds of things you save. You can change this anytime in
+                Sources.
+              </p>
+              <fieldset className="mt-8">
+                <legend className="sr-only">Sources</legend>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {SOURCE_CATALOG.map((source) => {
+                    const isSelected = selectedSources.includes(source.id);
+                    const badge = SOURCE_BADGE[source.id];
+                    return (
+                      <label
+                        key={source.id}
+                        className={cx(
+                          "flex cursor-pointer flex-col rounded-card border-2 bg-surface p-5 transition-colors",
+                          isSelected
+                            ? "border-accent"
+                            : "border-line hover:border-muted",
+                        )}
+                      >
+                        <span className="flex items-start justify-between gap-3">
+                          {badge ? (
+                            <SourceBadge type={badge} />
+                          ) : (
+                            <span className="text-muted">
+                              {SOURCE_ICONS[source.id]}
+                            </span>
+                          )}
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSource(source.id)}
+                            className="h-5 w-5 shrink-0 cursor-pointer accent-accent"
+                          />
+                        </span>
+                        <span className="mt-3 text-[17px] font-semibold text-fg">
+                          {source.name}
+                        </span>
+                        <span className="mt-1 text-[15px] leading-snug text-muted">
+                          {source.description}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+              <p className="mt-6 flex items-center gap-3 rounded-card border border-line bg-surface px-4 py-3 text-[15px] text-fg">
+                <IconShield size={20} className="shrink-0 text-accent-soft-fg" />
+                Banking, health and login pages are always skipped.
+              </p>
+              <div className="mt-10 flex items-center justify-between gap-3">
+                <Button variant="ghost" onClick={() => setStep(2)}>
+                  Back
+                </Button>
+                <Button
+                  size="lg"
+                  trailingIcon={<IconArrowRight size={18} />}
+                  onClick={continueFromSources}
+                  disabled={selectedSources.length === 0}
+                >
+                  {isAuthenticated ? "Continue" : "Create account to continue"}
+                </Button>
+              </div>
+            </>
+          )}
+
+          {step === 4 && (
+            <>
+              <h1 className="mt-3 font-display text-[34px] font-bold leading-tight tracking-tight sm:text-[44px]">
+                You&apos;re all set.
+              </h1>
+              <p className="mt-3 text-[18px] text-muted">
+                These sources show as active in Sources. You can pause or add more
+                anytime.
+              </p>
+              <div className="mt-8 rounded-card border border-line bg-surface p-5">
+                <Eyebrow>Selected sources</Eyebrow>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedSources.map((sourceId) => {
+                    const source = SOURCE_CATALOG.find((item) => item.id === sourceId);
+                    return <Tag key={sourceId}>{source?.name ?? sourceId}</Tag>;
+                  })}
+                </div>
+              </div>
+              {error && (
+                <p
+                  role="alert"
+                  className="mt-4 rounded-btn bg-accent-soft px-4 py-3 text-[15px] text-accent-soft-fg"
+                >
+                  {error}
+                </p>
+              )}
+              <div className="mt-10 flex items-center justify-between gap-3">
+                <Button variant="ghost" onClick={() => setStep(3)}>
+                  Back
+                </Button>
+                <Button
+                  size="lg"
+                  trailingIcon={<IconArrowRight size={18} />}
+                  onClick={handleComplete}
+                  loading={isSubmitting}
+                >
+                  {isSubmitting ? "Saving" : "Go to Home"}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       </main>
-
-      <footer className="flex justify-center items-center gap-2 pb-4">
-        {[1, 2, 3, 4].map((s) => (
-          <div
-            key={s}
-            onClick={() => setStep(s as 1 | 2 | 3 | 4)}
-            className={`h-2 rounded-full cursor-pointer transition-all ${
-              s === step ? "w-8 bg-[#2C6F54]" : "w-2 bg-[#E5DFD0]"
-            }`}
-          />
-        ))}
-      </footer>
     </div>
   );
 }
