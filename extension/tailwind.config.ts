@@ -1,9 +1,17 @@
 import type { Config } from "tailwindcss";
 
+import sentioraPreset from "../shared/src/ui/tailwindPreset";
+
 export default {
-  content: ["./src/popup/index.html", "./src/**/*.{ts,tsx}", "../shared/src/**/*.{ts,tsx}"],
+  content: [
+    "./src/popup/index.html",
+    "./src/**/*.{ts,tsx}",
+    "../shared/src/**/*.{ts,tsx}",
+  ],
+  presets: [sentioraPreset],
   theme: {
     extend: {
+      // Legacy palette, kept only until every screen is redesigned (removed in phase 7).
       colors: {
         parchment: {
           0: "#FFFDF7",
@@ -32,8 +40,6 @@ export default {
       },
       fontFamily: {
         serif: ["Charter", "Source Serif 4", "Georgia", "serif"],
-        sans: ["Public Sans", "Inter", "system-ui", "-apple-system", "sans-serif"],
-        mono: ["IBM Plex Mono", "Menlo", "monospace"],
       },
     },
   },

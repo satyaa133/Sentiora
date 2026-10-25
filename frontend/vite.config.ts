@@ -13,6 +13,17 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: [resolve(rootDirectory, "src/test/setup.ts")],
+    // Testing Library is hoisted next to React 19. Load its ESM build through Vite
+    // and pin React so tests (and components from shared/) render with React 18.
+    server: { deps: { inline: [/@testing-library/] } },
+    alias: {
+      "@testing-library/react": resolve(
+        rootDirectory,
+        "../node_modules/@testing-library/react/dist/@testing-library/react.esm.js",
+      ),
+      react: resolve(rootDirectory, "node_modules/react"),
+      "react-dom": resolve(rootDirectory, "node_modules/react-dom"),
+    },
   },
   resolve: {
     // npm hoists React 19 to the repo root (peer of @testing-library/react) while

@@ -1,51 +1,41 @@
-@import url('https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap');
+@import "../../shared/src/ui/tokens.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: light;
-  font-family: "Public Sans", Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  background-color: #FFFDF7;
-  color: #1F2421;
-}
-
 html,
 body,
 #root {
   min-height: 100%;
-  background-color: #FFFDF7;
 }
 
 body {
-  margin: 0;
   overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
 }
 
-/* Custom sleek scrollbars matching parchment palette */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #FAF8F1;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #E5DFD0;
+  background: var(--border);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #2C6F54;
+  background: var(--text-muted);
 }
 
-/* Keyframes for Floating Ring Elements & Ambient Lighting */
+/* Legacy landing animations, removed with the old landing page (phase 4/7). */
 @keyframes floatSlow {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px) scale(1);
   }
   50% {
@@ -54,7 +44,8 @@ body {
 }
 
 @keyframes floatDelayed {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px) scale(1);
   }
   50% {
@@ -63,7 +54,8 @@ body {
 }
 
 @keyframes floatSide {
-  0%, 100% {
+  0%,
+  100% {
     transform: translate(0px, 0px);
   }
   50% {
@@ -81,7 +73,8 @@ body {
 }
 
 @keyframes pulseGlow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: 0 0 25px rgba(44, 111, 84, 0.35);
   }
   50% {
