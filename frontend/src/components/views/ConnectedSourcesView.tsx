@@ -87,8 +87,14 @@ export default function ConnectedSourcesView({
         const now = new Date();
         const diffSecs = Math.floor((now.getTime() - date.getTime()) / 1000);
         if (diffSecs < 60) return "Just now";
-        if (diffSecs < 3600) return `${Math.floor(diffSecs / 60)} mins ago`;
-        if (diffSecs < 86400) return `${Math.floor(diffSecs / 3600)} hours ago`;
+        if (diffSecs < 3600) {
+          const mins = Math.floor(diffSecs / 60);
+          return `${mins} ${mins === 1 ? "min" : "mins"} ago`;
+        }
+        if (diffSecs < 86400) {
+          const hours = Math.floor(diffSecs / 3600);
+          return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+        }
         const days = Math.floor(diffSecs / 86400);
         return `${days} ${days === 1 ? "day" : "days"} ago`;
       } catch {

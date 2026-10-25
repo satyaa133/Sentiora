@@ -9,13 +9,6 @@ body {
   padding: 0;
 }
 
-input[type="text"],
-input[type="email"],
-input[type="password"],
-textarea {
-  font-family: inherit;
-}
-
 ::-webkit-scrollbar {
   width: 6px;
 }
