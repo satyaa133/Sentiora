@@ -28,7 +28,7 @@ export function Chip({
       className={cx(
         "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors",
         selected
-          ? "bg-inverse text-on-inverse"
+          ? "border border-inverse-border bg-inverse text-on-inverse"
           : "border border-line bg-surface text-fg hover:bg-raised",
         className,
       )}

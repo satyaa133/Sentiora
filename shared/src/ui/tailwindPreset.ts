@@ -34,7 +34,10 @@ const sentioraPreset = {
         },
         "on-accent": "var(--on-accent)",
         link: "var(--link)",
-        inverse: "var(--inverse)",
+        inverse: {
+          DEFAULT: "var(--inverse)",
+          border: "var(--inverse-border)",
+        },
         overlay: "var(--overlay)",
         "on-inverse": {
           DEFAULT: "var(--on-inverse)",

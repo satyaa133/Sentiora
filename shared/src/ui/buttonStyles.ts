@@ -7,7 +7,7 @@ export const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-accent text-on-accent hover:bg-accent-hover",
   secondary: "border border-line bg-surface text-fg hover:bg-raised",
   ghost: "bg-transparent text-fg hover:bg-raised",
-  inverse: "bg-inverse text-on-inverse hover:opacity-90",
+  inverse: "border border-inverse-border bg-inverse text-on-inverse hover:opacity-90",
 };
 
 const SIZES: Record<ButtonSize, string> = {

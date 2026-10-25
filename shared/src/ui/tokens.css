@@ -29,6 +29,8 @@
   --inverse: #111111;
   --on-inverse: #f4f4f3;
   --on-inverse-muted: #a8a8a4;
+  /* Edge for inverse fills; only visible in dark mode, where --inverse is close to --surface. */
+  --inverse-border: #111111;
 
   --shadow-float: 0 30px 60px -30px rgba(17, 17, 17, 0.25);
   --shadow-pop: 0 12px 32px -12px rgba(17, 17, 17, 0.18);
@@ -53,6 +55,7 @@
     --inverse: #1f1f1f;
     --on-inverse: #f4f4f3;
     --on-inverse-muted: #a8a8a4;
+    --inverse-border: #333333;
 
     --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
     --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
@@ -77,6 +80,7 @@
   --inverse: #1f1f1f;
   --on-inverse: #f4f4f3;
   --on-inverse-muted: #a8a8a4;
+  --inverse-border: #333333;
 
   --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
   --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);

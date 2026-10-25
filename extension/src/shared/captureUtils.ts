@@ -214,6 +214,8 @@ export interface CapturePostResult {
   error?: string;
   /** Server processing status of the memory: pending | processing | ready | failed. */
   status?: string;
+  /** Id of the memory the background worker created (absent when deduplicated). */
+  memoryId?: string;
 }
 
 export async function postCapturePayload(
@@ -260,6 +262,7 @@ export function sendCaptureMessage(
         deduplicated: Boolean(response.deduplicated),
         error: response.error ? String(response.error) : undefined,
         status: typeof response.status === "string" ? response.status : undefined,
+        memoryId: typeof response.memoryId === "string" ? response.memoryId : undefined,
       });
     });
   });

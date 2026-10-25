@@ -9,6 +9,8 @@
  *
  * Colours come from tokens, so Echo inverts with the theme automatically.
  */
+import type { CSSProperties } from "react";
+
 import { ECHO_BODY_PATH } from "./echoShape.js";
 
 export type EchoState = "idle" | "saving" | "happy" | "faded" | "guarding";
@@ -20,8 +22,17 @@ export interface EchoProps {
   title?: string;
   /** Disable the idle bob / save float (reduced motion is always respected). */
   still?: boolean;
+  /** "inverse" draws Echo for graphite panels (bg-inverse): light body, dark face. */
+  tone?: "default" | "inverse";
   className?: string;
 }
+
+// Echo is drawn with --text (body) and --surface (face); the inverse tone remaps
+// both for this SVG only.
+const INVERSE_TONE = {
+  "--text": "var(--on-inverse)",
+  "--surface": "var(--inverse)",
+} as CSSProperties;
 
 const FACE_STROKE = {
   fill: "none",
@@ -109,6 +120,7 @@ export default function Echo({
   size = 64,
   title,
   still = false,
+  tone = "default",
   className,
 }: EchoProps) {
   const motionClass = still
@@ -129,6 +141,7 @@ export default function Echo({
       height={size}
       className={[motionClass, className].filter(Boolean).join(" ") || undefined}
       data-echo-state={state}
+      style={tone === "inverse" ? INVERSE_TONE : undefined}
       {...a11y}
     >
       {title ? <title>{title}</title> : null}

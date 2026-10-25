@@ -8,7 +8,7 @@ export type CardPadding = "none" | "sm" | "md" | "lg";
 const TONES: Record<CardTone, string> = {
   surface: "border border-line bg-surface text-fg",
   raised: "bg-raised text-fg",
-  inverse: "bg-inverse text-on-inverse",
+  inverse: "border border-inverse-border bg-inverse text-on-inverse",
 };
 
 const PADDING: Record<CardPadding, string> = {
