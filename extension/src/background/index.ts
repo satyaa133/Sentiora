@@ -1,6 +1,7 @@
 import { extApiFetch } from "../services/extApiClient";
 import { setAccessToken, setRefreshToken, setCachedUser, clearAllAuthData } from "../services/storage";
 import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
+import { isTrustedAppUrl } from "../shared/appUrl";
 import { postCapturePayload, sanitizeCapturePayload } from "../shared/captureUtils";
 import type { ExtensionMessage, CapturePayload, YoutubePlayerResponse } from "../shared/types";
 
@@ -82,6 +83,14 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     return true;
   }
 
+  if (
+    (message.type === "SYNC_AUTH_TOKENS" || message.type === "CLEAR_AUTH_TOKENS") &&
+    !isTrustedAuthSender(sender)
+  ) {
+    sendResponse({ success: false, error: "Untrusted sender" });
+    return false;
+  }
+
   if (message.type === "SYNC_AUTH_TOKENS") {
     const { accessToken, refreshToken, user } = message.payload;
     Promise.all([
@@ -113,6 +122,13 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     return true;
   }
 });
+
+/** Auth changes come only from extension pages (popup) or the configured web app. */
+function isTrustedAuthSender(sender: chrome.runtime.MessageSender): boolean {
+  if (sender.id !== undefined && sender.id !== chrome.runtime.id) return false;
+  if (!sender.tab) return true;
+  return isTrustedAppUrl(sender.url ?? sender.tab.url);
+}
 
 const inFlightCaptures = new Set<string>();
 
@@ -182,10 +198,7 @@ function notifyDashboardTabs(): void {
       for (const tab of tabs) {
         if (
           tab.id &&
-          tab.url &&
-          (tab.url.includes("localhost") ||
-            tab.url.includes("127.0.0.1") ||
-            tab.url.includes("sentiora"))
+          isTrustedAppUrl(tab.url)
         ) {
           chrome.tabs.sendMessage(tab.id, { type: "REFRESH_MEMORY_FEED" }, () => {
             // Ignore tab send errors if script not listening

@@ -5,6 +5,7 @@ import { getAccessToken, getRefreshToken, getCachedUser, setCachedUser, clearAll
 import { extApiFetch, ExtApiError, attemptTokenRefresh } from "../services/extApiClient";
 import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
 import { sendCaptureMessage } from "../shared/captureUtils";
+import { appPageUrl } from "../shared/appUrl";
 import type { CapturePayload } from "../shared/types";
 
 type PopupView =
@@ -461,9 +462,9 @@ export default function App() {
 
   function openDashboard() {
     if (typeof chrome !== "undefined" && chrome.tabs) {
-      chrome.tabs.create({ url: "http://localhost:5173/dashboard" });
+      chrome.tabs.create({ url: appPageUrl("/dashboard") });
     } else {
-      window.open("http://localhost:5173/dashboard", "_blank");
+      window.open(appPageUrl("/dashboard"), "_blank");
     }
   }
 

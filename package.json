@@ -2,6 +2,9 @@
   "name": "sentiora",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
   "workspaces": [
     "frontend",
     "extension",
@@ -12,7 +15,7 @@
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:extension": "npm run dev --workspace extension",
     "dev:shared": "npm run dev --workspace shared",
-    "dev:backend": "node scripts/run-python.mjs -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+    "dev:backend": "node scripts/run-python.mjs -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
     "dev:worker": "node scripts/run-python.mjs -m app.workers.worker",
     "build": "npm run build:frontend && npm run build:extension && npm run build:shared",
     "build:frontend": "npm run build --workspace frontend",

@@ -31,7 +31,7 @@ from tests.testdb import (
 
 
 def _e2e_redis_url() -> str:
-    base = os.environ.get("REDIS_URL") or _dotenv_value("REDIS_URL") or "redis://localhost:6379/0"
+    base = os.environ.get("REDIS_URL") or _dotenv_value("REDIS_URL") or "redis://127.0.0.1:6379/0"
     parts = urlsplit(base)
     db = os.environ.get("E2E_REDIS_DB", "15")
     return urlunsplit((parts.scheme, parts.netloc, f"/{db}", parts.query, parts.fragment))

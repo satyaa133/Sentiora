@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_JWT_SECRET_KEY = "DEV_SECRET_KEY_CHANGE_IN_PRODUCTION_SENTIORA_2026"
 DEFAULT_DATABASE_URL = (
-    "postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora"
+    "postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@127.0.0.1:5432/Sentiora"
 )
 
 
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://127.0.0.1:6379/0"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     # Reverse proxies whose X-Forwarded-For header is trusted for client IPs
     # (rate limiting). Empty = ignore X-Forwarded-For entirely.

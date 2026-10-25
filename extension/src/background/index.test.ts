@@ -188,3 +188,60 @@ describe("YouTube main-world player bridge", () => {
     }
   });
 });
+
+describe("auth token sync trust boundary", () => {
+  const tokens = { type: "SYNC_AUTH_TOKENS", payload: { accessToken: "a", refreshToken: "r", user: { id: "u" } } };
+
+  async function workerWithStorageSpy() {
+    await loadWorker();
+    const set = vi.fn(async () => undefined);
+    const remove = vi.fn(async () => undefined);
+    const chromeMock = (globalThis as unknown as {
+      chrome: { storage: { local: Record<string, unknown>; session: Record<string, unknown> } };
+    }).chrome;
+    chromeMock.storage.local.set = set;
+    chromeMock.storage.local.remove = remove;
+    chromeMock.storage.session.set = set;
+    chromeMock.storage.session.remove = remove;
+    return { set, remove };
+  }
+
+  function sendSync(message: unknown, sender: unknown): Promise<unknown> {
+    return new Promise((resolve) => listeners[0]?.(message, sender, resolve));
+  }
+
+  it.each([
+    "https://sentiora-login.attacker.example/",
+    "https://evil.example/?next=sentiora",
+    "http://localhost:3000/",
+    "http://127.0.0.1:5173/",
+  ])("rejects tokens from a tab on %s", async (url) => {
+    const { set } = await workerWithStorageSpy();
+    const response = await sendSync(tokens, { tab: { id: 3, url }, url, frameId: 0 });
+    expect(response).toMatchObject({ success: false });
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it("rejects logout from an untrusted tab", async () => {
+    const { remove } = await workerWithStorageSpy();
+    const url = "https://sentiora.attacker.example/";
+    const response = await sendSync({ type: "CLEAR_AUTH_TOKENS" }, { tab: { id: 3, url }, url, frameId: 0 });
+    expect(response).toMatchObject({ success: false });
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("accepts logout from the configured web app", async () => {
+    const { remove } = await workerWithStorageSpy();
+    const url = "http://localhost:5173/login";
+    expect(await sendSync({ type: "CLEAR_AUTH_TOKENS" }, { tab: { id: 3, url }, url, frameId: 0 })).toMatchObject({ success: true });
+    expect(remove).toHaveBeenCalled();
+  });
+
+  it("accepts tokens from the configured web app and from the popup", async () => {
+    const { set } = await workerWithStorageSpy();
+    const url = "http://localhost:5173/dashboard";
+    expect(await sendSync(tokens, { tab: { id: 3, url }, url, frameId: 0 })).toMatchObject({ success: true });
+    expect(await sendSync(tokens, { url: "chrome-extension://abc/src/popup/index.html" })).toMatchObject({ success: true });
+    expect(set).toHaveBeenCalled();
+  });
+});

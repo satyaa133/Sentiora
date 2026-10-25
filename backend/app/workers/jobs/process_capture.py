@@ -2,7 +2,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
@@ -69,6 +69,34 @@ def _vector_dim() -> int:
     return get_settings().embedding_dimensions
 
 
+def _claim(db: DBSession, item_id: UUID) -> bool:
+    """Atomically take ownership of a pending (or abandoned processing) item.
+
+    The worker, the API's inline fallback and stale recovery can all reach the
+    same item; only the caller whose UPDATE matches may process it, so chunks are
+    never written twice concurrently and READY/FAILED items are not reprocessed.
+    """
+    now = datetime.now(UTC)
+    result = db.execute(
+        update(MemoryItem)
+        .where(
+            MemoryItem.id == item_id,
+            MemoryItem.deleted_at.is_(None),
+            or_(
+                MemoryItem.status == ItemStatus.pending,
+                and_(
+                    MemoryItem.status == ItemStatus.processing,
+                    MemoryItem.updated_at < now - STALE_AFTER,
+                ),
+            ),
+        )
+        .values(status=ItemStatus.processing, processing_error=None, updated_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return getattr(result, "rowcount", 0) == 1
+
+
 def process_capture(memory_item_id_str: str) -> None:
     """Normalize, chunk, optionally embed, then mark READY or FAILED."""
     logger.info("memory_id=%s stage=start", memory_item_id_str)
@@ -79,6 +107,14 @@ def process_capture(memory_item_id_str: str) -> None:
         if not item:
             logger.error("memory_id=%s stage=load reason=not_found", memory_item_id_str)
             return
+        if not _claim(db, item_id):
+            logger.info(
+                "memory_id=%s stage=skip reason=not_claimable status=%s",
+                memory_item_id_str,
+                item.status,
+            )
+            return
+        db.refresh(item)
 
         existing = _find_existing_ready(db, item.user_id, item.url, item.id)
         if existing:

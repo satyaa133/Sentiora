@@ -198,6 +198,25 @@ describe("captureYoutube — honest failures (nothing saved)", () => {
     );
   });
 
+  it("reports a removed/invalid video as unavailable, not as a loading player", async () => {
+    const doc = emptyDoc();
+    const error = doc.createElement("yt-playability-error-supported-renderers");
+    error.innerHTML = "<div>Video unavailable</div><div>This video is unavailable</div>";
+    doc.body.appendChild(error);
+    const promise = captureYoutube(true, deps({ doc, requestPlayerResponse: async () => null }));
+    await expectCode(promise, "YOUTUBE_VIDEO_UNAVAILABLE");
+    await expect(promise).rejects.toThrow(/Video unavailable/);
+  });
+
+  it("ignores YouTube's empty error-screen placeholder on playable pages", async () => {
+    const doc = emptyDoc();
+    doc.body.appendChild(doc.createElement("yt-playability-error-supported-renderers"));
+    await expectCode(
+      captureYoutube(true, deps({ doc, requestPlayerResponse: async () => null })),
+      "YOUTUBE_PLAYER_UNREADY",
+    );
+  });
+
   it("reports fetch failure when captions exist but return nothing (network error)", async () => {
     await expectCode(captureYoutube(false, deps({ fetchText: async () => null })), "YOUTUBE_TRANSCRIPT_FETCH_FAILED");
   });

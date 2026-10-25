@@ -459,6 +459,12 @@ async function readPanelTranscript(
   return null;
 }
 
+function readPlayabilityError(doc: Document): string | null {
+  const el = doc.querySelector("yt-playability-error-supported-renderers");
+  const text = (el?.textContent ?? "").replace(/\s+/g, " ").trim();
+  return text ? text.slice(0, 120) : null;
+}
+
 const UNAVAILABLE_STATUSES = new Set(["ERROR", "UNPLAYABLE", "LOGIN_REQUIRED", "CONTENT_CHECK_REQUIRED", "AGE_CHECK_REQUIRED"]);
 
 /**
@@ -510,6 +516,12 @@ export async function captureYoutube(
 
   if (!segments) {
     if (!playerResponse && tracks.length === 0) {
+      // Removed/private/invalid videos have no player data at all; YouTube's
+      // error screen is the only signal, and it is empty for playable videos.
+      const playabilityError = readPlayabilityError(deps.doc);
+      if (playabilityError) {
+        fail("YOUTUBE_VIDEO_UNAVAILABLE", `This video is not accessible (${playabilityError}). Nothing was saved.`);
+      }
       fail(
         "YOUTUBE_PLAYER_UNREADY",
         "The YouTube player is still loading. Wait for the video to start, then try again.",

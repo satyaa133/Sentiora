@@ -3,6 +3,7 @@ import { isYoutubeHost, isYoutubeVideoPage, captureYoutube, parseYoutubeVideoUrl
 import { isPdfDocument, capturePdf } from "./pdfCapture";
 import { captureWebpageTimed } from "./webpageCapture";
 import { sendCaptureMessage } from "../shared/captureUtils";
+import { isTrustedAppUrl } from "../shared/appUrl";
 import type { CapturePayload, ExtensionMessage, CaptureErrorCode } from "../shared/types";
 
 export type CapturePipelineResult =
@@ -194,12 +195,9 @@ function initContentScript(): void {
     setInterval(onYoutubeNavigation, 2500);
   }
 
-  const isDashboardHost =
-    window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1" ||
-    window.location.hostname.includes("sentiora");
-
-  if (!isDashboardHost) {
+  // Exact origin match: any other page could otherwise plant its own tokens and
+  // redirect this user's captures into a foreign account.
+  if (!isTrustedAppUrl(window.location.href)) {
     return;
   }
 

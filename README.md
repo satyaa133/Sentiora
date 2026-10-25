@@ -53,7 +53,7 @@ Ensure you have the following installed on your machine:
 
 | Tool | Min Version | Download Link |
 |---|---|---|
-| **Node.js** | `>= 18.x` | [nodejs.org](https://nodejs.org) |
+| **Node.js** | `20.19+` or `22.12+` (Vite 7) | [nodejs.org](https://nodejs.org) |
 | **Python** | `>= 3.12` | [python.org](https://python.org/downloads) |
 | **Docker Desktop** | Latest | [docker.com](https://www.docker.com/products/docker-desktop) |
 | **Git** | Latest | [git-scm.com](https://git-scm.com) |
@@ -77,17 +77,17 @@ cd Sentiora
 # Mac / Linux
 cp .env.example .env
 cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env
-cp extension/.env.example extension/.env
 ```
 
 ```bat
 REM Windows Command Prompt
 copy .env.example .env
 copy backend\.env.example backend\.env
-copy frontend\.env.example frontend\.env
-copy extension\.env.example extension\.env
 ```
+
+- `.env` (repo root): Docker ports plus the **frontend/extension build config** (`VITE_API_BASE_URL`, `VITE_APP_URL`). Vite reads `VITE_*` only from this file; `frontend/.env` and `extension/.env` are ignored.
+- `backend/.env`: API and worker settings (`DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`, AI keys).
+- If port 5432/6379 is already taken on your machine, set `POSTGRES_PORT`/`REDIS_PORT` in `.env` and use the same ports in `backend/.env`'s `DATABASE_URL`/`REDIS_URL`. Use `127.0.0.1`, not `localhost`, as the host in those URLs: the containers listen on IPv4 loopback only, and on Windows `localhost` tries IPv6 first and stalls (about 10 s per connection).
 
 ### Step 3 — Install Node Dependencies
 
@@ -99,15 +99,17 @@ npm install
 
 ```bash
 # Mac / Linux
-python3 -m venv backend/.venv
+python3.12 -m venv backend/.venv
 backend/.venv/bin/pip install -e "./backend[dev]"
 ```
 
 ```bat
-REM Windows
-python -m venv backend\.venv
+REM Windows (the py launcher picks 3.12 even if `python` is an older version)
+py -3.12 -m venv backend\.venv
 backend\.venv\Scripts\pip install -e ".\backend[dev]"
 ```
+
+The backend needs Python 3.12+. Check with `backend/.venv/bin/python --version` (Windows: `backend\.venv\Scripts\python --version`). On Windows, plain `python` is often the Microsoft Store 3.11 alias, which makes `pip install` fail with "requires a different Python".
 
 The npm scripts (`dev:backend`, `dev:worker`, `test:backend`, ...) always use `backend/.venv` (see `scripts/run-python.mjs`).
 
@@ -116,10 +118,10 @@ The npm scripts (`dev:backend`, `dev:worker`, `test:backend`, ...) always use `b
 Ensure **Docker Desktop** is running, then start database services (or use `npm run compose:up`):
 
 ```bash
-docker compose up -d postgres redis
+docker compose up -d
 ```
 
-Only start the services you need: `docker compose up -d` would also start containerised `backend`/`worker`, which compete with the host processes for port 8000 and the capture queue.
+This starts Postgres, Redis and pgAdmin only, bound to `127.0.0.1`. The containerised backend/worker are opt-in (`docker compose --profile app up -d`); don't run them alongside `npm start`/`npm run dev:worker`, because they compete for port 8000 and the capture queue. If you started them before, stop them with `docker compose --profile app stop backend worker`.
 
 > **Mac / Linux Docker socket tip**: If you get a socket permission error, run:
 > ```bash
@@ -172,13 +174,32 @@ In a separate terminal, start the background worker to process captures:
 npm run dev:worker
 ```
 
+The worker reconnects on its own if Redis restarts, and re-queues captures left pending.
+
 ### Load the Chrome Extension
 
-1. Build the extension bundle first: `npm run build:extension`
+1. Build the extension bundle first: `npm run build:extension` (it bakes in `VITE_API_BASE_URL`/`VITE_APP_URL` from the root `.env`; rebuild after changing them).
 2. Open Chrome and navigate to `chrome://extensions`.
 3. Enable **Developer mode** (toggle in the top right corner).
 4. Click **Load unpacked**.
 5. Select the `extension/dist` directory.
+
+The extension picks up the web app's sign-in only from the exact `VITE_APP_URL` origin. `http://127.0.0.1:5173` is not the same origin as `http://localhost:5173`.
+
+### Access From Another PC on Your LAN (optional)
+
+By default the backend, the frontend and Docker services listen on this machine only. For a teammate on the same network to use your instance:
+
+1. In the root `.env`, set `VITE_API_BASE_URL=http://<your-LAN-IP>:8000` and `VITE_APP_URL=http://<your-LAN-IP>:5173`. "localhost" in a browser always means *that* browser's machine.
+2. In `backend/.env`, add the LAN origin: `CORS_ORIGINS=["http://localhost:5173","http://<your-LAN-IP>:5173"]`.
+3. Start the API and frontend listening on all interfaces:
+   ```bash
+   npm run dev:backend -- --host 0.0.0.0
+   npm run dev:frontend -- --host
+   ```
+4. Allow inbound TCP 8000 and 5173 in your OS firewall for the private network only.
+
+Don't expose these dev servers to the internet: they use HTTP and the development JWT secret. For a shared remote environment, deploy `docker-compose.prod.yml` behind HTTPS (see `docs/RELEASE.md`). Two local setups never share data; each has its own database.
 
 ---
 
@@ -189,7 +210,7 @@ npm run dev:worker
 | **Web Dashboard** | [http://localhost:5173](http://localhost:5173) | Main user interface |
 | **Backend API** | [http://localhost:8000](http://localhost:8000) | FastAPI service |
 | **API Documentation** | [http://localhost:8000/docs](http://localhost:8000/docs) | Interactive Swagger UI |
-| **pgAdmin** | [http://localhost:5050](http://localhost:5050) | Database admin interface (`admin@sentiora.ai` / `admin`) |
+| **pgAdmin** | [http://localhost:5050](http://localhost:5050) | Database admin interface (`admin@sentiora.ai` / `admin`, local only) |
 
 ---
 
