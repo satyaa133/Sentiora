@@ -17,18 +17,16 @@ function uniqueEmail(prefix: string): string {
 
 async function signUpAndOnboard(page: Page): Promise<void> {
   await page.goto("/signup");
-  await page.getByPlaceholder("Jordan Miller").fill("E2E UI User");
-  await page.getByPlaceholder("e.g., jordan@example.com").fill(uniqueEmail("e2e_ui"));
-  await page.locator("input[type=password]").fill("MemoryPassword123!");
+  await page.getByLabel("Full name").fill("E2E UI User");
+  await page.getByLabel("Email").fill(uniqueEmail("e2e_ui"));
+  await page.getByLabel("Password", { exact: true }).fill("MemoryPassword123!");
   await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Create Account" }).click();
+  await page.getByRole("button", { name: "Create account" }).click();
 
-  // Walk the onboarding steps until the dashboard opens.
+  // Walk the onboarding steps until Home opens.
   await expect(page).toHaveURL(/\/onboarding/);
   for (let step = 0; step < 6 && !/\/dashboard/.test(page.url()); step += 1) {
-    const next = page
-      .getByRole("button", { name: /^(Next|Confirm Selection|Go to Dashboard)/ })
-      .first();
+    const next = page.getByRole("button", { name: /^(Continue|Go to Home)/ }).first();
     await next.click();
     await page.waitForTimeout(300);
   }
@@ -36,58 +34,70 @@ async function signUpAndOnboard(page: Page): Promise<void> {
 }
 
 async function addMemory(page: Page, title: string, content: string): Promise<void> {
-  await page.getByRole("button", { name: /Add Memory/ }).first().click();
-  await page.getByPlaceholder("e.g. Clean Architecture & System Design Notes").fill(title);
-  await page.getByPlaceholder("Paste article text, notes, key takeaways, or transcript details...").fill(content);
-  await page.getByRole("button", { name: "Save to Vault" }).click();
-  await expect(page.getByRole("button", { name: "Save to Vault" })).toBeHidden();
+  await page.getByRole("button", { name: "Add memory" }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Add a memory" });
+  await dialog.getByLabel("Title").fill(title);
+  await dialog.getByLabel("Content").fill(content);
+  await dialog.getByRole("button", { name: "Save memory" }).click();
+  await expect(dialog).toBeHidden();
 }
 
-function memoryCard(page: Page, title: string) {
-  return page.locator("main").locator("div.group", { has: page.getByRole("heading", { name: title }) }).first();
+function memoryRow(page: Page, title: string) {
+  return page.locator("main").getByRole("listitem").filter({ hasText: title }).first();
 }
 
-test("UI: sign up, add a memory, see it processed, and get a grounded cited answer", async ({ page }) => {
+test("UI: sign up, add a memory, see it processed, and get a grounded cited answer", async ({
+  page,
+}) => {
   await signUpAndOnboard(page);
   await addMemory(page, FACT_TITLE, FACT_CONTENT);
 
-  // Wait (bounded) for the worker to finish: the card loses its "Processing..." badge.
+  // Wait (bounded) for the worker to finish: the row loses its "Processing" tag.
   await page.goto("/timeline");
-  const card = memoryCard(page, FACT_TITLE);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await expect(card).not.toContainText(/Processing|Failed/, { timeout: 30_000 });
+  const row = memoryRow(page, FACT_TITLE);
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await expect(row).not.toContainText(/Processing|Failed/, { timeout: 30_000 });
 
   // Direct navigation + refresh keep the right view.
   await page.goto("/ask");
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Ask Sentiora RAG Assistant" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Ask Sentiora" }),
+  ).toBeVisible();
 
-  const input = page.getByPlaceholder(/Ask about/);
-  await input.fill("How many gallons of whale oil did the Zephyrine Point keeper burn per night in January?");
+  const input = page.getByLabel("Your question");
+  await input.fill(
+    "How many gallons of whale oil did the Zephyrine Point keeper burn per night in January?",
+  );
   await input.press("Enter");
 
   const main = page.locator("main");
   await expect(main).toContainText(/nine gallons/i, { timeout: 30_000 });
-  await expect(main.getByText(/Source Citations/i)).toBeVisible();
+  await expect(main.getByRole("heading", { name: "Sources used" })).toBeVisible();
   await expect(main.getByText(FACT_TITLE).last()).toBeVisible();
+  await expect(main.getByRole("button", { name: "Open memory" }).first()).toBeVisible();
 
   // Browser history returns to the previous view.
   await page.goto("/timeline");
   await page.goBack();
   await expect(page).toHaveURL(/\/ask$/);
-  await expect(page.getByRole("heading", { name: "Ask Sentiora RAG Assistant" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Ask Sentiora" }),
+  ).toBeVisible();
 });
 
-test("UI: a capture that cannot be indexed is shown as failed with its reason", async ({ page }) => {
+test("UI: a capture that cannot be indexed is shown as failed with its reason", async ({
+  page,
+}) => {
   await signUpAndOnboard(page);
   await addMemory(page, "Too Short Note", "Too short to index.");
 
   await page.goto("/timeline");
-  const card = memoryCard(page, "Too Short Note");
-  await expect(card).toContainText("Failed", { timeout: 30_000 });
+  const row = memoryRow(page, "Too Short Note");
+  await expect(row).toContainText("Failed", { timeout: 30_000 });
 
-  await card.click();
-  const alert = page.getByRole("alert").filter({ hasText: "Processing failed" });
+  await row.getByRole("button", { name: /Too Short Note/ }).click();
+  const alert = page.getByRole("alert").filter({ hasText: "It is not searchable" });
   await expect(alert).toBeVisible();
   await expect(alert).toContainText(/too short to index/i);
 });
