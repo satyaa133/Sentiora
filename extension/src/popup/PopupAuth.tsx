@@ -1,10 +1,8 @@
 import React, { useState } from "react";
-import { extApiFetch, ExtApiError } from "../services/extApiClient";
-import {
-  setAccessToken,
-  setRefreshToken,
-  setCachedUser,
-} from "../services/storage";
+import { Button, Echo, IconAlert, TextField, cx } from "@shared/ui";
+import { API_DISPLAY_URL, extApiFetch, ExtApiError } from "../services/extApiClient";
+import { appPageUrl } from "../shared/appUrl";
+import { setAccessToken, setRefreshToken, setCachedUser } from "../services/storage";
 
 interface PopupAuthProps {
   onAuthChange: (authenticated: boolean) => void;
@@ -92,22 +90,31 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
 
       if (mode === "register") {
         if (typeof chrome !== "undefined" && chrome.tabs) {
-          chrome.tabs.create({ url: "http://localhost:5173/onboarding" });
+          chrome.tabs.create({ url: appPageUrl("/onboarding") });
         } else {
-          window.open("http://localhost:5173/onboarding", "_blank");
+          window.open(appPageUrl("/onboarding"), "_blank");
         }
       }
     } catch (err) {
       if (err instanceof ExtApiError) {
         if (err.code === "AUTH_INVALID_CREDENTIALS") {
-          setError("Invalid email or password. If you haven't created an account, click 'Create Account' above.");
-        } else if (err.code === "AUTH_EMAIL_ALREADY_EXISTS" || err.code === "AUTH_EMAIL_EXISTS") {
-          setError("An account with this email address already exists. Switch to 'Sign In'.");
+          setError(
+            "Invalid email or password. If you haven't created an account, choose Create account above.",
+          );
+        } else if (
+          err.code === "AUTH_EMAIL_ALREADY_EXISTS" ||
+          err.code === "AUTH_EMAIL_EXISTS"
+        ) {
+          setError(
+            "An account with this email address already exists. Switch to Sign in.",
+          );
         } else {
           setError(err.message || "Authentication request failed.");
         }
       } else {
-        setError("Unable to connect to backend server. Ensure http://localhost:8000 is online.");
+        setError(
+          `Unable to connect to the Sentiora server at ${API_DISPLAY_URL}. Make sure it is running and reachable.`,
+        );
       }
     } finally {
       setIsLoading(false);
@@ -115,108 +122,99 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
   }
 
   return (
-    <div className="space-y-3.5 font-sans text-[#1F2421]">
-      {/* Segmented Auth Mode Switcher */}
-      <div className="flex bg-white/80 p-1 rounded-2xl border border-[#E5DFD0] shadow-xs">
-        <button
-          type="button"
-          onClick={() => {
-            setMode("login");
-            setError(null);
-          }}
-          className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${
-            mode === "login"
-              ? "bg-[#2C6F54] text-white shadow-xs"
-              : "text-[#60706A] hover:text-[#1F2421]"
-          }`}
-        >
-          Sign In
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setMode("register");
-            setError(null);
-          }}
-          className={`flex-1 py-1.5 text-xs font-bold rounded-xl transition-all ${
-            mode === "register"
-              ? "bg-[#2C6F54] text-white shadow-xs"
-              : "text-[#60706A] hover:text-[#1F2421]"
-          }`}
-        >
-          Create Account
-        </button>
+    <section className="space-y-4 px-5 pb-5 pt-6">
+      <div className="flex items-center gap-3">
+        <Echo state="idle" size={48} />
+        <div>
+          <h1 className="font-display text-[22px] font-bold tracking-tight">
+            {mode === "login" ? "Sign in to Sentiora" : "Create your account"}
+          </h1>
+          <p className="text-[15px] text-muted">
+            Save pages you choose, find them later.
+          </p>
+        </div>
+      </div>
+
+      <div
+        role="group"
+        aria-label="Account"
+        className="flex gap-1 rounded-full bg-raised p-1"
+      >
+        {(["login", "register"] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={mode === value}
+            onClick={() => {
+              setMode(value);
+              setError(null);
+            }}
+            className={cx(
+              "h-9 flex-1 rounded-full text-[15px] font-medium transition-colors",
+              mode === value
+                ? "bg-surface text-fg shadow-pop"
+                : "text-muted hover:text-fg",
+            )}
+          >
+            {value === "login" ? "Sign in" : "Create account"}
+          </button>
+        ))}
       </div>
 
       {error && (
-        <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl p-2.5 text-center font-medium leading-relaxed shadow-xs">
-          ⚠️ {error}
-        </div>
+        <p
+          role="alert"
+          className="flex items-start gap-2 rounded-btn bg-accent-soft px-3 py-2.5 text-[15px] text-accent-soft-fg"
+        >
+          <IconAlert size={18} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </p>
       )}
 
-      <form onSubmit={handleAuth} className="space-y-2.5">
+      <form onSubmit={handleAuth} className="space-y-3" noValidate>
         {mode === "register" && (
-          <div>
-            <label className="block text-[11px] font-bold text-[#1F2421] mb-1">
-              Full Name
-            </label>
-            <input
-              type="text"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              className="w-full bg-white border border-[#E5DFD0] rounded-xl px-3 py-2 text-xs text-[#1F2421] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2C6F54] font-medium shadow-xs"
-              placeholder="e.g. Jordan Miller"
-            />
-          </div>
+          <TextField
+            label="Full name"
+            type="text"
+            autoComplete="name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+          />
         )}
 
-        <div>
-          <label className="block text-[11px] font-bold text-[#1F2421] mb-1">
-            Email Address
-          </label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-white border border-[#E5DFD0] rounded-xl px-3 py-2 text-xs text-[#1F2421] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2C6F54] font-medium shadow-xs"
-            placeholder="jordan@example.com"
-            required
-          />
-        </div>
+        <TextField
+          label="Email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+        />
 
-        <div>
-          <label className="block text-[11px] font-bold text-[#1F2421] mb-1">
-            Password
-          </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-white border border-[#E5DFD0] rounded-xl px-3 py-2 text-xs text-[#1F2421] placeholder-[#9CA3AF] focus:outline-none focus:border-[#2C6F54] font-medium shadow-xs"
-            placeholder="••••••••••"
-            required
-          />
-          {mode === "register" && (
-            <p className="text-[10px] text-[#60706A] mt-1 font-medium">
-              Min 10 chars, 1 uppercase (A-Z), and 1 number (0-9).
-            </p>
-          )}
-        </div>
+        <TextField
+          label="Password"
+          type="password"
+          autoComplete={mode === "login" ? "current-password" : "new-password"}
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          hint={
+            mode === "register"
+              ? "At least 10 characters, with one capital letter and one number."
+              : undefined
+          }
+          required
+        />
 
-        <button
-          type="submit"
-          disabled={isLoading}
-          className="w-full bg-[#2C6F54] hover:bg-[#235943] disabled:opacity-50 text-white font-bold rounded-xl py-2.5 text-xs transition-all shadow-md active:scale-[0.99] mt-1"
-        >
+        <Button type="submit" size="lg" fullWidth loading={isLoading}>
           {isLoading
             ? mode === "login"
-              ? "Signing in..."
-              : "Creating Account..."
+              ? "Signing in"
+              : "Creating account"
             : mode === "login"
-            ? "Sign In to Vault"
-            : "Create Vault Account"}
-        </button>
+              ? "Sign in"
+              : "Create account"}
+        </Button>
       </form>
-    </div>
+    </section>
   );
 }

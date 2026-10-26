@@ -23,10 +23,10 @@ def test_production_accepts_valid_secret(monkeypatch):
     from app.core.config import get_settings, Settings
     get_settings.cache_clear()
     monkeypatch.setenv("APP_ENVIRONMENT", "production")
-    monkeypatch.setenv("JWT_SECRET_KEY", "super_secure_test_key_12345")
+    monkeypatch.setenv("JWT_SECRET_KEY", "super_secure_test_key_1234567890_abcdef")
     settings = Settings()
     assert settings.app_environment == "production"
-    assert settings.jwt_secret_key == "super_secure_test_key_12345"
+    assert settings.jwt_secret_key == "super_secure_test_key_1234567890_abcdef"
 
 def test_development_accepts_default_secret(monkeypatch):
     from app.core.config import get_settings, Settings

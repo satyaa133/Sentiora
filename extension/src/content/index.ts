@@ -1,8 +1,9 @@
 import { isCurrentPageSensitive } from "./sensitiveGuard";
-import { isYoutubeWatchPage, captureYoutube } from "./youtubeCapture";
+import { isYoutubeHost, isYoutubeVideoPage, captureYoutube, parseYoutubeVideoUrl } from "./youtubeCapture";
 import { isPdfDocument, capturePdf } from "./pdfCapture";
 import { captureWebpageTimed } from "./webpageCapture";
 import { sendCaptureMessage } from "../shared/captureUtils";
+import { isTrustedAppUrl } from "../shared/appUrl";
 import type { CapturePayload, ExtensionMessage, CaptureErrorCode } from "../shared/types";
 
 export type CapturePipelineResult =
@@ -29,7 +30,7 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
     return { status: "skipped", reason: "sensitive" };
   }
 
-  if (isYoutubeWatchPage()) {
+  if (isYoutubeVideoPage()) {
     try {
       const payload = await captureYoutube(manualCapture);
       if (!payload) {
@@ -83,6 +84,10 @@ async function submitExtractedPayload(payload: CapturePayload): Promise<CaptureP
 }
 
 async function runAutoCapturePipeline(): Promise<CapturePipelineResult> {
+  // On YouTube only video pages are memories; never auto-save home/search/channel pages.
+  if (isYoutubeHost() && !isYoutubeVideoPage()) {
+    return { status: "skipped", reason: "no_payload" };
+  }
   const extracted = await extractCapturePayload(false);
   if (extracted.status === "skipped") {
     return { status: "skipped", reason: extracted.reason };
@@ -149,6 +154,7 @@ function initContentScript(): void {
           sendResponse({
             success: false,
             error: result.error,
+            errorCode: result.errorCode,
           });
         })
         .catch((err) => {
@@ -169,34 +175,29 @@ function initContentScript(): void {
     }
   });
 
-  let lastCapturedUrl = window.location.href;
-  function checkYoutubeUrlChange(): void {
-    if (window.location.href !== lastCapturedUrl) {
-      lastCapturedUrl = window.location.href;
-      if (isYoutubeWatchPage()) {
-        setTimeout(() => {
-          void runAutoCapturePipeline();
-        }, 1500);
-      }
-    }
-  }
-
-  if (window.location.hostname.includes("youtube.com")) {
-    window.addEventListener("yt-navigate-finish", () => {
+  // YouTube is a SPA: watch for in-app navigation between videos. Both the
+  // yt-navigate-finish event and the URL poll can fire for one navigation, so
+  // auto-capture at most once per video ID.
+  if (isYoutubeHost()) {
+    let lastVideoId = parseYoutubeVideoUrl(window.location.href)?.videoId ?? null;
+    const onYoutubeNavigation = () => {
+      const videoId = parseYoutubeVideoUrl(window.location.href)?.videoId ?? null;
+      if (!videoId || videoId === lastVideoId) return;
+      lastVideoId = videoId;
       setTimeout(() => {
-        void runAutoCapturePipeline();
+        if (parseYoutubeVideoUrl(window.location.href)?.videoId === videoId) {
+          void runAutoCapturePipeline();
+        }
       }, 1500);
-    });
-    window.addEventListener("popstate", checkYoutubeUrlChange);
-    setInterval(checkYoutubeUrlChange, 2500);
+    };
+    window.addEventListener("yt-navigate-finish", onYoutubeNavigation);
+    window.addEventListener("popstate", onYoutubeNavigation);
+    setInterval(onYoutubeNavigation, 2500);
   }
 
-  const isDashboardHost =
-    window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1" ||
-    window.location.hostname.includes("sentiora");
-
-  if (!isDashboardHost) {
+  // Exact origin match: any other page could otherwise plant its own tokens and
+  // redirect this user's captures into a foreign account.
+  if (!isTrustedAppUrl(window.location.href)) {
     return;
   }
 

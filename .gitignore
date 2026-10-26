@@ -1,4 +1,4 @@
-﻿# OS and Editor files
+# OS and Editor files
 Thumbs.db
 Desktop.ini
 .DS_Store
@@ -25,6 +25,7 @@ Desktop.ini
 *.token
 *.credentials
 !.env.example
+!.env.production.example
 !backend/.env.example
 !frontend/.env.example
 !extension/.env.example
@@ -39,6 +40,7 @@ coverage/
 .npm/
 .yarn/
 playwright-report/
+release/
 test-results/
 blob-report/
 *.tsbuildinfo
@@ -69,6 +71,8 @@ backend/.venv312/
 *.bak
 *.orig
 *.rej
+pip-log.txt
+pip_output*.txt
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

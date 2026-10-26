@@ -13,6 +13,8 @@ import {
 } from "./storage";
 
 const rawBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+/** Server origin for user-facing error messages. */
+export const API_DISPLAY_URL = rawBaseUrl.replace(/\/api\/v1$/, "");
 const API_PREFIX = rawBaseUrl.endsWith("/api/v1") ? rawBaseUrl : `${rawBaseUrl}/api/v1`;
 
 interface ApiResponse<T = unknown> {

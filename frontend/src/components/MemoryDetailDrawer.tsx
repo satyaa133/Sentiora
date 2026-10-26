@@ -1,6 +1,20 @@
 import { useState } from "react";
+import {
+  Button,
+  Drawer,
+  IconAlert,
+  IconCheck,
+  IconCopy,
+  IconExternalLink,
+  IconMessage,
+  IconTrash,
+  SourceBadge,
+  Tag,
+  buttonClasses,
+} from "@shared/ui";
 import type { MemoryItem } from "../types/memory";
 import { formatExtractedContent } from "../utils/contentFormatter";
+import { safeHref } from "../utils/safeHref";
 
 interface MemoryDetailDrawerProps {
   item: MemoryItem | null;
@@ -9,20 +23,29 @@ interface MemoryDetailDrawerProps {
   onAskAnything?: (item: MemoryItem) => void;
 }
 
-export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnything }: MemoryDetailDrawerProps) {
+export default function MemoryDetailDrawer({
+  item,
+  onClose,
+  onDelete,
+  onAskAnything,
+}: MemoryDetailDrawerProps) {
   const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!item) return null;
 
+  function close() {
+    setConfirmingDelete(false);
+    onClose();
+  }
+
   async function handleDelete() {
     if (!item) return;
-    if (!window.confirm("Are you sure you want to delete this memory item?")) return;
-
     setIsDeleting(true);
     try {
       await onDelete(item.id);
-      onClose();
+      close();
     } finally {
       setIsDeleting(false);
     }
@@ -44,151 +67,165 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnyth
 
   const readingTimeMin = Math.max(1, Math.ceil(item.reading_time_seconds / 60));
   const formatted = formatExtractedContent(item);
+  const capturedOn = new Date(item.captured_at).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        className="fixed inset-0 bg-ink-900/40 backdrop-blur-md transition-all duration-300"
-      />
-
-      {/* Drawer Panel */}
-      <div className="relative w-full max-w-2xl bg-parchment-0/95 backdrop-blur-xl border-l border-parchment-200/80 h-full flex flex-col justify-between shadow-2xl z-10 text-ink-900 font-sans">
-        {/* Header */}
-        <div className="p-6 border-b border-parchment-200/80 flex items-start justify-between gap-4 bg-parchment-50/90 backdrop-blur-md">
-          <div className="space-y-1.5">
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-moss-100 text-moss-600">
-              {item.source_type.toUpperCase()}
-            </span>
-            {item.status !== "ready" && (
-              <span
-                className={`ml-2 inline-flex items-center px-2.5 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase ${
-                  item.status === "failed"
-                    ? "bg-rose-50 text-rose-700"
-                    : "bg-amberBadge-100 text-amberBadge-600"
-                }`}
-              >
-                {item.status === "failed" ? "Failed" : "Processing..."}
-              </span>
-            )}
-            <h2 className="text-xl font-bold font-serif text-ink-900 leading-snug">{item.title}</h2>
-            <a
-              href={item.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-moss-600 hover:underline font-medium truncate max-w-md"
-            >
-              <span>{domain}</span>
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="p-2 text-ink-500 hover:text-ink-900 hover:bg-parchment-200 rounded-xl transition-colors shrink-0"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Content Body */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6">
-          {/* Metadata bar */}
-          <div className="grid grid-cols-3 gap-3 p-4 bg-white border border-parchment-200 rounded-xl text-center shadow-card">
-            <div>
-              <p className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">Word Count</p>
-              <p className="text-sm font-semibold text-ink-900 mt-0.5">{item.word_count}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">Reading Time</p>
-              <p className="text-sm font-semibold text-ink-900 mt-0.5">{readingTimeMin} min</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">Captured</p>
-              <p className="text-sm font-semibold text-ink-900 mt-0.5">
-                {new Date(item.captured_at).toLocaleDateString()}
-              </p>
-            </div>
-          </div>
-
-          {/* Thumbnail preview if present */}
-          {item.thumbnail_url && (
-            <div className="rounded-xl overflow-hidden border border-parchment-200">
-              <img src={item.thumbnail_url} alt="" className="w-full h-auto object-cover max-h-64" />
-            </div>
-          )}
-
-          {/* Full Extracted Text */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-ink-500">
-                  Extracted Content
-                </h3>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider uppercase bg-parchment-200/90 text-ink-700">
-                  {formatted.sourceLabel}
-                </span>
-              </div>
-              <button
-                onClick={handleCopyText}
-                className="text-xs text-moss-600 hover:underline font-semibold flex items-center gap-1"
-              >
-                {copied ? "Copied!" : "Copy Text"}
-              </button>
-            </div>
-
-            <div className="p-5 bg-white border border-parchment-200 rounded-xl text-ink-900 text-sm leading-relaxed space-y-4 font-sans shadow-card">
-              {formatted.paragraphs.map((para, idx) => (
-                <p key={idx} className="text-xs md:text-sm text-ink-800 leading-relaxed font-sans">
-                  {para}
-                </p>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Footer Actions */}
-        <div className="p-4 border-t border-parchment-200/80 bg-parchment-50/90 backdrop-blur-md flex items-center justify-between gap-3">
-          <div className="flex gap-2">
-            <a
-              href={item.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-4 py-2.5 rounded-xl bg-white border border-parchment-200 hover:bg-parchment-100 text-ink-900 text-xs font-semibold transition-colors flex items-center gap-2 shadow-card"
-            >
-              Open Source
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-            </a>
-            
-            {onAskAnything && item.status === "ready" && (
-              <button
-                onClick={() => onAskAnything(item)}
-                className="px-4 py-2.5 rounded-xl bg-moss-600 hover:bg-moss-700 text-white text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-md hover:shadow-lg active:scale-95"
-              >
-                <span>✨</span> Ask Anything
-              </button>
-            )}
-          </div>
-
-          <button
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="px-4 py-2.5 rounded-xl bg-rose-50 border border-rose-200 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-1.5"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            {isDeleting ? "Deleting..." : "Delete Memory"}
-          </button>
-        </div>
+  const footer = confirmingDelete ? (
+    <div
+      role="alertdialog"
+      aria-label="Delete this memory?"
+      className="flex w-full flex-wrap items-center justify-between gap-3"
+    >
+      <p className="text-[15px] font-semibold text-fg">Delete this memory?</p>
+      <div className="flex gap-2">
+        <Button
+          variant="secondary"
+          onClick={() => setConfirmingDelete(false)}
+          autoFocus
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={handleDelete}
+          loading={isDeleting}
+          leadingIcon={<IconTrash size={18} />}
+        >
+          Delete
+        </Button>
       </div>
     </div>
+  ) : (
+    <div className="flex w-full flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap gap-2">
+        {onAskAnything && item.status === "ready" && (
+          <Button
+            variant="inverse"
+            leadingIcon={<IconMessage size={18} />}
+            onClick={() => onAskAnything(item)}
+          >
+            Ask about this
+          </Button>
+        )}
+        <a
+          href={safeHref(item.url)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonClasses("secondary", "md")}
+        >
+          Open original
+          <IconExternalLink size={16} />
+          <span className="sr-only">(opens in a new tab)</span>
+        </a>
+      </div>
+      <Button
+        variant="ghost"
+        leadingIcon={<IconTrash size={18} />}
+        onClick={() => setConfirmingDelete(true)}
+        className="text-muted hover:text-fg"
+      >
+        Delete
+      </Button>
+    </div>
+  );
+
+  return (
+    <Drawer
+      open
+      size="lg"
+      onClose={close}
+      title={item.title}
+      eyebrow={
+        <span className="flex flex-wrap items-center gap-2 normal-case">
+          <SourceBadge type={item.source_type} />
+          {item.status === "failed" ? (
+            <Tag>Failed</Tag>
+          ) : item.status !== "ready" ? (
+            <Tag>Processing</Tag>
+          ) : null}
+        </span>
+      }
+      footer={footer}
+    >
+      <div className="space-y-6">
+        <a
+          href={safeHref(item.url)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex max-w-full items-center gap-1 text-[15px] text-link hover:underline"
+        >
+          <span className="truncate">{domain}</span>
+          <IconExternalLink size={14} className="shrink-0" />
+          <span className="sr-only">(opens in a new tab)</span>
+        </a>
+
+        {item.status === "failed" && (
+          <p
+            role="alert"
+            className="flex items-start gap-2 rounded-btn bg-accent-soft px-4 py-3 text-[15px] text-accent-soft-fg"
+          >
+            <IconAlert size={18} className="mt-0.5 shrink-0" />
+            <span>
+              {item.processing_error || "This memory could not be indexed."} It is not
+              searchable; capture it again to retry.
+            </span>
+          </p>
+        )}
+
+        <dl className="grid grid-cols-3 gap-3 rounded-card bg-raised p-4 text-center">
+          <div>
+            <dt className="font-mono text-eyebrow uppercase text-muted">Words</dt>
+            <dd className="mt-1 font-semibold text-fg">{item.word_count}</dd>
+          </div>
+          <div>
+            <dt className="font-mono text-eyebrow uppercase text-muted">Reading</dt>
+            <dd className="mt-1 font-semibold text-fg">{readingTimeMin} min</dd>
+          </div>
+          <div>
+            <dt className="font-mono text-eyebrow uppercase text-muted">Saved</dt>
+            <dd className="mt-1 font-semibold text-fg">{capturedOn}</dd>
+          </div>
+        </dl>
+
+        {item.thumbnail_url && (
+          <img
+            src={item.thumbnail_url}
+            alt=""
+            className="max-h-64 w-full rounded-card border border-line object-cover"
+          />
+        )}
+
+        <section aria-labelledby="memory-content-heading" className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h3
+              id="memory-content-heading"
+              className="flex items-center gap-2 text-[17px] font-semibold"
+            >
+              Saved text
+              <span className="font-mono text-eyebrow font-normal uppercase text-muted">
+                {formatted.sourceLabel}
+              </span>
+            </h3>
+            {item.content ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                leadingIcon={copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
+                onClick={handleCopyText}
+              >
+                {copied ? "Copied" : "Copy text"}
+              </Button>
+            ) : null}
+          </div>
+          <div className="space-y-4 text-[17px] leading-relaxed text-fg">
+            {formatted.paragraphs.map((para, idx) => (
+              <p key={idx}>{para}</p>
+            ))}
+          </div>
+        </section>
+      </div>
+    </Drawer>
   );
 }

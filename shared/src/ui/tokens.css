@@ -1,0 +1,195 @@
+/*
+ * Sentiora design tokens (Graphite & Coral). Source of truth: docs/DESIGN.md §2–3.
+ *
+ * Theme follows the OS by default. Setting data-theme="light" | "dark" on <html>
+ * overrides it (see theme.ts). The same attribute on any element scopes a theme to
+ * that subtree (used by /dev/components to show both themes side by side).
+ * Components must use these variables, never raw hex.
+ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f4f3;
+  --surface: #ffffff;
+  --surface-raised: #ebebe8;
+  --text: #111111;
+  --text-muted: #5f5f5c;
+  --border: #e5e5e2;
+  --border-soft: #f0f0ee;
+  --accent: #ff5a3c;
+  --accent-hover: #e0472b;
+  --on-accent: #111111;
+  --link: #c93520;
+  --accent-soft: #ffe3dd;
+  --accent-soft-text: #a12a18;
+
+  /* Inverse surfaces: graphite panels, user bubbles, the onboarding rail. */
+  --inverse: #111111;
+  --on-inverse: #f4f4f3;
+  --on-inverse-muted: #a8a8a4;
+  /* Edge for inverse fills; only visible in dark mode, where --inverse is close to --surface. */
+  --inverse-border: #111111;
+
+  --shadow-float: 0 30px 60px -30px rgba(17, 17, 17, 0.25);
+  --shadow-pop: 0 12px 32px -12px rgba(17, 17, 17, 0.18);
+  --overlay: rgba(17, 17, 17, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #111111;
+    --surface: #1a1a1a;
+    --surface-raised: #1f1f1f;
+    --text: #f4f4f3;
+    --text-muted: #a8a8a4;
+    --border: #2a2a2a;
+    --border-soft: #222222;
+    --link: #ff5a3c;
+    --accent-soft: #3b2420;
+    --accent-soft-text: #ff8a73;
+
+    --inverse: #1f1f1f;
+    --on-inverse: #f4f4f3;
+    --on-inverse-muted: #a8a8a4;
+    --inverse-border: #333333;
+
+    --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
+    --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+    --overlay: rgba(0, 0, 0, 0.65);
+  }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #111111;
+  --surface: #1a1a1a;
+  --surface-raised: #1f1f1f;
+  --text: #f4f4f3;
+  --text-muted: #a8a8a4;
+  --border: #2a2a2a;
+  --border-soft: #222222;
+  --link: #ff5a3c;
+  --accent-soft: #3b2420;
+  --accent-soft-text: #ff8a73;
+
+  --inverse: #1f1f1f;
+  --on-inverse: #f4f4f3;
+  --on-inverse-muted: #a8a8a4;
+  --inverse-border: #333333;
+
+  --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
+  --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  --overlay: rgba(0, 0, 0, 0.65);
+}
+
+/* Source-type badges keep the same pair in both modes (DESIGN.md §2). */
+:root {
+  --badge-web-bg: #ffe3dd;
+  --badge-web-text: #a12a18;
+  --badge-pdf-bg: #fdf0d9;
+  --badge-pdf-text: #7a4b00;
+  --badge-video-bg: #fbe4e1;
+  --badge-video-text: #8a2a1e;
+  --badge-note-bg: #e6f2d0;
+  --badge-note-text: #3d5410;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --duration: 200ms;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  --font-display:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+[data-theme] {
+  color: var(--text);
+}
+
+html {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  line-height: 1.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background-color: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+/* Echo motion (DESIGN.md §4): 4px bob on a 3s loop; quick float on save. */
+@keyframes echo-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes echo-float {
+  0% {
+    transform: translateY(6px);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.echo-bob {
+  animation: echo-bob 3s ease-in-out infinite;
+}
+
+.echo-float {
+  animation: echo-float 250ms var(--ease) both;
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.drawer-in {
+  animation: drawer-in 220ms var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

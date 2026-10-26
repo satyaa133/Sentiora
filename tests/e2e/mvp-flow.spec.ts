@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-const API = process.env.E2E_API_BASE_URL ?? "http://localhost:8000";
+// Set by playwright.config.ts to the isolated e2e API (never the dev server).
+const API = process.env.E2E_API_BASE_URL ?? "http://localhost:8100";
 
 function uniqueEmail(): string {
   return `e2e_${Date.now()}_${Math.floor(Math.random() * 10000)}@example.com`;

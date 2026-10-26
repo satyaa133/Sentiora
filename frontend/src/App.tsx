@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -9,6 +10,11 @@ import LandingPage from "./pages/LandingPage";
 import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
 import SignUp from "./pages/SignUp";
+
+// UI kit gallery, development builds only (tree-shaken from production).
+const ComponentsGallery = import.meta.env.DEV
+  ? lazy(() => import("./pages/dev/ComponentsGallery"))
+  : null;
 
 export default function App() {
   return (
@@ -84,6 +90,16 @@ export default function App() {
                 </ProtectedRoute>
               }
             />
+            {ComponentsGallery ? (
+              <Route
+                path="dev/components"
+                element={
+                  <Suspense fallback={null}>
+                    <ComponentsGallery />
+                  </Suspense>
+                }
+              />
+            ) : null}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
