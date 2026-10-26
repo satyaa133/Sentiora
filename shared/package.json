@@ -9,8 +9,5 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
-  },
-  "peerDependencies": {
-    "react": "^18.3.1"
   }
 }
