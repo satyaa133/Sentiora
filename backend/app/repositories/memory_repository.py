@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, datetime, UTC
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import ColumnElement, Select, func, or_, select
@@ -24,9 +25,9 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def apply_memory_filters(
-    stmt: Select[tuple[MemoryItem]], filters: MemoryFilters | None
-) -> Select[tuple[MemoryItem]]:
+# Generic over the statement so the annotation holds on SQLAlchemy 2.0 and 2.1,
+# which type select(MemoryItem) differently.
+def apply_memory_filters[S: Select[Any]](stmt: S, filters: MemoryFilters | None) -> S:
     if filters is None:
         return stmt
     if filters.source_type is not None:
@@ -85,7 +86,7 @@ class MemoryRepository:
             select(func.count()).select_from(base_stmt.subquery())
         ).scalar_one()
 
-        items = list(
+        items: list[MemoryItem] = list(
             self.db.execute(
                 base_stmt.order_by(MemoryItem.captured_at.desc(), MemoryItem.id.desc())
                 .offset((page - 1) * per_page)
@@ -146,7 +147,7 @@ class MemoryRepository:
             .where(*self._live(user_id), MemoryItem.captured_at >= since)
             .group_by(local_day)
         ).all()
-        return {day: int(count) for day, count in rows}
+        return {day: int(count) for day, count in cast(list[tuple[date, int]], rows)}
 
     def latest_captured_at(self, user_id: UUID) -> datetime | None:
         return self.db.execute(
