@@ -38,7 +38,12 @@ from app.services.rag_sanitize import (
     sanitize_untrusted_text,
     strip_instruction_like_lines,
 )
-from app.services.retrieval_service import RetrievedChunk, RetrievalService, needs_document_context
+from app.services.retrieval_service import (
+    RetrievedChunk,
+    RetrievalService,
+    keyword_coverage,
+    needs_document_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +66,18 @@ class LLMNotConfiguredError(RuntimeError):
 
 class LLMProviderError(RuntimeError):
     """Raised when a configured LLM provider fails at runtime."""
+
+    # HTTP statuses that mean the provider account or service is unavailable
+    # (no credits, bad key, quota, overload) rather than a one-off failure.
+    UNAVAILABLE_STATUSES = frozenset({401, 402, 403, 429, 503})
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def provider_unavailable(self) -> bool:
+        return self.status in self.UNAVAILABLE_STATUSES
 
 
 SYSTEM_PROMPT = """You are Echo, the assistant inside Sentiora, a private memory app.
@@ -568,7 +585,11 @@ class RagService:
         if not self._llm_configured():
             return self._fallback_response(question, chunks)
 
-        answer = self._generate(question, chunks, SYSTEM_PROMPT, history)
+        try:
+            answer = self._generate(question, chunks, SYSTEM_PROMPT, history)
+        except LLMProviderError:
+            # Memory was found, so answer from it rather than failing the question.
+            return self._fallback_response(question, chunks)
         if _looks_insufficient(answer):
             text, _ = _apply_citations(answer, [])
             return self._response(question, text, [], "memory", insufficient=True)
@@ -599,7 +620,20 @@ class RagService:
             return self._response(question, text, [], "general")
 
         prompt = HYBRID_PROMPT + (COMBINED_RULE if combined else "")
-        answer = self._generate(question, chunks, prompt, history)
+        try:
+            answer = self._generate(question, chunks, prompt, history)
+        except LLMProviderError:
+            # Fall back only to memory that covers most of the question's
+            # keywords; one shared word or a loose vector neighbour is not an
+            # answer to a general question.
+            relevant = [
+                chunk
+                for chunk in chunks
+                if keyword_coverage(question, chunk.title, chunk.content) >= 2 / 3
+            ]
+            if not relevant:
+                raise
+            return self._fallback_response(question, relevant)
         general_part, memory_part = _split_memory_section(answer)
         citations = _citations_from_chunks(chunks)
         if memory_part is None:
@@ -628,12 +662,7 @@ class RagService:
         self, question: str, topic: str, chunks: list[RetrievedChunk]
     ) -> AskResponse:
         """'Which sources mention X': list the matching saves, never generate."""
-        strong = float(getattr(self.settings, "rag_strong_distance", 0.4))
-        matching = [
-            chunk
-            for chunk in chunks
-            if chunk.rank > 0 or (chunk.distance is not None and chunk.distance <= strong)
-        ]
+        matching = self._clear_matches(chunks)
         clean_topic = sanitize_untrusted_text(topic)[:80]
         if not any(len(word) >= 3 for word in re.findall(r"[A-Za-z0-9]+", topic)):
             # Keyword search ignores words under 3 characters, so "none mention
@@ -710,6 +739,15 @@ class RagService:
         answer, citations = _format_listing(items, window.label, zone)
         return self._response(question, answer, citations, "memory")
 
+    def _clear_matches(self, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+        """Keyword hits and strong semantic hits only."""
+        strong = float(getattr(self.settings, "rag_strong_distance", 0.4))
+        return [
+            chunk
+            for chunk in chunks
+            if chunk.rank > 0 or (chunk.distance is not None and chunk.distance <= strong)
+        ]
+
     def _fallback_response(self, question: str, chunks: list[RetrievedChunk]) -> AskResponse:
         return self._response(
             question,
@@ -752,7 +790,12 @@ class RagService:
             raise
         except Exception as exc:
             logger.exception("LLM completion failed for configured provider")
-            raise LLMProviderError(str(exc) or type(exc).__name__) from exc
+            # openai errors carry status_code, google-genai errors carry code.
+            status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            raise LLMProviderError(
+                str(exc) or type(exc).__name__,
+                status=status if isinstance(status, int) else None,
+            ) from exc
         cleaned = (answer or "").strip()
         if not cleaned:
             raise LLMProviderError("The language model returned an empty response.")

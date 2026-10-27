@@ -343,13 +343,14 @@ def test_chat_falls_back_when_llm_completion_fails(monkeypatch) -> None:  # type
         json={"question": "What is binary search?"},
         headers=headers,
     )
-    assert chat_resp.status_code == 502
-    error = chat_resp.json()["error"]
-    assert error["code"] == "ASK_LLM_FAILED"
-    assert "unavailable" not in error["message"].lower() or "language model failed" in error["message"].lower()
-    assert "language model failed" in error["message"].lower()
+    # Matching memory was found, so the question is answered from it locally.
+    assert chat_resp.status_code == 200
+    payload = chat_resp.json()["data"]
+    assert payload["used_fallback"] is True
+    assert "halves" in payload["answer"].lower()
+    assert payload["citations"][0]["memory_id"] == item_id
     # Raw provider errors must not reach the client.
-    assert "provider timeout" not in error["message"].lower()
+    assert "provider timeout" not in payload["answer"].lower()
 
 
 def test_search_lexical_without_embeddings(monkeypatch) -> None:  # type: ignore[no-untyped-def]

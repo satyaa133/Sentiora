@@ -148,6 +148,15 @@ def _query_tokens(query: str) -> list[str]:
     ]
 
 
+def keyword_coverage(query: str, *texts: str) -> float:
+    """Share of the query's keywords that appear in the given texts (0.0–1.0)."""
+    tokens = _query_tokens(query)
+    if not tokens:
+        return 0.0
+    haystack = " ".join(texts).lower()
+    return sum(token in haystack for token in tokens) / len(tokens)
+
+
 def _min_token_matches(token_count: int) -> int:
     """Short queries need one hit; longer ones need real overlap, not one stray word."""
     if token_count <= 2:

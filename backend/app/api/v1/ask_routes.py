@@ -3,6 +3,9 @@
 Error hierarchy:
   LLMNotConfiguredError  → HTTP 503  AI_NOT_CONFIGURED
     (only when no retrieved memory can be used for a local fallback)
+  LLMProviderError       → HTTP 503  AI_PROVIDER_UNAVAILABLE (credits, key, quota, overload)
+                         → HTTP 502  ASK_LLM_FAILED (anything else)
+    (raised only when no matching memory could answer locally)
   Any other exception    → HTTP 502  ASK_SYSTEM_FAILED
 """
 
@@ -64,9 +67,22 @@ def ask_memories(
                 ),
             },
         ) from None
-    except LLMProviderError:
+    except LLMProviderError as exc:
         # Provider error text can include upstream details; it stays in the log.
         logger.exception("Ask LLM provider failed")
+        if exc.provider_unavailable:
+            # Out of credits, bad key, quota or overload: retrying won't help soon.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "AI_PROVIDER_UNAVAILABLE",
+                    "message": (
+                        "The AI provider is unavailable right now (for example it is "
+                        "out of credits or rate-limited). Questions about your saved "
+                        "memories still work; general questions need the provider."
+                    ),
+                },
+            ) from None
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={

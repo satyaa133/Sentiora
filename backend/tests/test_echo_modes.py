@@ -450,3 +450,56 @@ def test_cited_answer_that_names_the_source_stays_a_memory_answer(monkeypatch) -
     data = _ask(headers, "How does binary search halve the interval?")
     assert data["mode"] == "memory"
     assert [c["memory_id"] for c in data["citations"]] == [item_id]
+
+
+class _ProviderError(Exception):
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"upstream said {status_code}")
+        self.status_code = status_code
+
+
+def _failing_llm(monkeypatch, status_code: int | None) -> None:  # type: ignore[no-untyped-def]
+    _with_llm(monkeypatch)
+
+    def boom(self, question, chunks, **kwargs):  # type: ignore[no-untyped-def]
+        raise _ProviderError(status_code) if status_code else RuntimeError("timeout")
+
+    monkeypatch.setattr("app.services.rag_service.RagService._complete", boom)
+
+
+def test_out_of_credits_general_question_reports_provider_unavailable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _failing_llm(monkeypatch, 402)
+    headers = _auth_headers("echo_credits@example.com")
+    resp = client.post("/api/v1/chat", json={"question": "What is a binary heap?"}, headers=headers)
+    assert resp.status_code == 503
+    error = resp.json()["error"]
+    assert error["code"] == "AI_PROVIDER_UNAVAILABLE"
+    assert "upstream said" not in error["message"]
+
+
+def test_one_off_provider_failure_without_memory_is_ask_llm_failed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _failing_llm(monkeypatch, None)
+    headers = _auth_headers("echo_timeout@example.com")
+    resp = client.post("/api/v1/chat", json={"question": "What is a binary heap?"}, headers=headers)
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "ASK_LLM_FAILED"
+
+
+def test_provider_failure_on_a_personal_question_falls_back_to_memory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _failing_llm(monkeypatch, 402)
+    headers = _auth_headers("echo_credits_memory@example.com")
+    item_id = _create(headers, "Binary Search Explained", ARTICLE)
+    data = _ask(headers, "What did I save about binary search?")
+    assert data["used_fallback"] is True
+    assert [c["memory_id"] for c in data["citations"]] == [item_id]
+
+
+def test_provider_failure_does_not_answer_a_general_question_with_unrelated_memory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _failing_llm(monkeypatch, 402)
+    headers = _auth_headers("echo_credits_unrelated@example.com")
+    _create(headers, "Memory vault guide", "Search your saved pages using natural language phrases. " * 3)
+    resp = client.post(
+        "/api/v1/chat", json={"question": "What is a large language model?"}, headers=headers
+    )
+    assert resp.status_code == 503
+    assert resp.json()["error"]["code"] == "AI_PROVIDER_UNAVAILABLE"

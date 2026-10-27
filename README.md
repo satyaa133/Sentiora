@@ -353,7 +353,9 @@ Each answer has a `mode` (`backend/app/services/ask_intent.py` picks it, `rag_se
 |---|---|---|
 | Provider key missing, relevant memories found | `200` | Grounded local fallback, `used_fallback: true`, real citations |
 | Provider key missing, general question | `200` | `insufficient_context: true`; says general answers need the AI model |
-| LLM configured but the request fails | `502` | `ASK_LLM_FAILED`; details stay in the server log |
+| LLM request fails, matching memory found | `200` | Local fallback from that memory, `used_fallback: true` |
+| Provider unavailable (out of credits, bad key, quota, overload), no matching memory | `503` | `AI_PROVIDER_UNAVAILABLE`; details stay in the server log |
+| Other LLM failure, no matching memory | `502` | `ASK_LLM_FAILED` |
 | Unexpected server error | `502` | `ASK_SYSTEM_FAILED` |
 
 - **Citations** are validated against the retrieved set: `[Source N]` markers that point at nothing are removed, and the rest are renumbered to match `citations` (each carries `captured_at` and a short `excerpt`).
