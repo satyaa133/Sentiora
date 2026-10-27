@@ -79,4 +79,6 @@ def reset_security_limiters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "rate_limit_register_per_minute", 1000)
     monkeypatch.setattr(settings, "rate_limit_chat_per_minute", 1000)
     monkeypatch.setattr(settings, "rate_limit_chat_per_user_per_minute", 1000)
+    monkeypatch.setattr(settings, "rate_limit_refresh_per_minute", 1000)
+    monkeypatch.setattr(settings, "rate_limit_search_per_user_per_minute", 1000)
     monkeypatch.setattr(settings, "failed_login_max_attempts", 1000)

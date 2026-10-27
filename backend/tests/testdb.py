@@ -128,8 +128,8 @@ def ensure_test_database(url: str) -> None:
     finally:
         engine.dispose()
 
-    # Run the alembic console script in a subprocess: backend/alembic/ (the
-    # migrations folder) shadows the alembic package when backend/ is on sys.path.
+    # Run the alembic console script in a subprocess so migrations run with a
+    # fresh interpreter and the target DATABASE_URL, isolated from this process.
     scripts_dir = Path(sys.executable).parent
     alembic_bin = shutil.which("alembic", path=str(scripts_dir)) or shutil.which("alembic")
     if not alembic_bin:

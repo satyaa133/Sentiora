@@ -1,16 +1,26 @@
 import { useState, useMemo } from "react";
-import { Chip, IconSearch, Input, MemoryList, MemoryRow } from "@shared/ui";
+import { Button, Chip, IconSearch, Input, MemoryList, MemoryRow } from "@shared/ui";
 import EmptyState from "../EmptyState";
+import MemoryFeedSkeleton from "../MemoryFeedSkeleton";
 import type { MemoryItem } from "../../types/memory";
 import { formatExtractedContent } from "../../utils/contentFormatter";
 import { dayLabel } from "../../utils/dates";
 
 interface SearchViewProps {
   items: MemoryItem[];
+  isLoading: boolean;
+  loadError: string | null;
+  onRetry: () => void;
   onSelectItem: (item: MemoryItem) => void;
 }
 
-export default function SearchView({ items, onSelectItem }: SearchViewProps) {
+export default function SearchView({
+  items,
+  isLoading,
+  loadError,
+  onRetry,
+  onSelectItem,
+}: SearchViewProps) {
   const [query, setQuery] = useState("");
 
   const searchResults = useMemo(() => {
@@ -69,6 +79,36 @@ export default function SearchView({ items, onSelectItem }: SearchViewProps) {
         ) : null}
       </div>
 
+      {isLoading ? (
+        <MemoryFeedSkeleton />
+      ) : loadError ? (
+        <EmptyState
+          title="Could not load your memories"
+          body={loadError}
+          action={
+            <Button variant="secondary" onClick={onRetry}>
+              Try again
+            </Button>
+          }
+        />
+      ) : (
+        <SearchResults query={query} results={searchResults} onSelectItem={onSelectItem} />
+      )}
+    </div>
+  );
+}
+
+function SearchResults({
+  query,
+  results: searchResults,
+  onSelectItem,
+}: {
+  query: string;
+  results: MemoryItem[];
+  onSelectItem: (item: MemoryItem) => void;
+}) {
+  return (
+    <>
       {query.trim() ? (
         <p role="status" className="text-[15px] text-muted">
           {searchResults.length} {searchResults.length === 1 ? "result" : "results"} for
@@ -107,6 +147,6 @@ export default function SearchView({ items, onSelectItem }: SearchViewProps) {
           body="Type a word, a phrase or a website to find saved articles, PDFs and videos."
         />
       )}
-    </div>
+    </>
   );
 }

@@ -47,7 +47,8 @@ def _find_existing_ready(db: DBSession, user_id: UUID, url: str, current_id: UUI
             MemoryItem.id != current_id,
         )
     )
-    return db.execute(stmt).scalar_one_or_none()
+    # Several READY rows can share a URL after races; reuse the oldest one.
+    return db.execute(stmt.order_by(MemoryItem.created_at).limit(1)).scalars().first()
 
 
 def _looks_like_stub(text: str) -> bool:

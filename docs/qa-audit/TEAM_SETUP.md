@@ -103,3 +103,8 @@ Two developers' local setups **never** share data. Use the shared remote environ
 | Extension doesn't pick up the web sign-in | You opened the app on a different origin than `VITE_APP_URL` (e.g. `127.0.0.1` vs `localhost`). |
 | YouTube capture says the transcript could not be fetched | Known limitation under investigation (BUG_REGISTER OPEN-01). Webpage and PDF capture are unaffected. |
 | Semantic search is lexical only | No embedding key. Set `OPENAI_API_KEY` or `GEMINI_API_KEY` in `backend/.env` and restart the API and worker. |
+| Web app says "Could not reach the Sentiora server" | The request got no response: the API is not running at `VITE_API_BASE_URL`, or the page origin is missing from `CORS_ORIGINS`. Check `http://localhost:8000/health` and the browser console. |
+| "Too many requests" (HTTP 429) | A per-minute limit was hit (`RATE_LIMIT_*` in `backend/.env`). Wait a minute, or raise the limit for local testing. |
+| Local `file://` PDFs are not captured | Chrome blocks extensions from file URLs by default. In `chrome://extensions` → Sentiora → **Details**, turn on **Allow access to file URLs**. |
+| Uploading a `.txt`/`.md` file on Sources fails | Known gap: the upload is sent as a `file://` web page, which the API refuses. Use the extension or **Add memory** instead. |
+| Extension changes don't show up | `npm run dev:extension` rebuilds `extension/dist`, but Chrome needs the reload icon in `chrome://extensions`, then a page refresh. |

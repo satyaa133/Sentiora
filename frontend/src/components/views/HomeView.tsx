@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { FormEvent, RefObject } from "react";
+import type { FormEvent } from "react";
 
 import {
   Button,
@@ -19,19 +19,11 @@ import {
   MemoryRowSkeleton,
 } from "@shared/ui";
 
-import type { MemoryItem, SourceType } from "../../types/memory";
+import EmptyState from "../EmptyState";
+import { SOURCE_FILTERS, type MemoryItem, type SourceFilter } from "../../types/memory";
 import { formatExtractedContent } from "../../utils/contentFormatter";
 import { dayLabel, greeting, savedAgo } from "../../utils/dates";
 import { pickResurfaced } from "../../utils/resurface";
-
-type Filter = "all" | SourceType;
-
-const FILTERS: Array<{ id: Filter; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "webpage", label: "Web" },
-  { id: "pdf", label: "PDF" },
-  { id: "youtube", label: "Video" },
-];
 
 const DISMISSED_KEY = "sentiora-resurface-dismissed";
 
@@ -64,7 +56,6 @@ interface HomeViewProps {
   status: string | null;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
-  searchInputRef: RefObject<HTMLInputElement>;
   onRetry: () => void;
   onSync: () => void;
   onAddMemory: () => void;
@@ -83,7 +74,6 @@ export default function HomeView({
   status,
   searchQuery,
   onSearchQueryChange,
-  searchInputRef,
   onRetry,
   onSync,
   onAddMemory,
@@ -92,7 +82,7 @@ export default function HomeView({
   onOpenPalette,
   onViewTimeline,
 }: HomeViewProps) {
-  const [filter, setFilter] = useState<Filter>("all");
+  const [filter, setFilter] = useState<SourceFilter>("all");
   const [dismissed, setDismissed] = useState<Set<string>>(readDismissed);
 
   const filtered = useMemo(() => {
@@ -179,7 +169,6 @@ export default function HomeView({
         </label>
         <Input
           id="home-search"
-          ref={searchInputRef}
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.target.value)}
           placeholder="Search or ask anything you've saved..."
@@ -253,7 +242,7 @@ export default function HomeView({
               aria-label="Filter by type"
               className="flex flex-wrap gap-2"
             >
-              {FILTERS.map((option) => (
+              {SOURCE_FILTERS.map((option) => (
                 <Chip
                   key={option.id}
                   selected={filter === option.id}
@@ -276,16 +265,15 @@ export default function HomeView({
               ))}
             </ul>
           ) : loadError ? (
-            <Card className="flex flex-col items-center py-10 text-center">
-              <Echo state="faded" size={72} />
-              <p className="mt-4 text-[17px] font-semibold text-fg">
-                Could not load your memories
-              </p>
-              <p className="mt-1 max-w-sm text-[15px] text-muted">{loadError}</p>
-              <Button variant="secondary" className="mt-5" onClick={onRetry}>
-                Try again
-              </Button>
-            </Card>
+            <EmptyState
+              title="Could not load your memories"
+              body={loadError}
+              action={
+                <Button variant="secondary" onClick={onRetry}>
+                  Try again
+                </Button>
+              }
+            />
           ) : filtered.length > 0 ? (
             <>
               <MemoryList>

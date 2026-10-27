@@ -61,7 +61,8 @@ class MemoryItemCreate(BaseModel):
     @classmethod
     def sanitize_url(cls, v: object) -> str:
         if not isinstance(v, str) or not v.strip():
-            return "https://unknown"
+            # A placeholder URL would make unrelated captures dedupe together.
+            raise ValueError("url is required")
         url = v.strip()[:2048]
         # Stored URLs are rendered as links: never accept javascript:/data: etc.
         scheme = url.split(":", 1)[0].lower() if ":" in url else ""
@@ -89,9 +90,11 @@ class MemoryItemCreate(BaseModel):
         if not isinstance(v, str) or not v.strip():
             return None
         val = v.strip()
-        if val.startswith("data:") or len(val) > 2048:
+        # Rendered as <img src>: only plain web URLs (drops data:, javascript:, ...).
+        scheme = val.split(":", 1)[0].lower() if ":" in val else ""
+        if scheme not in {"http", "https"} or len(val) > 2048:
             return None
-        return val[:2048]
+        return val
 
 
 class MemoryItemResponse(BaseModel):

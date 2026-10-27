@@ -84,8 +84,6 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
   },
 ];
 
-export const ALL_SOURCE_IDS = SOURCE_CATALOG.map((source) => source.id);
-
 export function statusToUiLabel(
   status: SourceStatus,
 ): "Active" | "Paused" | "Ready to Connect" {

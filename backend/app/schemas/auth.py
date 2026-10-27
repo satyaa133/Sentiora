@@ -1,22 +1,25 @@
 import re
+from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+
+
+def _check_password_strength(v: str) -> str:
+    if not re.search(r"[A-Z]", v):
+        raise ValueError("Must contain at least one uppercase letter.")
+    if not re.search(r"[0-9]", v):
+        raise ValueError("Must contain at least one number.")
+    return v
+
+
+StrongPassword = Annotated[str, Field(min_length=10), AfterValidator(_check_password_strength)]
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=10)
+    password: StrongPassword
     full_name: str = Field(min_length=2, max_length=80)
-
-    @field_validator("password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Must contain at least one uppercase letter.")
-        if not re.search(r"[0-9]", v):
-            raise ValueError("Must contain at least one number.")
-        return v
 
 
 class LoginRequest(BaseModel):
@@ -34,30 +37,12 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     reset_token: str
-    new_password: str = Field(min_length=10)
-
-    @field_validator("new_password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Must contain at least one uppercase letter.")
-        if not re.search(r"[0-9]", v):
-            raise ValueError("Must contain at least one number.")
-        return v
+    new_password: StrongPassword
 
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str = Field(min_length=10)
-
-    @field_validator("new_password")
-    @classmethod
-    def validate_password(cls, v: str) -> str:
-        if not re.search(r"[A-Z]", v):
-            raise ValueError("Must contain at least one uppercase letter.")
-        if not re.search(r"[0-9]", v):
-            raise ValueError("Must contain at least one number.")
-        return v
+    new_password: StrongPassword
 
 
 class RegisterResponseData(BaseModel):

@@ -1,11 +1,10 @@
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.deps import get_current_user, get_db
-from app.core.rate_limit import limit_login, limit_register
+from app.core.rate_limit import limit_login, limit_refresh, limit_register
 from app.models.user import User
 from app.schemas.auth import (
     AuthTokenData,
@@ -17,18 +16,11 @@ from app.schemas.auth import (
     RegisterResponseData,
     ResetPasswordRequest,
 )
-from app.schemas.envelope import (
-    APIResponse,
-    ResponseMeta,
-)
+from app.schemas.envelope import APIResponse, response_meta
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-
-def _meta(request: Request) -> ResponseMeta:
-    request_id = getattr(request.state, "request_id", f"req_{uuid.uuid4().hex[:8]}")
-    return ResponseMeta(request_id=request_id)
 
 
 @router.post(
@@ -45,7 +37,7 @@ def register(
     service = AuthService(db)
     limit_register(request)
     data = service.register(req)
-    return APIResponse(data=data, meta=_meta(request))
+    return APIResponse(data=data, meta=response_meta(request))
 
 
 @router.post(
@@ -67,7 +59,7 @@ def login(
     if ip_address == "testclient":
         ip_address = "127.0.0.1"
     data = service.login(req, ip_address=ip_address, user_agent=user_agent)
-    return APIResponse(data=data, meta=_meta(request))
+    return APIResponse(data=data, meta=response_meta(request))
 
 
 @router.post(
@@ -81,9 +73,10 @@ def refresh_token(
     request: Request,
     db: Annotated[DBSession, Depends(get_db)],
 ) -> APIResponse[AuthTokenData]:
+    limit_refresh(request)
     service = AuthService(db)
     data = service.refresh_tokens(req.refresh_token)
-    return APIResponse(data=data, meta=_meta(request))
+    return APIResponse(data=data, meta=response_meta(request))
 
 
 @router.post(
@@ -101,7 +94,7 @@ def logout(
     return {
         "success": True,
         "data": {"message": "Logged out successfully."},
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
 
 
@@ -122,7 +115,7 @@ def get_current_user_me(
             "is_email_verified": current_user.is_email_verified,
             "is_active": current_user.is_active,
         },
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
 
 
@@ -143,7 +136,7 @@ def forgot_password(
         "data": {
             "message": "If this email is registered, you will receive a reset link."
         },
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
 
 
@@ -184,5 +177,5 @@ def change_password(
     return {
         "success": True,
         "data": {"message": "Password changed successfully."},
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
