@@ -22,7 +22,7 @@ export default function Hero() {
     <section id="hero" aria-labelledby="hero-heading" className="pb-16 pt-10 sm:pt-16 lg:pb-24">
       <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-4 sm:px-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-14">
         <div>
-          <p className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-sm font-medium text-fg">
+          <p className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[15px] font-medium text-fg">
             <span aria-hidden="true" className="h-2.5 w-2.5 rounded-full bg-accent" />
             A private memory for everything you read
           </p>

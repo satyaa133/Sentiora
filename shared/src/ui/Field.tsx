@@ -103,11 +103,11 @@ function FieldShell({ id, label, hint, error, children, className }: FieldShellP
       <Label htmlFor={id}>{label}</Label>
       {children}
       {error ? (
-        <p id={`${id}-error`} className="text-sm text-link">
+        <p id={`${id}-error`} className="text-[15px] text-link">
           {error}
         </p>
       ) : hint ? (
-        <p id={`${id}-hint`} className="text-sm text-muted">
+        <p id={`${id}-hint`} className="text-[15px] text-muted">
           {hint}
         </p>
       ) : null}

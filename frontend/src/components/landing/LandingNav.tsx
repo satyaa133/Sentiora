@@ -55,7 +55,7 @@ export default function LandingNav({ heroId = "hero" }: { heroId?: string }) {
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-bg/95 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
-        <Link to="/" aria-label="Sentiora home" className="shrink-0 rounded-btn">
+        <Link to="/" aria-label="Sentiora home" className="touch-target inline-flex shrink-0 rounded-btn">
           <Logo size={21} />
         </Link>
         <nav aria-label="Sections" className="hidden items-center gap-1 md:flex">

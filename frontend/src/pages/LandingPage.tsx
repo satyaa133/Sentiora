@@ -79,12 +79,12 @@ export default function LandingPage() {
                 {link.href ? (
                   <a
                     href={link.href}
-                    className="text-muted hover:text-fg hover:underline"
+                    className="inline-flex min-h-touch items-center text-muted hover:text-fg hover:underline"
                   >
                     {link.label}
                   </a>
                 ) : (
-                  <span className="text-muted">{link.label}</span>
+                  <span className="inline-flex min-h-touch items-center text-muted">{link.label}</span>
                 )}
               </li>
             ))}

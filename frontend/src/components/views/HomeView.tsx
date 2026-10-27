@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { emitEcho } from "../echo/echoEvents";
 import { useEchoSearchEvents } from "../echo/useEchoSearchEvents";
+import { useStatistics } from "../../hooks/useStatistics";
+import ThisWeekChart from "./ThisWeekChart";
 
 import {
   Button,
@@ -65,6 +67,8 @@ interface HomeViewProps {
   onAsk: (question: string) => void;
   onOpenPalette: () => void;
   onViewTimeline: () => void;
+  /** Changes when memories are added, removed or change status; refreshes "This week". */
+  statsRefreshKey?: unknown;
 }
 
 export default function HomeView({
@@ -83,7 +87,9 @@ export default function HomeView({
   onAsk,
   onOpenPalette,
   onViewTimeline,
+  statsRefreshKey,
 }: HomeViewProps) {
+  const { stats } = useStatistics(statsRefreshKey);
   const [filter, setFilter] = useState<SourceFilter>("all");
   const [dismissed, setDismissed] = useState<Set<string>>(readDismissed);
 
@@ -191,7 +197,7 @@ export default function HomeView({
             </button>
           }
         />
-        <p id="home-search-hint" className="mt-2 min-h-[20px] text-sm text-muted">
+        <p id="home-search-hint" className="mt-2 min-h-[22px] text-[15px] text-muted">
           {searchQuery.trim()
             ? "Filtering your recent memories. Press Enter to ask Sentiora."
             : ""}
@@ -327,24 +333,27 @@ export default function HomeView({
           )}
         </section>
 
-        <aside aria-labelledby="try-heading" className="min-w-0">
-          <h2 id="try-heading" className="mb-4 text-[20px] font-semibold text-fg">
-            Try asking
-          </h2>
-          <ul className="space-y-3">
-            {suggestions.map((question) => (
-              <li key={question}>
-                <button
-                  type="button"
-                  onClick={() => onAsk(question)}
-                  className="flex w-full items-start justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3.5 text-left text-[16px] text-fg transition-colors hover:bg-raised"
-                >
-                  <span>{question}</span>
-                  <IconArrowRight size={18} className="mt-0.5 shrink-0 text-link" />
-                </button>
-              </li>
-            ))}
-          </ul>
+        <aside aria-labelledby="try-heading" className="min-w-0 space-y-6">
+          <div>
+            <h2 id="try-heading" className="mb-4 text-[20px] font-semibold text-fg">
+              Try asking
+            </h2>
+            <ul className="space-y-3">
+              {suggestions.map((question) => (
+                <li key={question}>
+                  <button
+                    type="button"
+                    onClick={() => onAsk(question)}
+                    className="flex w-full items-start justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3.5 text-left text-[16px] text-fg transition-colors hover:bg-raised"
+                  >
+                    <span>{question}</span>
+                    <IconArrowRight size={18} className="mt-0.5 shrink-0 text-link" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <ThisWeekChart daily={stats?.daily ?? null} />
         </aside>
       </div>
     </div>

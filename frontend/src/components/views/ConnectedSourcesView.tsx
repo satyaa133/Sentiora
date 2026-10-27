@@ -343,7 +343,7 @@ export default function ConnectedSourcesView({
                       </span>
                     </div>
                     <p className="mt-0.5 text-[15px] text-muted">{src.description}</p>
-                    <p className="mt-0.5 text-sm text-muted">
+                    <p className="mt-0.5 text-[15px] text-muted">
                       {src.count || 0} {src.count === 1 ? "memory" : "memories"}
                       {src.lastSync && src.lastSync !== "Ready to sync"
                         ? ` · last saved ${src.lastSync.toLowerCase()}`
@@ -432,7 +432,7 @@ export default function ConnectedSourcesView({
           <span className="text-[16px] font-semibold text-fg">
             {uploading ? "Adding your files…" : "Drop files here, or choose files"}
           </span>
-          <span className="text-sm text-muted">PDF, TXT or Markdown</span>
+          <span className="text-[15px] text-muted">PDF, TXT or Markdown</span>
         </button>
         <p
           id="upload-status"
@@ -451,7 +451,7 @@ export default function ConnectedSourcesView({
         size="lg"
         footer={
           <>
-            <span className="mr-auto self-center text-sm text-muted">
+            <span className="mr-auto self-center text-[15px] text-muted">
               {allAvailableSources.length} sources
             </span>
             <Button onClick={() => setIsConnectModalOpen(false)}>Done</Button>
@@ -480,7 +480,7 @@ export default function ConnectedSourcesView({
                 </span>
                 <div className="min-w-0">
                   <p className="font-semibold text-fg">{channel.name}</p>
-                  <p className="text-sm text-muted">{channel.description}</p>
+                  <p className="text-[15px] text-muted">{channel.description}</p>
                 </div>
               </div>
               {channel.status === "Active" ? (

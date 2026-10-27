@@ -24,7 +24,7 @@ export default function AuthLayout({
   return (
     <div className="flex min-h-screen flex-col bg-bg text-fg">
       <header className="flex h-16 items-center justify-between px-4 sm:px-6">
-        <Link to="/" aria-label="Sentiora home" className="rounded-btn">
+        <Link to="/" aria-label="Sentiora home" className="touch-target inline-flex rounded-btn">
           <Logo size={21} />
         </Link>
         <ThemeToggle variant="icon" />

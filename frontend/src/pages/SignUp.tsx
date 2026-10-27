@@ -161,7 +161,7 @@ export default function SignUp() {
                 ))}
               </div>
               {strength.label && (
-                <p id="signup-strength" className="mt-1.5 text-sm text-muted">
+                <p id="signup-strength" className="mt-1.5 text-[15px] text-muted">
                   {strength.label}
                 </p>
               )}
@@ -197,7 +197,7 @@ export default function SignUp() {
             </span>
           </label>
           {errors.terms && (
-            <p id="signup-terms-error" className="mt-1 text-sm text-link">
+            <p id="signup-terms-error" className="mt-1 text-[15px] text-link">
               {errors.terms}
             </p>
           )}

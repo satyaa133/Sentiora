@@ -7,6 +7,7 @@ import {
   IconCheck,
   IconClose,
   IconCopy,
+  IconNote,
   IconExternalLink,
   IconPlus,
   IconRefresh,
@@ -27,6 +28,8 @@ import {
 import { browserTimeZone } from "../../services/dashboardService";
 import { safeHref } from "../../utils/safeHref";
 import { emitEcho } from "../echo/echoEvents";
+import { createMemoryItem } from "../../services/memoryService";
+import { videoJumpUrl, videoStart } from "../../utils/videoJump";
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
@@ -80,6 +83,10 @@ export default function AskSentioraView({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isWriting, setIsWriting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Save as note (DESIGN.md §5.5): per answer, saving / saved / failed.
+  const [noteState, setNoteState] = useState<
+    Record<string, "saving" | "saved" | "failed">
+  >({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Effects can run twice (StrictMode); act on each launch only once.
   const handledLaunchId = useRef<number | null>(null);
@@ -202,6 +209,40 @@ export default function AskSentioraView({
     void handleSendQuery(input);
   }
 
+  /**
+   * Keep an answer as a note memory, the same way the extension saves notes:
+   * POST /memory-items with a sentiora.app/notes URL. The question, the answer
+   * and its sources become the note's text.
+   */
+  async function handleSaveNote(message: Message) {
+    if (noteState[message.id] === "saving" || noteState[message.id] === "saved") return;
+    const index = messages.findIndex((msg) => msg.id === message.id);
+    const question =
+      [...messages.slice(0, index)].reverse().find((msg) => msg.sender === "user")
+        ?.text ?? "";
+    const sources = (message.citations ?? []).map(
+      (citation, i) => `[${i + 1}] ${citation.title} (${citation.url})`,
+    );
+    setNoteState((prev) => ({ ...prev, [message.id]: "saving" }));
+    try {
+      await createMemoryItem({
+        source_type: "webpage",
+        title: clip(`Note: ${question || "Ask Sentiora answer"}`, 120),
+        url: `https://sentiora.app/notes/${Date.now()}`,
+        content: [
+          question && `Q: ${question}`,
+          message.text,
+          sources.length ? `Sources:\n${sources.join("\n")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      });
+      setNoteState((prev) => ({ ...prev, [message.id]: "saved" }));
+    } catch {
+      setNoteState((prev) => ({ ...prev, [message.id]: "failed" }));
+    }
+  }
+
   function handleCopy(id: string, text: string) {
     void navigator.clipboard?.writeText(text);
     setCopiedId(id);
@@ -243,7 +284,12 @@ export default function AskSentioraView({
           day: "numeric",
         })
       : null;
-    return [label, citation.domain, citation.page_number ? `p. ${citation.page_number}` : null, saved]
+    return [
+      label,
+      citation.domain,
+      citation.page_number ? `p. ${citation.page_number}` : null,
+      saved,
+    ]
       .filter(Boolean)
       .join(" · ");
   }
@@ -269,7 +315,11 @@ export default function AskSentioraView({
             );
           }
 
-          if (/^\d+\.\s+/.test(line) || line.startsWith("• ") || line.startsWith("- ")) {
+          if (
+            /^\d+\.\s+/.test(line) ||
+            line.startsWith("• ") ||
+            line.startsWith("- ")
+          ) {
             return (
               <li key={idx} className="ml-5 list-disc">
                 {formatInlineText(
@@ -313,7 +363,10 @@ export default function AskSentioraView({
       }
       if (part.startsWith("`") && part.endsWith("`")) {
         return (
-          <code key={i} className="rounded bg-raised px-1.5 py-0.5 font-mono text-[15px]">
+          <code
+            key={i}
+            className="rounded bg-raised px-1.5 py-0.5 font-mono text-[15px]"
+          >
             {part.slice(1, -1)}
           </code>
         );
@@ -336,7 +389,9 @@ export default function AskSentioraView({
           aria-label="From your saved memory"
           className="rounded-btn border-l-4 border-accent bg-raised px-4 py-3"
         >
-          <h3 className="font-mono text-eyebrow uppercase text-muted">From your saved memory</h3>
+          <h3 className="font-mono text-eyebrow uppercase text-muted">
+            From your saved memory
+          </h3>
           <div className="mt-2">{renderFormattedMessage(memory, withCitations)}</div>
         </section>
       </div>
@@ -345,6 +400,8 @@ export default function AskSentioraView({
 
   function renderSourceCard(citation: AskCitation, index: number) {
     const href = originalHref(citation);
+    const start = videoStart(citation.heading);
+    const jumpHref = href && start ? videoJumpUrl(href, start.seconds) : null;
     return (
       <li
         key={`${citation.memory_id}-${index}`}
@@ -354,7 +411,9 @@ export default function AskSentioraView({
           <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-accent px-1.5 font-mono text-xs font-semibold text-on-accent">
             {index + 1}
           </span>
-          <span className="truncate font-mono text-xs text-muted">{citationMeta(citation)}</span>
+          <span className="truncate font-mono text-xs text-muted">
+            {citationMeta(citation)}
+          </span>
         </div>
         <p className="mt-2 font-semibold leading-snug text-fg">{citation.title}</p>
         {citation.heading && citation.heading !== citation.title ? (
@@ -393,6 +452,17 @@ export default function AskSentioraView({
               Original unavailable
             </span>
           )}
+          {jumpHref && start ? (
+            <a
+              href={jumpHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-touch items-center gap-1 text-[15px] font-semibold text-link hover:underline"
+            >
+              Jump to {start.label}
+              <span className="sr-only">(opens the video in a new tab)</span>
+            </a>
+          ) : null}
         </div>
       </li>
     );
@@ -405,7 +475,10 @@ export default function AskSentioraView({
           <Echo state="idle" size={32} still className="shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="font-mono text-eyebrow uppercase text-muted">Echo</p>
-            <h1 id="ask-title" className="truncate text-[17px] font-semibold leading-tight text-fg">
+            <h1
+              id="ask-title"
+              className="truncate text-[17px] font-semibold leading-tight text-fg"
+            >
               {conversationTitle}
             </h1>
           </div>
@@ -430,7 +503,10 @@ export default function AskSentioraView({
                   Ask Echo
                 </h2>
                 <p className="mt-2 max-w-md text-[17px] text-muted">{introText}</p>
-                <ul aria-label="Suggested questions" className="mt-6 flex w-full max-w-lg flex-col gap-2">
+                <ul
+                  aria-label="Suggested questions"
+                  className="mt-6 flex w-full max-w-lg flex-col gap-2"
+                >
                   {starters.map((prompt) => (
                     <li key={prompt}>
                       <button
@@ -472,7 +548,10 @@ export default function AskSentioraView({
                       </p>
                     )}
                     {msg.isError ? (
-                      <div role="alert" className="space-y-3 rounded-btn bg-accent-soft px-4 py-3">
+                      <div
+                        role="alert"
+                        className="space-y-3 rounded-btn bg-accent-soft px-4 py-3"
+                      >
                         <p className="text-[16px] text-accent-soft-fg">{msg.text}</p>
                         {msg.retryQuestion ? (
                           <Button
@@ -480,7 +559,9 @@ export default function AskSentioraView({
                             size="sm"
                             leadingIcon={<IconRefresh size={16} />}
                             disabled={isGenerating}
-                            onClick={() => void handleSendQuery(msg.retryQuestion ?? "")}
+                            onClick={() =>
+                              void handleSendQuery(msg.retryQuestion ?? "")
+                            }
                           >
                             Try again
                           </Button>
@@ -488,7 +569,10 @@ export default function AskSentioraView({
                       </div>
                     ) : msg.isNotFound ? (
                       <div className="text-muted [&_*]:text-muted">
-                        {renderFormattedMessage(msg.text, Boolean(msg.citations?.length))}
+                        {renderFormattedMessage(
+                          msg.text,
+                          Boolean(msg.citations?.length),
+                        )}
                       </div>
                     ) : (
                       renderAnswer(msg)
@@ -496,7 +580,9 @@ export default function AskSentioraView({
 
                     {msg.citations && msg.citations.length > 0 ? (
                       <ol aria-label="Sources" className="space-y-3 xl:hidden">
-                        {msg.citations.map((citation, index) => renderSourceCard(citation, index))}
+                        {msg.citations.map((citation, index) =>
+                          renderSourceCard(citation, index),
+                        )}
                       </ol>
                     ) : null}
 
@@ -506,19 +592,53 @@ export default function AskSentioraView({
                           variant="secondary"
                           size="sm"
                           leadingIcon={
-                            copiedId === msg.id ? <IconCheck size={16} /> : <IconCopy size={16} />
+                            copiedId === msg.id ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconCopy size={16} />
+                            )
                           }
                           onClick={() => handleCopy(msg.id, msg.text)}
                         >
                           {copiedId === msg.id ? "Copied" : "Copy answer"}
                         </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leadingIcon={
+                            noteState[msg.id] === "saved" ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconNote size={16} />
+                            )
+                          }
+                          loading={noteState[msg.id] === "saving"}
+                          disabled={noteState[msg.id] === "saved"}
+                          onClick={() => void handleSaveNote(msg)}
+                        >
+                          {noteState[msg.id] === "saved"
+                            ? "Saved as note"
+                            : "Save as note"}
+                        </Button>
+                        {noteState[msg.id] === "failed" ? (
+                          <p role="alert" className="w-full text-[15px] text-link">
+                            Could not save this note. Try again.
+                          </p>
+                        ) : null}
                       </div>
                     ) : null}
 
                     {msg.id === lastAiId && !isGenerating && msg.followups?.length ? (
-                      <div role="group" aria-label="Follow-up questions" className="flex flex-wrap gap-2">
+                      <div
+                        role="group"
+                        aria-label="Follow-up questions"
+                        className="flex flex-wrap gap-2"
+                      >
                         {msg.followups.map((followup) => (
-                          <Chip key={followup} onClick={() => void handleSendQuery(followup)}>
+                          <Chip
+                            key={followup}
+                            onClick={() => void handleSendQuery(followup)}
+                          >
                             {followup}
                           </Chip>
                         ))}
@@ -530,7 +650,10 @@ export default function AskSentioraView({
             )}
 
             {isGenerating && (
-              <div role="status" className="flex items-center gap-3 text-[16px] text-muted">
+              <div
+                role="status"
+                className="flex items-center gap-3 text-[16px] text-muted"
+              >
                 <Echo state="saving" size={36} still />
                 {isWriting ? "Writing the answer…" : "Looking through your memories…"}
               </div>
@@ -571,7 +694,9 @@ export default function AskSentioraView({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleComposerKeyDown}
-              placeholder={messages.length > 0 ? "Ask a follow-up..." : "Ask Echo anything..."}
+              placeholder={
+                messages.length > 0 ? "Ask a follow-up..." : "Ask Echo anything..."
+              }
               className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent py-2.5 text-[17px] text-fg placeholder:text-muted focus:outline-none"
             />
             <button
@@ -585,8 +710,9 @@ export default function AskSentioraView({
               <IconArrowUp size={20} />
             </button>
           </div>
-          <p className="mt-2 text-center text-sm text-muted">
-            Memory answers cite your saves. General answers are labelled as general knowledge.
+          <p className="mt-2 text-center text-[15px] text-muted">
+            Memory answers cite your saves. General answers are labelled as general
+            knowledge.
           </p>
         </form>
       </section>
@@ -600,7 +726,9 @@ export default function AskSentioraView({
         </h2>
         {latestCitations.length > 0 ? (
           <ol className="mt-4 space-y-3 [&>li]:bg-bg">
-            {latestCitations.map((citation, index) => renderSourceCard(citation, index))}
+            {latestCitations.map((citation, index) =>
+              renderSourceCard(citation, index),
+            )}
           </ol>
         ) : (
           <p className="mt-2 text-[15px] text-muted">
@@ -623,10 +751,15 @@ function errorMessage(err: unknown): string {
     return "You're asking faster than the limit allows. Wait a moment, then try again.";
   }
   if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
-    return err.message || "Sentiora AI is not configured, and no saved memory could be used to answer.";
+    return (
+      err.message ||
+      "Sentiora AI is not configured, and no saved memory could be used to answer."
+    );
   }
   if (err.code === "ASK_LLM_FAILED") {
-    return err.message || "The language model failed while answering. Try again in a moment.";
+    return (
+      err.message || "The language model failed while answering. Try again in a moment."
+    );
   }
   if (err.code === "ASK_SYSTEM_FAILED" || err.status === 502) {
     return err.message || "The Sentiora server had a problem answering this question.";

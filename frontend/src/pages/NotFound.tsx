@@ -7,7 +7,7 @@ export default function NotFound() {
   return (
     <div className="flex min-h-screen flex-col bg-bg text-fg">
       <header className="mx-auto flex h-16 w-full max-w-6xl items-center px-4 sm:px-6">
-        <Link to="/" aria-label="Sentiora home" className="rounded-btn">
+        <Link to="/" aria-label="Sentiora home" className="touch-target inline-flex rounded-btn">
           <Logo size={21} />
         </Link>
       </header>

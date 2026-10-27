@@ -180,7 +180,7 @@ export default function IntelligenceView({
               <button
                 type="button"
                 onClick={() => onOpenTimeline({})}
-                className="text-[15px] font-semibold text-link hover:underline"
+                className="touch-target text-[15px] font-semibold text-link hover:underline"
               >
                 Open Timeline
               </button>

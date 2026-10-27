@@ -128,6 +128,25 @@ body {
   line-height: 1.55;
 }
 
+/*
+ * Touch targets are at least 44px (DESIGN.md §2) without changing how compact
+ * controls look: an invisible, centred hit area grows to 44 x 44.
+ * Loaded before Tailwind utilities, so an explicit "absolute" still wins.
+ */
+.touch-target {
+  position: relative;
+}
+
+.touch-target::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

@@ -216,6 +216,7 @@ export default function DashboardHome() {
               onAsk={askAbout}
               onOpenPalette={() => setPaletteOpen(true)}
               onViewTimeline={() => setActiveTab("timeline")}
+              statsRefreshKey={viewRefreshKey}
             />
           )}
 
