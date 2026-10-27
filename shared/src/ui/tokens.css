@@ -168,6 +168,71 @@ body {
   animation: echo-float 250ms var(--ease) both;
 }
 
+/* Echo props and mouths (DESIGN.md §8.3). SVG parts scale around their own box. */
+.echo-chomp-mouth,
+.echo-prop-search,
+.echo-prop-heart,
+.echo-prop-think {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes echo-chomp {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.15);
+  }
+}
+
+.echo-chomp-mouth {
+  animation: echo-chomp 240ms ease-in-out infinite;
+}
+
+@keyframes echo-search-sweep {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(-6px, -3px) rotate(-8deg);
+  }
+}
+
+.echo-prop-search {
+  animation: echo-search-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes echo-heart-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.18);
+  }
+}
+
+.echo-prop-heart {
+  animation: echo-heart-pulse 900ms ease-in-out infinite;
+}
+
+@keyframes echo-think-dots {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.echo-prop-think {
+  animation: echo-think-dots 1.2s ease-in-out infinite;
+}
+
 /*
  * Logo wordmark (DESIGN.md §13): "sentiora" with a coral dot on the dotless ı.
  * The wave hops the letters 60ms apart on a springy ease; the dot hops higher

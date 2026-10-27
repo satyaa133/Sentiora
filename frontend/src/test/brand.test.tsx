@@ -1,13 +1,14 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import Echo, { type EchoState } from "@shared/ui/Echo";
+import Echo from "@shared/ui/Echo";
+import { ECHO_STATES } from "@shared/ui/echoShape";
 import Logo from "@shared/ui/Logo";
 import { IconSearch } from "@shared/ui/icons";
 
 afterEach(cleanup);
 
-const STATES: EchoState[] = ["idle", "saving", "happy", "faded", "guarding"];
+const STATES = ECHO_STATES;
 
 describe("Echo", () => {
   it.each(STATES)("renders the %s state", (state) => {
@@ -36,11 +37,18 @@ describe("Echo", () => {
     expect(container.querySelector("svg")).not.toHaveClass("echo-bob");
   });
 
+  it("draws arms only when asked", () => {
+    const { container, rerender } = render(<Echo />);
+    expect(container.querySelector(".echo-arm-left")).toBeNull();
+    rerender(<Echo arms />);
+    expect(container.querySelector(".echo-arm-left")).not.toBeNull();
+  });
+
   it("uses tokens, not raw colours", () => {
     const { container } = render(
       <>
         {STATES.map((state) => (
-          <Echo key={state} state={state} />
+          <Echo key={state} state={state} arms />
         ))}
       </>,
     );

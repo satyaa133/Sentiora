@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { emitEcho } from "../echo/echoEvents";
+import { useEchoSearchEvents } from "../echo/useEchoSearchEvents";
 
 import {
   Button,
@@ -97,6 +99,8 @@ export default function HomeView({
       );
     });
   }, [items, filter, searchQuery]);
+
+  useEchoSearchEvents(searchQuery, filtered.length);
 
   const resurfaced = useMemo(
     () => pickResurfaced(items, dismissed),
@@ -220,10 +224,20 @@ export default function HomeView({
             ) : null}
           </div>
           <div className="flex shrink-0 gap-2">
-            <Button onClick={() => onSelectItem(resurfaced)}>Revisit</Button>
+            <Button
+              onClick={() => {
+                emitEcho({ type: "resurfaced", action: "revisit" });
+                onSelectItem(resurfaced);
+              }}
+            >
+              Revisit
+            </Button>
             <Button
               variant="secondary"
-              onClick={() => dismissResurfaced(resurfaced.id)}
+              onClick={() => {
+                emitEcho({ type: "resurfaced", action: "dismiss" });
+                dismissResurfaced(resurfaced.id);
+              }}
             >
               Not now
             </Button>

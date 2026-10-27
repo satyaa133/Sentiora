@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useEchoSearchEvents } from "../echo/useEchoSearchEvents";
 import { Button, Chip, IconSearch, Input, MemoryList, MemoryRow } from "@shared/ui";
 import EmptyState from "../EmptyState";
 import MemoryFeedSkeleton from "../MemoryFeedSkeleton";
@@ -34,6 +35,8 @@ export default function SearchView({
         (item.author?.toLowerCase().includes(q) ?? false),
     );
   }, [items, query]);
+
+  useEchoSearchEvents(query, searchResults.length);
 
   // Quick suggestions: the domains you've saved from.
   const suggestions = useMemo(

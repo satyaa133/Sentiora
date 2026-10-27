@@ -1,6 +1,7 @@
 import { Suspense, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
+import EchoMount from "./components/echo/EchoMount";
 import ProtectedRoute from "./components/ProtectedRoute";
 import OnboardingRoute from "./components/OnboardingRoute";
 import { AuthProvider } from "./context/AuthContext";
@@ -10,22 +11,12 @@ import LandingPage from "./pages/LandingPage";
 import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
 import SignUp from "./pages/SignUp";
+import { DASHBOARD_PATHS } from "./routes";
 
 // UI kit gallery, development builds only (tree-shaken from production).
 const ComponentsGallery = import.meta.env.DEV
   ? lazy(() => import("./pages/dev/ComponentsGallery"))
   : null;
-
-const DASHBOARD_PATHS = [
-  "dashboard",
-  "intelligence",
-  "timeline",
-  "search",
-  "ask",
-  "sources",
-  "privacy",
-  "settings",
-];
 
 export default function App() {
   return (
@@ -70,6 +61,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
+        <EchoMount />
       </AuthProvider>
     </BrowserRouter>
   );

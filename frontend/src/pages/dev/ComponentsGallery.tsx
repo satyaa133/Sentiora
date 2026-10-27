@@ -13,6 +13,7 @@ import {
   Chip,
   Drawer,
   Echo,
+  ECHO_STATES,
   Eyebrow,
   IconArrowRight,
   IconButton,
@@ -39,9 +40,8 @@ import {
   Toggle,
   useToast,
 } from "@shared/ui";
-import type { EchoState } from "@shared/ui";
 
-const ECHO_STATES: EchoState[] = ["idle", "saving", "happy", "faded", "guarding"];
+
 const FILTERS = ["All", "Web", "PDF", "Video", "Notes"];
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -106,13 +106,13 @@ function Showcase() {
             <Logo tone="inverse" size={18} />
           </span>
         </div>
-        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5">
+        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-7">
           {ECHO_STATES.map((state) => (
             <li
               key={state}
               className="flex flex-col items-center gap-2 rounded-card bg-raised p-4"
             >
-              <Echo state={state} size={56} />
+              <Echo state={state} size={56} arms />
               <span className="text-sm text-muted">{state}</span>
             </li>
           ))}

@@ -26,6 +26,7 @@ import {
 } from "../../services/askService";
 import { browserTimeZone } from "../../services/dashboardService";
 import { safeHref } from "../../utils/safeHref";
+import { emitEcho } from "../echo/echoEvents";
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
@@ -153,6 +154,7 @@ export default function AskSentioraView({
     setMessages((prev) => [...prev, { id: nextId(), sender: "user", text: question }]);
     setInput("");
     setIsGenerating(true);
+    emitEcho({ type: "ask" });
 
     try {
       const payload: AskRequest = { question, tz: browserTimeZone() };
@@ -173,6 +175,11 @@ export default function AskSentioraView({
           usedFallback: Boolean(result.used_fallback),
         },
       ]);
+      emitEcho({
+        type: "answer",
+        status: result.insufficient_context ? "not_found" : "ready",
+        cited: (result.citations?.length ?? 0) > 0,
+      });
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -184,6 +191,7 @@ export default function AskSentioraView({
           retryQuestion: question,
         },
       ]);
+      emitEcho({ type: "answer", status: "error", cited: false });
     } finally {
       setIsGenerating(false);
     }
@@ -532,6 +540,7 @@ export default function AskSentioraView({
         </div>
 
         <form
+          data-echo-dock=""
           onSubmit={handleSubmit}
           className="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-4 pt-2 sm:px-6"
         >

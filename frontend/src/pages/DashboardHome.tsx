@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar, { MobileTopBar, type NavTab } from "../components/Sidebar";
 import CommandPalette from "../components/CommandPalette";
@@ -15,6 +15,8 @@ import PrivacyCenterView from "../components/views/PrivacyCenterView";
 import AccountSettingsView from "../components/views/AccountSettingsView";
 import AddMemoryModal from "../components/AddMemoryModal";
 import { useAuth } from "../context/AuthContext";
+import { emitEcho } from "../components/echo/echoEvents";
+import { useEchoFeedEvents } from "../hooks/useEchoFeedEvents";
 import { useMemoryFeed } from "../hooks/useMemoryFeed";
 import type { AskLaunch, AskScope } from "../services/askService";
 import type { MemoryItem, SourceType } from "../types/memory";
@@ -118,6 +120,15 @@ export default function DashboardHome() {
   );
 
   const viewRefreshKey = `${feedKey}|${deleteCount}`;
+
+  // Echo reacts to real feed changes and tab switches only (DESIGN.md §8.2).
+  useEchoFeedEvents(items, !isLoading && !loadError, feedKey);
+  const previousTab = useRef(activeTab);
+  useEffect(() => {
+    if (previousTab.current === activeTab) return;
+    previousTab.current = activeTab;
+    emitEcho({ type: "navigate", tab: activeTab });
+  }, [activeTab]);
 
   const openAsk = useCallback(
     (question?: string, options: { scope?: AskScope; send?: boolean } = {}) => {

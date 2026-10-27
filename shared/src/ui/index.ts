@@ -1,5 +1,6 @@
 export { default as Echo } from "./Echo.js";
-export type { EchoProps, EchoState } from "./Echo.js";
+export { ECHO_STATES } from "./echoShape.js";
+export type { EchoLook, EchoProps, EchoState } from "./Echo.js";
 export { ECHO_BODY_PATH } from "./echoShape.js";
 export { default as Logo, LogoMark } from "./Logo.js";
 export { useLogoWave } from "./useLogoWave.js";
