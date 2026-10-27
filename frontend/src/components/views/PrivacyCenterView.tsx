@@ -33,6 +33,8 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
   useEffect(() => {
     try {
       localStorage.setItem("sentiora_blocked_domains", JSON.stringify(blockedDomains));
+      // The extension's content script on this page reads the list from storage.
+      window.postMessage({ type: "SENTIORA_BLOCKLIST_SYNC" }, window.location.origin);
     } catch (e) {
       console.error("Failed to save blocked domains:", e);
     }
@@ -105,9 +107,9 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
             Sensitive pages are always skipped
           </h2>
           <p className="mt-1 text-[16px] leading-relaxed text-muted">
-            The extension never saves banking, health, tax or browser pages, pages with
-            a visible password field, or pages marked noindex. The check runs in your
-            browser before anything is sent.
+            The extension skips banking, payment, health, insurance, tax and ID sites it
+            recognises, sign-in pages, pages with a visible password field, and pages
+            marked noindex. The check runs in your browser before anything is sent.
           </p>
         </div>
       </Card>
@@ -120,9 +122,8 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
           Your blocked sites
         </h2>
         <p className="mt-1 text-[15px] text-muted">
-          {/* TODO: the extension doesn't read this list yet; it is stored in this browser only. */}
-          Sites you add here are kept in this browser. The extension doesn&apos;t use
-          this list yet.
+          The extension in this browser skips these sites and their subdomains. Changes
+          apply as soon as you add or remove a site.
         </p>
 
         <form

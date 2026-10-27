@@ -132,7 +132,16 @@ export type ExtensionMessage =
   | { type: "CLEAR_AUTH_TOKENS" }
   | { type: "FETCH_PDF_BYTES"; url: string }
   | { type: "CHECK_FILE_ACCESS" }
-  | { type: "GET_YOUTUBE_PLAYER_RESPONSE"; videoId: string };
+  | { type: "GET_YOUTUBE_PLAYER_RESPONSE"; videoId: string }
+  /** Content script → background: is there a session to save under? */
+  | { type: "GET_SESSION_STATE" }
+  /** App-origin content script → background: the Privacy Center blocklist. */
+  | { type: "SYNC_BLOCKLIST"; domains: unknown }
+  /** Popup → background: has this URL been saved or is it saving now? */
+  | { type: "GET_PAGE_STATUS"; url: string };
+
+/** Capture status of one URL in this browser session, as the popup shows it. */
+export type PageCaptureStatus = "saved" | "saving" | "not_saved";
 
 /**
  * Trimmed, JSON-safe subset of YouTube's player response, read from the page's

@@ -8,7 +8,7 @@ const QUESTIONS: Array<{ q: string; a: string }> = [
   },
   {
     q: "Does it read my browsing history?",
-    a: "It never looks at your past history. While you're signed in to the extension, it saves the pages you open from then on and skips banking, health, sign-in and browser pages. Everything it saves is listed in your timeline, where you can delete it.",
+    a: "It never looks at your past history. While you're signed in to the extension, it saves the pages you open from then on. It skips banking, health and sign-in pages it recognises, plus any site you block. Everything it saves is listed in your timeline, where you can delete it.",
   },
   {
     q: "Can I save PDFs that are on my computer?",

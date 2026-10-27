@@ -269,8 +269,9 @@ export default function Onboarding() {
                 What should Echo remember?
               </h1>
               <p className="mt-3 text-[18px] text-muted">
-                Pick the kinds of things you save. You can change this anytime in
-                Sources.
+                Echo saves the pages you read while you&apos;re signed in. Pick what
+                matters to you; you can change this in Sources and block any site in
+                Privacy.
               </p>
               <fieldset className="mt-8">
                 <legend className="sr-only">Sources</legend>

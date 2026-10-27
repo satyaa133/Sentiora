@@ -56,6 +56,26 @@ export async function setCachedUser(user: CachedUser): Promise<void> {
   await chrome.storage.local.set({ [USER_KEY]: user });
 }
 
+// ── User Blocklist ──
+// Sites the user blocked in the web app's Privacy Center, synced by the content
+// script on the app origin. Kept on sign-out: it is a device preference.
+
+const USER_BLOCKED_DOMAINS_KEY = "sentiora_user_blocked_domains";
+
+export async function getUserBlockedDomains(): Promise<string[]> {
+  try {
+    const result = await chrome.storage.local.get(USER_BLOCKED_DOMAINS_KEY);
+    const value = result[USER_BLOCKED_DOMAINS_KEY];
+    return Array.isArray(value) ? value.filter((d): d is string => typeof d === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setUserBlockedDomains(domains: string[]): Promise<void> {
+  await chrome.storage.local.set({ [USER_BLOCKED_DOMAINS_KEY]: domains });
+}
+
 // ── Clear All Auth Data ──
 
 export async function clearAllAuthData(): Promise<void> {

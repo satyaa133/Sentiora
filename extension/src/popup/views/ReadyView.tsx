@@ -1,4 +1,12 @@
-import { Button, IconArrowRight, IconNote } from "@shared/ui";
+import {
+  Button,
+  IconArrowRight,
+  IconCheck,
+  IconLoader,
+  IconNote,
+  IconShield,
+  cx,
+} from "@shared/ui";
 
 import { shortAge, sourceLabel } from "../format";
 
@@ -10,6 +18,40 @@ export interface RecentMemory {
   created_at?: string | null;
 }
 
+/** What the extension has done with the current page; "checking" until known. */
+export type PageStatus = "checking" | "saved" | "saving" | "not_saved" | "blocked";
+
+const STATUS_LABEL: Record<Exclude<PageStatus, "checking">, string> = {
+  saved: "Saved",
+  saving: "Saving…",
+  not_saved: "Not saved yet",
+  blocked: "Blocked",
+};
+
+function StatusPill({ status }: { status: Exclude<PageStatus, "checking"> }) {
+  const icon =
+    status === "saved" ? (
+      <IconCheck size={14} />
+    ) : status === "saving" ? (
+      <IconLoader size={14} className="motion-safe:animate-spin" />
+    ) : status === "blocked" ? (
+      <IconShield size={14} />
+    ) : null;
+  return (
+    <span
+      className={cx(
+        "inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-3 text-sm font-medium",
+        status === "not_saved"
+          ? "border border-line text-muted"
+          : "bg-accent-soft text-accent-soft-fg",
+      )}
+    >
+      {icon}
+      {STATUS_LABEL[status]}
+    </span>
+  );
+}
+
 interface ReadyViewProps {
   tabTitle: string;
   tabType: string;
@@ -18,6 +60,7 @@ interface ReadyViewProps {
   recent: RecentMemory[] | null;
   /** One-line status after an action, e.g. after Undo. */
   notice?: string | null;
+  status: PageStatus;
   saving: boolean;
   onSave: () => void;
   onAddNote: () => void;
@@ -30,6 +73,7 @@ export default function ReadyView({
   tabHost,
   recent,
   notice,
+  status,
   saving,
   onSave,
   onAddNote,
@@ -39,13 +83,24 @@ export default function ReadyView({
     <>
       <section className="space-y-4 px-5 pb-5 pt-5">
         <div className="rounded-card bg-raised p-4">
-          <p className="truncate font-mono text-eyebrow text-muted">
-            <span className="uppercase">{sourceLabel(tabType)}</span>
-            {tabHost ? ` · ${tabHost}` : ""}
-          </p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="min-w-0 truncate font-mono text-eyebrow text-muted">
+              <span className="uppercase">{sourceLabel(tabType)}</span>
+              {tabHost ? ` · ${tabHost}` : ""}
+            </p>
+            <span role="status">
+              {status === "checking" ? null : <StatusPill status={status} />}
+            </span>
+          </div>
           <h1 className="mt-1.5 line-clamp-3 text-[17px] font-semibold leading-snug text-fg">
             {tabTitle}
           </h1>
+          {status === "not_saved" ? (
+            <p className="mt-2 text-[15px] text-muted">
+              Echo saves pages as you read them. Save this one now if it didn&apos;t
+              catch it.
+            </p>
+          ) : null}
         </div>
 
         {notice ? (
@@ -54,9 +109,11 @@ export default function ReadyView({
           </p>
         ) : null}
 
-        <Button size="lg" fullWidth onClick={onSave} loading={saving}>
-          Save to memory
-        </Button>
+        {status === "not_saved" ? (
+          <Button variant="secondary" fullWidth onClick={onSave} loading={saving}>
+            Save now
+          </Button>
+        ) : null}
         <Button
           variant="ghost"
           fullWidth

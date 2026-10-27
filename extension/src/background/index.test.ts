@@ -2,12 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { YoutubeCapturePayload } from "../shared/types";
 
 const apiFetch = vi.fn();
-vi.mock("../services/extApiClient", () => ({ extApiFetch: (...args: unknown[]) => apiFetch(...args) }));
+const tokenRefresh = vi.fn();
+vi.mock("../services/extApiClient", () => ({
+  extApiFetch: (...args: unknown[]) => apiFetch(...args),
+  attemptTokenRefresh: () => tokenRefresh(),
+}));
 
 type Listener = (message: unknown, sender: unknown, sendResponse: (r: unknown) => void) => boolean | void;
 
 // chrome.storage.session survives service-worker restarts; module memory does not.
 let sessionStore: Record<string, unknown> = {};
+let localStore: Record<string, unknown> = {};
 let listeners: Listener[] = [];
 const executeScript = vi.fn();
 
@@ -24,7 +29,11 @@ function installChrome(): void {
         get: async (key: string) => ({ [key]: sessionStore[key] }),
         set: async (items: Record<string, unknown>) => Object.assign(sessionStore, items),
       },
-      local: { get: async () => ({}), set: async () => undefined, remove: async () => undefined },
+      local: {
+        get: async (key: string) => ({ [key]: localStore[key] }),
+        set: async (items: Record<string, unknown>) => Object.assign(localStore, items),
+        remove: async () => undefined,
+      },
     },
     scripting: { executeScript },
     action: { setBadgeText: vi.fn(), setBadgeBackgroundColor: vi.fn() },
@@ -63,8 +72,11 @@ function youtubePayload(isForce = false): YoutubeCapturePayload {
 }
 
 beforeEach(() => {
-  sessionStore = {};
+  // Signed in unless a test says otherwise.
+  sessionStore = { sentiora_access_token: "token" };
+  localStore = {};
   apiFetch.mockReset();
+  tokenRefresh.mockReset();
   executeScript.mockReset();
   vi.spyOn(console, "info").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -133,6 +145,78 @@ describe("background capture messaging", () => {
     // A failed capture must not start the cooldown.
     apiFetch.mockResolvedValue({ success: true, data: { id: "m2", status: "pending" } });
     expect(await send({ type: "CAPTURE_YOUTUBE", payload: youtubePayload() })).toMatchObject({ success: true, memoryId: "m2" });
+  });
+});
+
+describe("signed-out and blocked captures send nothing", () => {
+  it("does not post page content without a session", async () => {
+    await loadWorker();
+    sessionStore = {};
+    const result = await send({ type: "CAPTURE_YOUTUBE", payload: youtubePayload(true) });
+    expect(result).toEqual({ success: false, error: "Sign in to Sentiora to save pages." });
+    expect(apiFetch).not.toHaveBeenCalled();
+    expect(tokenRefresh).not.toHaveBeenCalled();
+  });
+
+  it("refreshes an expired access token before posting", async () => {
+    await loadWorker();
+    sessionStore = {};
+    localStore = { sentiora_refresh_token: "refresh" };
+    tokenRefresh.mockResolvedValue("fresh");
+    apiFetch.mockResolvedValue({ success: true, data: { id: "m1", status: "pending" } });
+    expect(await send({ type: "CAPTURE_YOUTUBE", payload: youtubePayload(true) })).toMatchObject({ success: true });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not post when the refresh token is rejected", async () => {
+    await loadWorker();
+    sessionStore = {};
+    localStore = { sentiora_refresh_token: "expired" };
+    tokenRefresh.mockResolvedValue(null);
+    expect(await send({ type: "CAPTURE_YOUTUBE", payload: youtubePayload(true) })).toMatchObject({ success: false });
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("answers GET_SESSION_STATE", async () => {
+    await loadWorker();
+    expect(await send({ type: "GET_SESSION_STATE" })).toEqual({ signedIn: true });
+    sessionStore = {};
+    expect(await send({ type: "GET_SESSION_STATE" })).toEqual({ signedIn: false });
+  });
+
+  it("skips sites on the user's synced blocklist", async () => {
+    await loadWorker();
+    localStore = { sentiora_user_blocked_domains: ["youtube.com"] };
+    const result = await send({ type: "CAPTURE_YOUTUBE", payload: youtubePayload(true) });
+    expect(result).toMatchObject({ success: false });
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it("stores a sanitized blocklist from the web app and ignores other senders", async () => {
+    await loadWorker();
+    const appUrl = "http://localhost:5173/privacy";
+    const domains = ["https://www.News.example.com/x", "junk", 7];
+
+    const evil = "https://evil.example/";
+    const untrusted = await new Promise((resolve) =>
+      listeners[0]?.({ type: "SYNC_BLOCKLIST", domains }, { tab: { id: 3, url: evil }, url: evil, frameId: 0 }, resolve),
+    );
+    expect(untrusted).toMatchObject({ success: false });
+    expect(localStore.sentiora_user_blocked_domains).toBeUndefined();
+
+    expect(
+      await send({ type: "SYNC_BLOCKLIST", domains }, { tab: { id: 3, url: appUrl }, url: appUrl, frameId: 0 }),
+    ).toEqual({ success: true });
+    expect(localStore.sentiora_user_blocked_domains).toEqual(["news.example.com"]);
+  });
+
+  it("reports a page's capture status for the popup", async () => {
+    await loadWorker();
+    const url = `https://www.youtube.com/watch?v=${VIDEO_ID}`;
+    expect(await send({ type: "GET_PAGE_STATUS", url })).toEqual({ status: "not_saved" });
+    apiFetch.mockResolvedValue({ success: true, data: { id: "m1", status: "pending" } });
+    await send({ type: "CAPTURE_YOUTUBE", payload: youtubePayload() });
+    expect(await send({ type: "GET_PAGE_STATUS", url })).toEqual({ status: "saved" });
   });
 });
 

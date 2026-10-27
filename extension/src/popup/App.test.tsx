@@ -16,6 +16,7 @@ const storage = vi.hoisted(() => ({
   setAccessToken: vi.fn(),
   setRefreshToken: vi.fn(),
   clearAllAuthData: vi.fn(),
+  getUserBlockedDomains: vi.fn(),
 }));
 vi.mock("../services/storage", () => storage);
 
@@ -38,6 +39,10 @@ function installChrome(options: {
   title: string;
   forceCapture?: ForceCaptureReply;
   captureResult?: Record<string, unknown>;
+  /** Background record for the page; defaults to not saved. */
+  pageStatus?: string;
+  /** Content-script page check (password field, noindex). */
+  sensitivity?: string | null;
 }) {
   const tab = { id: 7, url: options.url, title: options.title };
   const chromeMock = {
@@ -47,6 +52,9 @@ function installChrome(options: {
       sendMessage: vi.fn(
         (message: { type: string }, callback?: (r: unknown) => void) => {
           if (message.type.startsWith("CAPTURE_")) callback?.(options.captureResult);
+          if (message.type === "GET_PAGE_STATUS") {
+            callback?.({ status: options.pageStatus ?? "not_saved" });
+          }
         },
       ),
     },
@@ -65,7 +73,10 @@ function installChrome(options: {
           _opts: unknown,
           callback: (r: unknown) => void,
         ) => {
-          callback(message.type === "PING" ? { ok: true } : options.forceCapture);
+          if (message.type === "PING") callback({ ok: true });
+          else if (message.type === "GET_SENSITIVITY") {
+            callback({ reason: options.sensitivity ?? null });
+          } else callback(options.forceCapture);
         },
       ),
       create: vi.fn(),
@@ -102,6 +113,7 @@ const RECENT = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  storage.getUserBlockedDomains.mockResolvedValue([]);
   api.extApiFetch.mockImplementation(async (path: string) =>
     path.startsWith("/memory-items?") ? { data: RECENT } : { data: {} },
   );
@@ -146,7 +158,8 @@ describe("popup", () => {
           el?.tagName === "P" && el.textContent === "Article · blog.example.dev",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save to memory" })).toBeEnabled();
+    expect(await screen.findByText("Not saved yet")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save now" })).toBeEnabled();
     expect(await screen.findByText("Attention is all you need")).toBeInTheDocument();
     expect(screen.getByText("System design: rate limiters")).toBeInTheDocument();
     expect(api.extApiFetch).toHaveBeenCalledWith("/memory-items?per_page=2");
@@ -170,7 +183,7 @@ describe("popup", () => {
     });
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Save to memory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save now" }));
 
     expect(await screen.findByText("Saved. Echo's got it.")).toBeInTheDocument();
     expect(screen.getByText("Searchable in a few seconds.")).toBeInTheDocument();
@@ -203,33 +216,94 @@ describe("popup", () => {
     });
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Save to memory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save now" }));
 
     expect(await screen.findByText("Saved. Echo's got it.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
   });
 
-  it("shows the protected state with the built-in rule", async () => {
+  it("opens on the protected state for a built-in rule, without reading the page", async () => {
     signedIn();
-    installChrome({
+    const chromeMock = installChrome({
       url: "https://www.chase.com/accounts",
       title: "Accounts",
-      forceCapture: { skipped: true, reason: "sensitive" },
     });
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Save to memory" }));
 
     expect(
       await screen.findByRole("heading", { name: "Echo won't save this page" }),
     ).toBeInTheDocument();
     expect(screen.getByText("www.chase.com")).toBeInTheDocument();
     expect(screen.getByText("Built-in rule")).toBeInTheDocument();
+    expect(
+      chromeMock.tabs.sendMessage.mock.calls.some(([, m]) => m.type === "FORCE_CAPTURE"),
+    ).toBe(false);
 
     const why = screen.getByRole("button", { name: "Why was this blocked?" });
     expect(why).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(why);
     expect(why).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("labels sites the user blocked in Privacy as their rule", async () => {
+    signedIn();
+    storage.getUserBlockedDomains.mockResolvedValue(["blog.example.dev"]);
+    installChrome({ url: "https://blog.example.dev/post", title: "A post" });
+
+    render(<App />);
+
+    expect(await screen.findByText("Your rule")).toBeInTheDocument();
+    expect(
+      screen.getByText("You blocked this site in Privacy, so Echo skips it."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a page-level block (password field) without a rule chip", async () => {
+    signedIn();
+    installChrome({
+      url: "https://forum.example.dev/members",
+      title: "Members",
+      sensitivity: "password_field",
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Echo won't save this page" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Built-in rule")).not.toBeInTheDocument();
+    expect(screen.queryByText("Your rule")).not.toBeInTheDocument();
+  });
+
+  it("shows an automatically saved page as saved, with no save button", async () => {
+    signedIn();
+    installChrome({
+      url: "https://blog.example.dev/post",
+      title: "Understanding containers",
+      pageStatus: "saved",
+    });
+
+    render(<App />);
+
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save now" })).not.toBeInTheDocument();
+  });
+
+  it("shows the protected state when the content script skips a manual save", async () => {
+    signedIn();
+    installChrome({
+      url: "https://blog.example.dev/post",
+      title: "A post",
+      forceCapture: { skipped: true, reason: "sensitive" },
+    });
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save now" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Echo won't save this page" }),
+    ).toBeInTheDocument();
   });
 
   it("shows the error state with a retry", async () => {
@@ -241,7 +315,7 @@ describe("popup", () => {
     });
 
     render(<App />);
-    fireEvent.click(await screen.findByRole("button", { name: "Save to memory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save now" }));
 
     expect(
       await screen.findByRole("heading", { name: "Echo couldn't save this page" }),
