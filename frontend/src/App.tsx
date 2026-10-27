@@ -5,14 +5,17 @@ import EchoMount from "./components/echo/EchoMount";
 import ProtectedRoute from "./components/ProtectedRoute";
 import OnboardingRoute from "./components/OnboardingRoute";
 import { AuthProvider } from "./context/AuthContext";
-import DashboardHome from "./pages/DashboardHome";
-import ForgotPassword from "./pages/ForgotPassword";
 import LandingPage from "./pages/LandingPage";
-import Login from "./pages/Login";
-import NotFound from "./pages/NotFound";
-import Onboarding from "./pages/Onboarding";
-import SignUp from "./pages/SignUp";
 import { DASHBOARD_PATHS } from "./routes";
+
+// The landing page ships in the first bundle (it holds the LCP); every other
+// page loads on demand so landing visitors don't download the app (DESIGN.md §11).
+const DashboardHome = lazy(() => import("./pages/DashboardHome"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const Login = lazy(() => import("./pages/Login"));
+const NotFound = lazy(() => import("./pages/NotFound"));
+const Onboarding = lazy(() => import("./pages/Onboarding"));
+const SignUp = lazy(() => import("./pages/SignUp"));
 
 // UI kit gallery, development builds only (tree-shaken from production).
 const ComponentsGallery = import.meta.env.DEV
@@ -23,45 +26,47 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/">
-            <Route index element={<LandingPage />} />
-            <Route path="login" element={<Login />} />
-            <Route path="signup" element={<SignUp />} />
-            <Route path="forgot-password" element={<ForgotPassword />} />
-            <Route
-              path="onboarding"
-              element={
-                <OnboardingRoute>
-                  <Onboarding />
-                </OnboardingRoute>
-              }
-            />
-            {/* Every app tab renders the same shell; DashboardHome picks the view from the path. */}
-            <Route
-              element={
-                <ProtectedRoute>
-                  <DashboardHome />
-                </ProtectedRoute>
-              }
-            >
-              {DASHBOARD_PATHS.map((path) => (
-                <Route key={path} path={path} />
-              ))}
-            </Route>
-            {ComponentsGallery ? (
+        <Suspense fallback={<div className="min-h-screen bg-bg" />}>
+          <Routes>
+            <Route path="/">
+              <Route index element={<LandingPage />} />
+              <Route path="login" element={<Login />} />
+              <Route path="signup" element={<SignUp />} />
+              <Route path="forgot-password" element={<ForgotPassword />} />
               <Route
-                path="dev/components"
+                path="onboarding"
                 element={
-                  <Suspense fallback={null}>
-                    <ComponentsGallery />
-                  </Suspense>
+                  <OnboardingRoute>
+                    <Onboarding />
+                  </OnboardingRoute>
                 }
               />
-            ) : null}
-            <Route path="*" element={<NotFound />} />
-          </Route>
-        </Routes>
+              {/* Every app tab renders the same shell; DashboardHome picks the view from the path. */}
+              <Route
+                element={
+                  <ProtectedRoute>
+                    <DashboardHome />
+                  </ProtectedRoute>
+                }
+              >
+                {DASHBOARD_PATHS.map((path) => (
+                  <Route key={path} path={path} />
+                ))}
+              </Route>
+              {ComponentsGallery ? (
+                <Route
+                  path="dev/components"
+                  element={
+                    <Suspense fallback={null}>
+                      <ComponentsGallery />
+                    </Suspense>
+                  }
+                />
+              ) : null}
+              <Route path="*" element={<NotFound />} />
+            </Route>
+          </Routes>
+        </Suspense>
         <EchoMount />
       </AuthProvider>
     </BrowserRouter>

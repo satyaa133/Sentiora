@@ -20,7 +20,20 @@
 | Phase 6: Search | ✅ Completed | 100% | Semantic pgvector search, lexical fallback, user isolation |
 | Phase 7: AI / RAG Chat | ✅ Completed | 100% | Real LLM integration (OpenAI), grounded RAG pipeline, citations, 503 error handling, content dedup |
 | Phase 8: Testing | ✅ Completed | 100% | Dedicated test DB with safety guard; pytest (incl. YouTube, authz, security); Vitest (incl. service worker); Playwright API + real-UI flows on an isolated stack |
-| Phase 9: Deployment & Launch | 🟡 In Progress | 65% | Production compose validated locally; extension packaging script + store checklist. Pending: real deployment, brand icons/store assets, privacy policy, submission |
+| Phase 9: Deployment & Launch | 🟡 In Progress | 70% | Production compose validated locally; extension packaging script + store checklist; brand icons, favicon and link-preview image done. Pending: real deployment, store listing assets, privacy policy, submission |
+
+### UI/UX redesign (docs/DESIGN.md)
+
+| Redesign phase | Status | Commit | Notes |
+| -------------- | ------ | ------ | ----- |
+| 1-7: Tokens, UI kit, popup, landing, app shell, remaining views, final pass | ✅ Completed | 028af6b … beb0a2b | Built to DESIGN.md v1 |
+| 8: Honest auto-save | ✅ Completed | 7ca4d99 | Signed-out sessions send nothing; Privacy Center blocklist synced to the extension; larger built-in sensitive list (Indian and global finance, health, ID) and sign-in URLs; popup page status |
+| 9: Logo, icons, link preview | ✅ Completed | 3030260 | Wordmark with the coral dot and 10s wave; favicon, extension icons and OG image regenerated (`npm run icons:extension`, `npm run og:image`) |
+| 10: Echo companion, corner mode | ✅ Completed | 91fe855 | New Echo states and arms; corner Echo on app pages reacting to real events only; opt-in Web Audio sound |
+| 11: Roaming Echo, easter eggs, 404 | ✅ Completed | 466f707 | Landing and 404 only |
+| 12: Landing header, hero, live demo | ✅ Completed | 167ced2 | Static sample libraries; no API calls |
+| 13: Landing sections, final order | ✅ Completed | c20a41c | Before/after, scroll story, extension clip, privacy flow |
+| 14: Performance and docs | ✅ Completed | this commit | App pages code-split; landing LCP 1.75s on throttled mobile (`npm run perf:landing`) |
 
 
 ---
@@ -73,6 +86,7 @@
 * YouTube timedtext transcript extractor (`youtubeCapture.ts`) with description fallback
 * Local PDF reader helper (`pdfCapture.ts`)
 * Popup UI displaying auth status and live tab capture trigger
+* Redesign v2: popup leads with the page status (Saved / Saving / Not saved yet / Blocked); captures need a session before any page is read; the Privacy Center blocklist is honoured; built-in list covers Indian and global banking, UPI and payments, investing, insurance, health and government ID sites, plus sign-in URLs
 
 ---
 
@@ -85,7 +99,7 @@
   * Vitest suites for dashboard, extension capture utilities, and shared packages
   * GitHub Actions CI running lint, typecheck, test, and build on pull requests
 * **Current blockers**: YouTube blocks caption downloads outside its player and its transcript panel fails in automated/signed-out browsers, so live transcript capture is unverified in a real signed-in profile. Brand icons, store assets and privacy policy need owner decisions. Semantic search needs `OPENAI_API_KEY` or `GEMINI_API_KEY` (OpenRouter is chat-only).
-* **Current branch**: `fix/get-app-running`
+* **Current branch**: `feat/echo-intelligence`
 
 ---
 
@@ -99,6 +113,23 @@
 | P2 | Submit extension (`npm run package:extension`) | Low | Store assets | Published extension |
 | P2 | Tailwind v4 migration (clears remaining moderate npm audit findings) | Medium | — | Clean `npm audit` |
 | P3 | Re-embed existing memories after enabling an embedding provider | Low | Embedding key | Semantic search over older captures |
+
+### Later (redesign follow-ups, not in the current redesign)
+
+From DESIGN.md §12 and items deferred while building v2:
+
+| Task | Notes |
+| ---- | ----- |
+| "Try it on any link" in the landing hero | Needs a backend fetch of a public URL; the extension-only extraction rule applies today |
+| Memory year-in-review card | Shareable summary of a year of saves |
+| Shareable answer cards | Export an Ask answer with its sources as an image or link |
+| Pause saving from the popup | "Pause on this site" and "Pause for 1 hour" toggles |
+| Chrome Web Store listing assets | Screenshots, promo tiles, short and long description; set `CHROME_STORE_URL` in `frontend/src/components/landing/links.ts` |
+| Product Hunt launch | Assets and launch copy |
+| Corner Echo reaction to sensitive skips | The web app never hears about extension skips; needs an extension-to-app relay (like `REFRESH_MEMORY_FEED`) before Echo can show the shield |
+| Real extension screen recording | 10-15s MP4/WebM with poster; set `EXTENSION_CLIP_VIDEO` in `links.ts` to replace the animated stand-in |
+| Logo dot states | Dot pulses while saving, becomes a check when saved, a lock on protected pages (DESIGN.md §13, optional) |
+| Footer links | Terms, GitHub and Contact destinations are still `[TODO]`; FAQ pricing answer is still `[TODO]` |
 
 ---
 

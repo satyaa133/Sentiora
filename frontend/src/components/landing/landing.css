@@ -154,15 +154,14 @@
 }
 
 /* Scroll story (§9.3) and extension clip (§9.4). */
+/* Transform only, so the looping pulse stays on the compositor (§11). */
 @keyframes landing-pulse {
   0%,
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 transparent;
   }
   40% {
-    transform: scale(1.12);
-    box-shadow: 0 0 0 6px var(--accent-soft);
+    transform: scale(1.14);
   }
 }
 
