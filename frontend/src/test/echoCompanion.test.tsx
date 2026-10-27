@@ -63,7 +63,14 @@ describe("echo mode by route", () => {
     expect(echoModeFor("/dashboard", false)).toBeNull();
     expect(echoModeFor("/login", true)).toBeNull();
     expect(echoModeFor("/onboarding", true)).toBeNull();
-    expect(echoModeFor("/", false)).toBeNull();
+    expect(echoModeFor("/dev/components", false)).toBeNull();
+  });
+
+  it("lets Echo roam on the landing page and on 404s, signed in or not", () => {
+    expect(echoModeFor("/", false)).toBe("roam");
+    expect(echoModeFor("/", true)).toBe("roam");
+    expect(echoModeFor("/some/old-link", false)).toBe("roam");
+    expect(echoModeFor("/dashboards", true)).toBe("roam");
   });
 });
 

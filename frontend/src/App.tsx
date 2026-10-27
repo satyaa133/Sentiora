@@ -1,5 +1,5 @@
 import { Suspense, lazy } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import EchoMount from "./components/echo/EchoMount";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -9,6 +9,7 @@ import DashboardHome from "./pages/DashboardHome";
 import ForgotPassword from "./pages/ForgotPassword";
 import LandingPage from "./pages/LandingPage";
 import Login from "./pages/Login";
+import NotFound from "./pages/NotFound";
 import Onboarding from "./pages/Onboarding";
 import SignUp from "./pages/SignUp";
 import { DASHBOARD_PATHS } from "./routes";
@@ -58,7 +59,7 @@ export default function App() {
                 }
               />
             ) : null}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
         <EchoMount />

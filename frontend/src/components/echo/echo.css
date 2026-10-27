@@ -79,3 +79,96 @@
     animation: none;
   }
 }
+
+/* Roaming mode (§8.1). */
+.echo-roam .echo-arm-left,
+.echo-roam .echo-arm-right {
+  transform-box: fill-box;
+  transition: transform 120ms linear;
+}
+
+.echo-roam .echo-arm-left {
+  transform-origin: right top;
+  transform: rotate(calc(var(--echo-swing, 0deg) * -1));
+}
+
+.echo-roam .echo-arm-right {
+  transform-origin: left top;
+  transform: rotate(var(--echo-swing, 0deg));
+}
+
+.echo-blink .echo-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scaleY(0.12);
+}
+
+@keyframes echo-squish {
+  0% {
+    transform: scale(1, 1);
+  }
+  30% {
+    transform: scale(1.18, 0.82);
+  }
+  60% {
+    transform: scale(0.92, 1.08);
+  }
+  100% {
+    transform: scale(1, 1);
+  }
+}
+
+.echo-squish {
+  animation: echo-squish 420ms var(--ease) both;
+  transform-origin: 50% 85%;
+}
+
+@keyframes echo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.echo-spin {
+  animation: echo-spin 800ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes echo-scrap-pop {
+  from {
+    transform: translate(-50%, -30%) scale(0.2);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes echo-scrap-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+  50% {
+    translate: 0 -5px;
+  }
+}
+
+.echo-scrap {
+  transform: translate(-50%, -50%);
+  animation:
+    echo-scrap-pop 260ms var(--ease) both,
+    echo-scrap-float 2.4s ease-in-out 260ms infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .echo-scrap {
+    animation: echo-scrap-pop 200ms linear both;
+  }
+  .echo-spin {
+    animation: none;
+  }
+}

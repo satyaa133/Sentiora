@@ -81,7 +81,7 @@ function WideEyes({ look, ry = 8, pupil = 2.6 }: { look: EchoLook; ry?: number; 
   const dx = look.x * 2;
   const dy = look.y * 2.5;
   return (
-    <>
+    <g className="echo-eyes">
       <g fill="var(--surface)">
         <ellipse cx={50} cy={55} rx={6} ry={ry} />
         <ellipse cx={70} cy={55} rx={6} ry={ry} />
@@ -90,7 +90,7 @@ function WideEyes({ look, ry = 8, pupil = 2.6 }: { look: EchoLook; ry?: number; 
         <circle cx={50 + dx} cy={55 + dy} r={pupil} />
         <circle cx={70 + dx} cy={55 + dy} r={pupil} />
       </g>
-    </>
+    </g>
   );
 }
 
@@ -221,7 +221,7 @@ function Face({ state, look }: { state: EchoState; look: EchoLook }) {
     default:
       return (
         <>
-          <g fill="var(--surface)">
+          <g fill="var(--surface)" className="echo-eyes">
             <ellipse cx={50 + look.x * 2.5} cy={56 + look.y * 2.5} rx={5} ry={7} />
             <ellipse cx={70 + look.x * 2.5} cy={56 + look.y * 2.5} rx={5} ry={7} />
           </g>

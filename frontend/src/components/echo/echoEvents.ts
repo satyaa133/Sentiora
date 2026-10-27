@@ -15,7 +15,9 @@ export type EchoEvent =
   | { type: "ask" }
   | { type: "answer"; status: EchoAnswerStatus; cited: boolean }
   | { type: "resurfaced"; action: "revisit" | "dismiss" }
-  | { type: "navigate"; tab: string };
+  | { type: "navigate"; tab: string }
+  /** Landing page: roaming Echo ate a memory scrap; total for the nav chip. */
+  | { type: "landing-saved"; total: number };
 
 type Listener = (event: EchoEvent) => void;
 

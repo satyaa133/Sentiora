@@ -33,7 +33,8 @@ export default function EchoMount() {
   if (!ready || !mode) return null;
   return (
     <Suspense fallback={null}>
-      <EchoCompanion mode={mode} />
+      {/* Keyed by mode so switching between landing and app starts fresh. */}
+      <EchoCompanion key={mode} mode={mode} landing={pathname === "/"} />
     </Suspense>
   );
 }

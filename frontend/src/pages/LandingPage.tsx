@@ -49,7 +49,8 @@ export default function LandingPage() {
                 Sentiora saves the articles, PDFs and videos you read, then answers your
                 questions from them, with the sources linked.
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
+              {/* Roaming Echo may cross the hero buttons but never sits on them. */}
+              <div className="mt-8 flex flex-wrap gap-3" data-echo-avoid="">
                 <AddToChromeButton size="lg" className="w-full sm:w-auto">
                   Add to Chrome
                   <IconArrowRight size={18} />

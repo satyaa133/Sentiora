@@ -27,13 +27,14 @@ export default function AddToChromeButton({
         target="_blank"
         rel="noopener noreferrer"
         className={classes}
+        data-echo-point=""
       >
         {children}
       </a>
     );
   }
   return (
-    <Link to={ADD_TO_CHROME_FALLBACK_PATH} className={classes}>
+    <Link to={ADD_TO_CHROME_FALLBACK_PATH} className={classes} data-echo-point="">
       {children}
     </Link>
   );
