@@ -134,3 +134,63 @@
     animation: none;
   }
 }
+
+/* Before / after (§9.2): the "without" tabs jiggle. */
+@keyframes before-tab-jiggle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-1px) rotate(-1.5deg);
+  }
+  75% {
+    transform: translateY(1px) rotate(1.5deg);
+  }
+}
+
+.before-tab {
+  animation: before-tab-jiggle 1.6s ease-in-out infinite;
+}
+
+/* Scroll story (§9.3) and extension clip (§9.4). */
+@keyframes landing-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  40% {
+    transform: scale(1.12);
+    box-shadow: 0 0 0 6px var(--accent-soft);
+  }
+}
+
+.story-pulse {
+  animation: landing-pulse 2s ease-in-out infinite;
+}
+
+.clip-icon-pulse {
+  animation: landing-pulse 600ms var(--ease) 1;
+}
+
+.clip-cursor {
+  transition: left 700ms cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+.clip-toast {
+  animation: demo-slide-in 260ms var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .before-tab,
+  .story-pulse,
+  .clip-icon-pulse,
+  .clip-toast {
+    animation: none;
+  }
+  .clip-cursor {
+    transition: none;
+  }
+}
+

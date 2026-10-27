@@ -15,3 +15,7 @@ export const FOOTER_LINKS: Array<{ label: string; href: string | null }> = [
   { label: "GitHub", href: null },
   { label: "Contact", href: null },
 ];
+
+// TODO: a real 10-15s screen recording of the extension (DESIGN.md §9.4). While null,
+// the landing page shows the animated stand-in.
+export const EXTENSION_CLIP_VIDEO: { src: string; poster: string } | null = null;

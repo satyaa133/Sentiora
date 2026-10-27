@@ -2,12 +2,14 @@ import { Echo, Logo } from "@shared/ui";
 
 import AddToChromeButton from "../components/landing/AddToChromeButton";
 import AskBand from "../components/landing/AskBand";
+import BeforeAfter from "../components/landing/BeforeAfter";
+import ExtensionClip from "../components/landing/ExtensionClip";
 import Faq from "../components/landing/Faq";
 import Hero from "../components/landing/Hero";
-import HowItWorks from "../components/landing/HowItWorks";
 import LandingNav from "../components/landing/LandingNav";
 import { FOOTER_LINKS } from "../components/landing/links";
 import PrivacySection from "../components/landing/PrivacySection";
+import ScrollStory from "../components/landing/ScrollStory";
 
 const SAVES_FROM = [
   "Web articles",
@@ -17,6 +19,7 @@ const SAVES_FROM = [
   "Uploaded files",
 ];
 
+/** Landing page in the final order of DESIGN.md §9.7. */
 export default function LandingPage() {
   return (
     <div className="min-h-screen overflow-x-clip bg-bg text-fg">
@@ -46,7 +49,9 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <HowItWorks />
+        <BeforeAfter />
+        <ScrollStory />
+        <ExtensionClip />
         <AskBand />
         <PrivacySection />
         <Faq />

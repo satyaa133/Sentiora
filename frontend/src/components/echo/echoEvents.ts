@@ -17,7 +17,11 @@ export type EchoEvent =
   | { type: "resurfaced"; action: "revisit" | "dismiss" }
   | { type: "navigate"; tab: string }
   /** Landing page: roaming Echo ate a memory scrap; total for the nav chip. */
-  | { type: "landing-saved"; total: number };
+  | { type: "landing-saved"; total: number }
+  /** Landing scroll story reached beat 0-3 (§9.3). */
+  | { type: "story-beat"; beat: number }
+  /** Landing extension clip showed a save (§9.4). */
+  | { type: "clip-saved" };
 
 type Listener = (event: EchoEvent) => void;
 

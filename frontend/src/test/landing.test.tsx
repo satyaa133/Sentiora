@@ -10,7 +10,7 @@ import {
   findDemoAnswer,
   splitCitations,
 } from "../components/landing/demo/demoLibrary";
-import { emitEcho } from "../components/echo/echoEvents";
+import { emitEcho, onEcho } from "../components/echo/echoEvents";
 import LandingPage from "../pages/LandingPage";
 
 function stubReducedMotion(reduced: boolean) {
@@ -49,13 +49,17 @@ describe("LandingPage", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Remember everything you read." }),
     ).toBeInTheDocument();
+    // DESIGN.md §9.7: before/after, scroll story, extension clip, Ask, Privacy, FAQ, CTA.
     expect(headings).toEqual([
-      "Save it once. Find it by what it meant.",
+      "Where did I read that?",
+      "From a page you read to an answer you trust.",
+      "Watch it save a real page.",
       "Ask your own library, not the whole internet.",
       "Your memory stays yours.",
       "Questions",
       "Give your reading a memory.",
     ]);
+    expect(screen.getByRole("region", { name: "Saves from" })).toBeInTheDocument();
   });
 
   it("does not claim pages save only on click (the extension auto-saves)", () => {
@@ -80,14 +84,30 @@ describe("LandingPage", () => {
     expect(within(faq).getByText("[TODO]")).toBeInTheDocument();
   });
 
-  it("stacks How it works when reduced motion is preferred", () => {
+  it("stacks the scroll story when reduced motion is preferred", () => {
     stubReducedMotion(true);
     renderLanding();
     const section = screen.getByRole("region", {
-      name: "Save it once. Find it by what it meant.",
+      name: "From a page you read to an answer you trust.",
     });
     expect(section.querySelectorAll("[aria-current]")).toHaveLength(0);
-    expect(within(section).getAllByRole("heading", { level: 3 })).toHaveLength(3);
+    expect(section.querySelector("[data-story-stage]")).toBeNull();
+    expect(within(section).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual([
+      "You read like normal",
+      "It becomes a memory",
+      "Find it by meaning",
+      "Ask, with sources",
+    ]);
+  });
+
+  it("gives every header section link a target on the page", () => {
+    stubReducedMotion(false);
+    const { container } = renderLanding();
+    const nav = screen.getByRole("navigation", { name: "Sections" });
+    for (const link of within(nav).getAllByRole("link")) {
+      const id = link.getAttribute("href")?.slice(1);
+      expect(container.querySelector(`#${id}`), `#${id}`).not.toBeNull();
+    }
   });
 });
 
@@ -214,3 +234,63 @@ describe("live demo", () => {
     vi.useRealTimers();
   });
 });
+
+describe("before and after", () => {
+  it("shows the same query failing in bookmarks and found in Sentiora", () => {
+    stubReducedMotion(false);
+    renderLanding();
+    const section = screen.getByRole("region", { name: "Where did I read that?" });
+    expect(within(section).getByText("Without Sentiora")).toBeInTheDocument();
+    expect(within(section).getByText("0 results in bookmarks")).toBeInTheDocument();
+    expect(within(section).getByText("With Sentiora")).toBeInTheDocument();
+    expect(within(section).getByText("Found it in 0.4s")).toBeInTheDocument();
+  });
+});
+
+describe("extension clip", () => {
+  it("shows the finished run, saves and the banking skip, under reduced motion", () => {
+    stubReducedMotion(true);
+    renderLanding();
+    const section = screen.getByRole("region", { name: "Watch it save a real page." });
+    expect(within(section).getByText("44")).toBeInTheDocument();
+    expect(within(section).getByText("Skipped: banking page")).toBeInTheDocument();
+  });
+
+  it("steps through the tabs every 4.2s and tells Echo about each save", () => {
+    vi.useFakeTimers();
+    stubReducedMotion(false);
+    const saves: string[] = [];
+    const stop = onEcho((event) => {
+      if (event.type === "clip-saved") saves.push(event.type);
+    });
+    renderLanding();
+    const section = screen.getByRole("region", { name: "Watch it save a real page." });
+    expect(within(section).getByText("41")).toBeInTheDocument();
+    // Each step re-arms its timers after rendering, so advance one step per act.
+    for (let step = 0; step < 3; step += 1) act(() => vi.advanceTimersByTime(4_200));
+    act(() => vi.advanceTimersByTime(1_800));
+    expect(within(section).getByText("44")).toBeInTheDocument();
+    expect(within(section).getByText("Skipped: banking page")).toBeInTheDocument();
+    expect(saves).toHaveLength(3);
+    act(() => vi.advanceTimersByTime(4_200));
+    expect(within(section).getByText("41")).toBeInTheDocument();
+    stop();
+    vi.useRealTimers();
+  });
+});
+
+describe("privacy", () => {
+  it("states the three points and the honest flow", () => {
+    stubReducedMotion(false);
+    renderLanding();
+    const section = screen.getByRole("region", { name: "Your memory stays yours." });
+    for (const title of ["You stay in control", "Sensitive pages are skipped", "Export or delete anytime"]) {
+      expect(within(section).getByRole("heading", { name: title })).toBeInTheDocument();
+    }
+    const flow = within(section).getByRole("figure", { name: "What happens to a page you visit" });
+    expect(within(flow).getByText("nothing is sent anywhere")).toBeInTheDocument();
+    expect(within(flow).getByText("clean text, title, link and basic page details")).toBeInTheDocument();
+    expect(flow.textContent).not.toMatch(/only clean text|link only/i);
+  });
+});
+

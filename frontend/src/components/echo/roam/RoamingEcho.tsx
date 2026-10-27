@@ -4,7 +4,7 @@ import { Echo, cx, type EchoLook, type EchoState } from "@shared/ui";
 
 import { usePrefersReducedMotion } from "../../../hooks/usePrefersReducedMotion";
 import EchoControls from "../EchoControls";
-import { emitEcho } from "../echoEvents";
+import { emitEcho, onEcho } from "../echoEvents";
 import { readEchoPaused, readEchoSound, writeEchoPaused, writeEchoSound } from "../echoPrefs";
 import type { EchoSound } from "../echoSound";
 import {
@@ -48,16 +48,32 @@ const TOP_MARGIN = 76;
 const SCRAP_LABELS = ["article", "PDF", "video", "note", "paper", "slides", "talk", "thread"];
 const SCRAP_SOURCES = "main h1, main h2, main h3, main p";
 
+/** Echo's reaction to each scroll-story beat: point, chomp, search, happy. */
+const STORY_BEATS: Array<{ face: EchoState; line: string }> = [
+  { face: "happy", line: "keep reading" },
+  { face: "chomp", line: "saved it" },
+  { face: "searching", line: "found it" },
+  { face: "happy", line: "with sources" },
+];
+
+/** A memory scrap. It lives in page coordinates so it scrolls with the text it came from. */
 interface Scrap {
   id: number;
   x: number;
-  y: number;
+  pageY: number;
   label: string;
 }
+
+/** Where a scrap is on screen right now. */
+const onScreen = (scrap: Scrap): Vec => ({ x: scrap.x, y: scrap.pageY - window.scrollY });
+
+const isVisible = (point: Vec) => point.y > TOP_MARGIN && point.y < window.innerHeight - 40;
 
 interface Bubble {
   id: number;
   text: string;
+  /** Near a screen edge the bubble hugs Echo's inner side instead of centring. */
+  align: "center" | "left" | "right";
 }
 
 interface Reaction {
@@ -122,6 +138,7 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
   const cursor = useRef<{ x: number; y: number; t: number } | null>(null);
   const drag = useRef<{ dx: number; dy: number; moved: boolean; lastX: number; lastY: number; lastT: number; vx: number; vy: number } | null>(null);
   const scrapsRef = useRef<Scrap[]>([]);
+  const scrapLayerRef = useRef<HTMLDivElement>(null);
   const scrapId = useRef(0);
   const saved = useRef(0);
   const faceRef = useRef<EchoState>("idle");
@@ -148,7 +165,9 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
 
   const say = useCallback((text: string, ms = 1500) => {
     window.clearTimeout(bubbleTimer.current);
-    setBubble({ id: Date.now(), text });
+    const x = pos.current.x;
+    const align = x > window.innerWidth - 150 ? "right" : x < 150 ? "left" : "center";
+    setBubble({ id: Date.now(), text, align });
     if (soundOnRef.current && !pausedRef.current) sound.current?.babble(text);
     bubbleTimer.current = window.setTimeout(() => setBubble(null), ms);
   }, []);
@@ -195,7 +214,7 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
     const scrap: Scrap = {
       id: (scrapId.current += 1),
       x,
-      y,
+      pageY: y + window.scrollY,
       label: SCRAP_LABELS[Math.floor(Math.random() * SCRAP_LABELS.length)] ?? "note",
     };
     scrapsRef.current = [...scrapsRef.current, scrap];
@@ -234,11 +253,10 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
         } else {
           flee.current = null;
           point.current = null;
-          const live = scrapsRef.current;
-          const index = nearestIndex(p, live);
-          const scrap = live[index];
+          const live = scrapsRef.current.map(onScreen).filter(isVisible);
+          const scrap = live[nearestIndex(p, live)];
           if (scrap) {
-            target.current = { x: scrap.x, y: scrap.y };
+            target.current = scrap;
             speed = 5;
           } else if (now > nextWander.current) {
             target.current = randomPoint(bounds, avoid, AVOID_PAD + currentSize / 2);
@@ -276,14 +294,16 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
         vel.current = step.vel;
 
         const ate = scrapsRef.current.find(
-          (scrap) => distance(pos.current, scrap) < currentSize * 0.42,
+          (scrap) => distance(pos.current, onScreen(scrap)) < currentSize * 0.42,
         );
         if (ate) eatScrap(ate.id);
       }
 
       // Face: a timed reaction wins, then napping, then chomping when close to food.
       const reacting = reaction.current && now < reaction.current.until ? reaction.current.face : null;
-      const nearFood = scrapsRef.current.some((scrap) => distance(pos.current, scrap) < 170);
+      const nearFood = scrapsRef.current.some(
+        (scrap) => distance(pos.current, onScreen(scrap)) < 170,
+      );
       const nextFace: EchoState = reacting ?? (napping ? "sleeping" : nearFood ? "chomp" : "idle");
       if (nextFace !== faceRef.current) {
         faceRef.current = nextFace;
@@ -310,6 +330,8 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
       const tilt = Math.max(-14, Math.min(14, v.x * 2.4));
       const bob = reduced || napping ? 0 : Math.sin((now / 3000) * Math.PI * 2) * 4;
       const swing = Math.min(28, Math.hypot(v.x, v.y) * 5 + Math.sin(now / 160) * Math.min(8, Math.hypot(v.x, v.y) * 2));
+      const scrapLayer = scrapLayerRef.current;
+      if (scrapLayer) scrapLayer.style.transform = `translate3d(0, ${-window.scrollY}px, 0)`;
       const wrap = wrapRef.current;
       const body = bodyRef.current;
       if (wrap) {
@@ -340,7 +362,16 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
   useEffect(() => {
     if (paused) return;
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "hidden" || scrapsRef.current.length >= MAX_SCRAPS) return;
+      if (document.visibilityState === "hidden") return;
+      // Forget scraps left far behind by scrolling; cap the ones on screen.
+      const near = scrapsRef.current.filter(
+        (scrap) => Math.abs(scrap.pageY - window.scrollY - window.innerHeight / 2) < window.innerHeight * 1.5,
+      );
+      if (near.length !== scrapsRef.current.length) {
+        scrapsRef.current = near;
+        setScraps(near);
+      }
+      if (near.map(onScreen).filter(isVisible).length >= MAX_SCRAPS) return;
       const avoid = avoidBoxes();
       const sources = [...document.querySelectorAll<HTMLElement>(SCRAP_SOURCES)].filter((el) => {
         const rect = el.getBoundingClientRect();
@@ -361,6 +392,18 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
     }, SPAWN_EVERY_MS);
     return () => window.clearInterval(interval);
   }, [paused, addScrap]);
+
+  // The scrap layer scrolls with the page, written directly to avoid re-renders.
+  // The animation loop also syncs it each frame; this covers the paused state.
+  useEffect(() => {
+    const sync = () => {
+      const layer = scrapLayerRef.current;
+      if (layer) layer.style.transform = `translate3d(0, ${-window.scrollY}px, 0)`;
+    };
+    sync();
+    window.addEventListener("scroll", sync, { passive: true });
+    return () => window.removeEventListener("scroll", sync);
+  }, []);
 
   // Slow behaviours: blink, power nap, the occasional spin.
   useEffect(() => {
@@ -417,7 +460,7 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
     const onDoubleClick = (event: MouseEvent) => {
       const el = event.target as HTMLElement | null;
       if (el?.closest("a, button, input, textarea, select, label, summary, p, li, h1, h2, h3, h4, h5, h6, [contenteditable]")) return;
-      if (scrapsRef.current.length >= MAX_SCRAPS + 2) return;
+      if (scrapsRef.current.map(onScreen).filter(isVisible).length >= MAX_SCRAPS + 2) return;
       addScrap(event.clientX, event.clientY);
       sfx("pop");
     };
@@ -450,6 +493,34 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
       window.removeEventListener("scroll", onInput);
     };
   }, [paused, addScrap, react, say, sfx]);
+
+  // Landing sections talk to Echo: scroll story beats (§9.3) and extension clip saves (§9.4).
+  useEffect(() => {
+    if (paused) return;
+    return onEcho((event) => {
+      if (event.type === "clip-saved") {
+        react("chomp", 700);
+        sfx("chomp");
+      } else if (event.type === "story-beat") {
+        const beat = STORY_BEATS[event.beat];
+        if (!beat) return;
+        if (event.beat === 0) {
+          const stage = document.querySelector("[data-story-stage]")?.getBoundingClientRect();
+          if (stage) {
+            point.current = {
+              to: clampToBox(
+                { x: stage.left - sizeRef.current * 0.4, y: stage.top + stage.height * 0.3 },
+                viewportBounds(sizeRef.current),
+              ),
+              until: performance.now() + 1600,
+            };
+          }
+        }
+        react(beat.face, 1600);
+        say(beat.line, 1500);
+      }
+    });
+  }, [paused, react, say, sfx]);
 
   // Easter eggs, landing only (§10).
   useEffect(() => {
@@ -580,20 +651,27 @@ export default function RoamingEcho({ easterEggs }: { easterEggs: boolean }) {
         data-echo-mode="roam"
         className={cx("echo-roam pointer-events-none fixed inset-0 z-40 overflow-hidden", paused && "echo-paused")}
       >
-        {scraps.map((scrap) => (
-          <span
-            key={scrap.id}
-            className="echo-scrap absolute rounded-md bg-accent px-1.5 py-0.5 font-mono text-xs font-semibold text-on-accent shadow-pop"
-            style={{ left: scrap.x, top: scrap.y }}
-          >
-            {scrap.label}
-          </span>
-        ))}
+        <div ref={scrapLayerRef} className="absolute inset-x-0 top-0 will-change-transform">
+          {scraps.map((scrap) => (
+            <span
+              key={scrap.id}
+              className="echo-scrap absolute rounded-md bg-accent px-1.5 py-0.5 font-mono text-xs font-semibold text-on-accent shadow-pop"
+              style={{ left: scrap.x, top: scrap.pageY }}
+            >
+              {scrap.label}
+            </span>
+          ))}
+        </div>
         <div ref={wrapRef} className="absolute left-0 top-0 will-change-transform" style={{ width: size, height: size }}>
           {bubble ? (
             <p
               key={bubble.id}
-              className="echo-bubble absolute bottom-full left-1/2 mb-1 -translate-x-1/2 whitespace-nowrap rounded-card border border-line bg-surface px-3 py-1.5 text-[15px] text-fg shadow-pop"
+              className={cx(
+                "echo-bubble absolute bottom-full mb-1 whitespace-nowrap rounded-card border border-line bg-surface px-3 py-1.5 text-[15px] text-fg shadow-pop",
+                bubble.align === "center" && "left-1/2 -translate-x-1/2",
+                bubble.align === "right" && "right-0",
+                bubble.align === "left" && "left-0",
+              )}
             >
               {bubble.text}
             </p>

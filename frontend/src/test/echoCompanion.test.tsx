@@ -129,7 +129,8 @@ describe("corner Echo", () => {
     await screen.findByText("5 memories");
     vi.mocked(fetchStatistics).mockResolvedValue({ total: 6 } as DashboardService.DashboardStatistics);
     act(() => emitEcho({ type: "feed-changed" }));
-    expect(await screen.findByText("6 memories")).toBeInTheDocument();
+    // The counter re-mounts to replay its coral flash; wait for the flashing one.
+    await waitFor(() => expect(screen.getByText("6 memories")).toHaveClass("echo-count-flash"));
   });
 
   it("reacts to answers and navigation with short lines", () => {
