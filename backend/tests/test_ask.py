@@ -125,7 +125,7 @@ def test_chat_returns_grounded_answer_and_citations(monkeypatch) -> None:  # typ
     )
     monkeypatch.setattr(
         "app.services.rag_service.RagService._complete",
-        lambda self, question, chunks: "Binary search halves the remaining interval each step. [Source 1]",
+        lambda self, question, chunks, **_: "Binary search halves the remaining interval each step. [Source 1]",
     )
     headers, item_id = _index_memory(
         "ask_rag@example.com",
@@ -174,7 +174,7 @@ def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  #
     )
     monkeypatch.setattr(
         "app.services.rag_service.RagService._complete",
-        lambda self, question, chunks: (
+        lambda self, question, chunks, **_: (
             "I couldn't find enough information in your saved memories to answer that."
         ),
     )
@@ -328,7 +328,7 @@ def test_chat_falls_back_when_llm_completion_fails(monkeypatch) -> None:  # type
         )(),
     )
 
-    def _boom(self, question, chunks):  # type: ignore[no-untyped-def]
+    def _boom(self, question, chunks, **_):  # type: ignore[no-untyped-def]
         raise RuntimeError("provider timeout")
 
     monkeypatch.setattr("app.services.rag_service.RagService._complete", _boom)
@@ -347,7 +347,9 @@ def test_chat_falls_back_when_llm_completion_fails(monkeypatch) -> None:  # type
     error = chat_resp.json()["error"]
     assert error["code"] == "ASK_LLM_FAILED"
     assert "unavailable" not in error["message"].lower() or "language model failed" in error["message"].lower()
-    assert "provider timeout" in error["message"].lower() or "failed" in error["message"].lower()
+    assert "language model failed" in error["message"].lower()
+    # Raw provider errors must not reach the client.
+    assert "provider timeout" not in error["message"].lower()
 
 
 def test_search_lexical_without_embeddings(monkeypatch) -> None:  # type: ignore[no-untyped-def]

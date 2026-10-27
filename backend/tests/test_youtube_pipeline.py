@@ -287,7 +287,7 @@ def test_transcript_is_retrievable_semantically(monkeypatch: pytest.MonkeyPatch)
     # Exercise the pgvector path directly: the public search merges semantic
     # hits with lexical ones and may return the lexical copy of the same chunk.
     from app.core.config import get_settings
-    from app.services.retrieval_service import RetrievalService
+    from app.services.retrieval_service import RetrievalService, _Scope
 
     # Bag-of-words test vectors are far sparser than real embeddings, so a short
     # query sits further away; widen the cutoff for this fixture only.
@@ -296,7 +296,7 @@ def test_transcript_is_retrievable_semantically(monkeypatch: pytest.MonkeyPatch)
     db = SessionLocal()
     try:
         semantic = RetrievalService(db)._semantic_search(
-            UUID(item["user_id"]), "lard oil schooners", 5, None, None
+            UUID(item["user_id"]), "lard oil schooners", 5, _Scope()
         )
     finally:
         db.close()

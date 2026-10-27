@@ -9,7 +9,6 @@ Error hierarchy:
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -19,18 +18,14 @@ from app.api.deps import get_current_user, get_db
 from app.models.memory_item import SourceType
 from app.models.user import User
 from app.schemas.ask import AskRequest, AskResponse, SearchHit
-from app.schemas.envelope import APIResponse, ResponseMeta
-from app.core.rate_limit import limit_chat
+from app.schemas.envelope import APIResponse, response_meta
+from app.core.rate_limit import limit_chat, limit_search
 from app.services.rag_service import LLMNotConfiguredError, LLMProviderError, RagService
 from app.services.retrieval_service import RetrievalService
 
 router = APIRouter(tags=["Ask Sentiora"])
 logger = logging.getLogger(__name__)
 
-
-def _meta(request: Request) -> ResponseMeta:
-    request_id = getattr(request.state, "request_id", f"req_{uuid.uuid4().hex[:8]}")
-    return ResponseMeta(request_id=request_id)
 
 
 @router.post(
@@ -54,6 +49,8 @@ def ask_memories(
             source_type=req.source_type,
             top_k=req.top_k,
             memory_id=req.memory_id,
+            history=req.history,
+            tz=req.tz,
         )
     except LLMNotConfiguredError:
         raise HTTPException(
@@ -67,7 +64,8 @@ def ask_memories(
                 ),
             },
         ) from None
-    except LLMProviderError as exc:
+    except LLMProviderError:
+        # Provider error text can include upstream details; it stays in the log.
         logger.exception("Ask LLM provider failed")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -75,7 +73,7 @@ def ask_memories(
                 "code": "ASK_LLM_FAILED",
                 "message": (
                     "Sentiora could not generate an AI answer because the language "
-                    f"model failed ({exc}). Your memories were retrieved; try again "
+                    "model failed. Your memories were retrieved; try again "
                     "in a moment."
                 ),
             },
@@ -93,7 +91,7 @@ def ask_memories(
                 ),
             },
         ) from None
-    return APIResponse(data=data, meta=_meta(request))
+    return APIResponse(data=data, meta=response_meta(request))
 
 
 @router.get(
@@ -110,6 +108,7 @@ def search_memories(
     source_type: SourceType | None = Query(default=None),
     top_k: int = Query(default=8, ge=1, le=20),
 ) -> APIResponse[list[SearchHit]]:
+    limit_search(request, str(current_user.id))
     retrieval = RetrievalService(db)
     chunks = retrieval.retrieve_relevant_memories(
         user_id=current_user.id,
@@ -132,4 +131,4 @@ def search_memories(
         )
         for chunk in chunks
     ]
-    return APIResponse(data=hits, meta=_meta(request))
+    return APIResponse(data=hits, meta=response_meta(request))

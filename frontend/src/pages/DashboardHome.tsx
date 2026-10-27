@@ -1,10 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Sidebar, { MobileTopBar, type NavTab } from "../components/Sidebar";
 import CommandPalette from "../components/CommandPalette";
 import MemoryDetailDrawer from "../components/MemoryDetailDrawer";
 import HomeView from "../components/views/HomeView";
-import MemoryTimelineView from "../components/views/MemoryTimelineView";
+import MemoryTimelineView, {
+  type TimelinePreset,
+} from "../components/views/MemoryTimelineView";
+import IntelligenceView from "../components/views/IntelligenceView";
 import SearchView from "../components/views/SearchView";
 import AskSentioraView from "../components/views/AskSentioraView";
 import ConnectedSourcesView from "../components/views/ConnectedSourcesView";
@@ -13,10 +16,12 @@ import AccountSettingsView from "../components/views/AccountSettingsView";
 import AddMemoryModal from "../components/AddMemoryModal";
 import { useAuth } from "../context/AuthContext";
 import { useMemoryFeed } from "../hooks/useMemoryFeed";
-import type { MemoryItem } from "../types/memory";
+import type { AskLaunch, AskScope } from "../services/askService";
+import type { MemoryItem, SourceType } from "../types/memory";
 
 const NAV_TABS: readonly NavTab[] = [
   "dashboard",
+  "intelligence",
   "timeline",
   "search",
   "ask",
@@ -26,6 +31,10 @@ const NAV_TABS: readonly NavTab[] = [
 ];
 
 const PAGE_HEADINGS: Partial<Record<NavTab, { title: string; subtitle: string }>> = {
+  intelligence: {
+    title: "Intelligence",
+    subtitle: "What your memory holds, what needs attention, and what to ask next.",
+  },
   timeline: { title: "Timeline", subtitle: "Everything you've saved, newest first." },
   search: { title: "Search", subtitle: "Find a memory by its title, text or address." },
   sources: {
@@ -71,11 +80,13 @@ export default function DashboardHome() {
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
-  const [askQuery, setAskQuery] = useState<string>("");
-  const [askMemoryId, setAskMemoryId] = useState<string | undefined>();
+  const [deleteCount, setDeleteCount] = useState(0);
+  const [askLaunch, setAskLaunch] = useState<AskLaunch | null>(null);
+  const [timelinePreset, setTimelinePreset] = useState<{ id: number; preset: TimelinePreset }>({
+    id: 0,
+    preset: {},
+  });
   const [selectedItem, setSelectedItem] = useState<MemoryItem | null>(null);
-
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   // Global Ctrl/Cmd+K opens the command palette.
   useEffect(() => {
@@ -91,19 +102,62 @@ export default function DashboardHome() {
 
   const onDeleteItem = async (id: string) => {
     const deleted = await handleDeleteItem(id);
+    // The feed holds only the newest 100 items, so count deletes separately
+    // to refresh views that page further back.
+    if (deleted) setDeleteCount((count) => count + 1);
     if (deleted && selectedItem?.id === id) {
       setSelectedItem(null);
     }
   };
 
-  const askAbout = useCallback(
-    (question: string) => {
-      setAskQuery(question);
-      setAskMemoryId(undefined);
+  // Changes only when a memory is added, removed or changes status, so the
+  // Timeline and statistics refresh without refetching on every poll.
+  const feedKey = useMemo(
+    () => items.map((item) => `${item.id}:${item.status}`).join(","),
+    [items],
+  );
+
+  const viewRefreshKey = `${feedKey}|${deleteCount}`;
+
+  const openAsk = useCallback(
+    (question?: string, options: { scope?: AskScope; send?: boolean } = {}) => {
+      setAskLaunch({
+        id: Date.now(),
+        question,
+        // An explicit scope replaces the current one; plain questions keep it unset.
+        scope: options.scope,
+        autoSend: options.send,
+      });
       setActiveTab("ask");
     },
     [setActiveTab],
   );
+
+  const askAbout = useCallback((question: string) => openAsk(question), [openAsk]);
+
+  const askAboutItem = useCallback(
+    (item: MemoryItem) =>
+      openAsk(`What is "${item.title}" about?`, {
+        scope: { memoryId: item.id, label: item.title },
+      }),
+    [openAsk],
+  );
+
+  const askAboutSource = useCallback(
+    (sourceType: SourceType, label: string) =>
+      openAsk("Summarize my latest saves", { scope: { sourceType, label } }),
+    [openAsk],
+  );
+
+  const openTimeline = useCallback(
+    (preset: TimelinePreset) => {
+      setTimelinePreset((prev) => ({ id: prev.id + 1, preset }));
+      setActiveTab("timeline");
+    },
+    [setActiveTab],
+  );
+
+  const clearAskLaunch = useCallback(() => setAskLaunch(null), []);
 
   const openMemoryById = useCallback(
     (memoryId: string) => {
@@ -144,7 +198,6 @@ export default function DashboardHome() {
               status={toast}
               searchQuery={searchQuery}
               onSearchQueryChange={setSearchQuery}
-              searchInputRef={searchInputRef}
               onRetry={() => void loadMemoryFeed()}
               onSync={() => void handleManualSync()}
               onAddMemory={() => setIsAddModalOpen(true)}
@@ -169,22 +222,44 @@ export default function DashboardHome() {
                 ) : null}
               </header>
 
-              {activeTab === "timeline" && (
-                <MemoryTimelineView
+              {activeTab === "intelligence" && (
+                <IntelligenceView
                   items={items}
                   isLoading={isLoading}
+                  loadError={loadError}
+                  refreshKey={viewRefreshKey}
+                  onRetry={() => void loadMemoryFeed()}
+                  onAsk={openAsk}
+                  onOpenTimeline={openTimeline}
                   onSelectItem={setSelectedItem}
                 />
               )}
 
+              {activeTab === "timeline" && (
+                <MemoryTimelineView
+                  key={timelinePreset.id}
+                  preset={timelinePreset.preset}
+                  refreshKey={viewRefreshKey}
+                  onSelectItem={setSelectedItem}
+                  onAskAbout={askAboutItem}
+                />
+              )}
+
               {activeTab === "search" && (
-                <SearchView items={items} onSelectItem={setSelectedItem} />
+                <SearchView
+                  items={items}
+                  isLoading={isLoading}
+                  loadError={loadError}
+                  onRetry={() => void loadMemoryFeed()}
+                  onSelectItem={setSelectedItem}
+                />
               )}
 
               {activeTab === "sources" && (
                 <ConnectedSourcesView
                   items={items}
                   onRefreshFeed={() => loadMemoryFeed(true)}
+                  onAskAboutSource={askAboutSource}
                 />
               )}
 
@@ -197,12 +272,8 @@ export default function DashboardHome() {
           {isAsk && (
             <AskSentioraView
               items={items}
-              initialQuery={askQuery}
-              focusMemoryId={askMemoryId}
-              onClearInitialQuery={() => {
-                setAskQuery("");
-                setAskMemoryId(undefined);
-              }}
+              launch={askLaunch}
+              onLaunchConsumed={clearAskLaunch}
               onOpenMemory={openMemoryById}
             />
           )}
@@ -224,9 +295,7 @@ export default function DashboardHome() {
         onClose={() => setSelectedItem(null)}
         onDelete={onDeleteItem}
         onAskAnything={(item) => {
-          setAskQuery(`What is "${item.title}" about?`);
-          setAskMemoryId(item.id);
-          setActiveTab("ask");
+          askAboutItem(item);
           setSelectedItem(null);
         }}
       />

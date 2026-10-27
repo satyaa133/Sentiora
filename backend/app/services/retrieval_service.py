@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import math
 from typing import cast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from uuid import UUID
 
@@ -99,6 +99,16 @@ _STOPWORDS = {
     "also",
     "just",
     "really",
+    "these",
+    "those",
+    "them",
+    "they",
+    "recent",
+    "latest",
+    "saves",
+    "videos",
+    "pdfs",
+    "mostly",
 }
 
 
@@ -117,6 +127,17 @@ class RetrievedChunk:
     distance: float | None
     lexical: bool = False
     rank: float = 0.0
+
+
+_RRF_K = 60
+
+
+@dataclass(frozen=True)
+class _Scope:
+    source_type: SourceType | None = None
+    memory_id: UUID | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -163,38 +184,60 @@ class RetrievalService:
         top_k: int | None = None,
         source_type: SourceType | None = None,
         memory_id: UUID | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
     ) -> list[RetrievedChunk]:
         limit = top_k or self.settings.rag_top_k
+        scope = _Scope(source_type, memory_id, date_from, date_to)
         tokens = _query_tokens(query)
-        semantic = self._semantic_search(user_id, query, limit, source_type, memory_id)
-        lexical = self._lexical_search(user_id, query, limit, source_type, memory_id)
+        semantic = self._semantic_search(user_id, query, limit, scope)
+        lexical = self._lexical_search(user_id, query, limit, scope)
 
         if tokens:
-            if lexical:
-                lexical_ids = {chunk.memory_id for chunk in lexical}
-                semantic_keep = [chunk for chunk in semantic if chunk.memory_id in lexical_ids]
-                merged = self._deduplicate_chunks(semantic_keep + lexical)
-            elif semantic:
-                merged = self._deduplicate_chunks(semantic)
-            else:
+            if not lexical and not semantic:
                 return []
+            merged = self._fuse(semantic, lexical)
         else:
-            merged = self._deduplicate_chunks(
-                self._recent_chunks(user_id, limit, source_type, memory_id)
-            )
+            merged = self._deduplicate_chunks(self._recent_chunks(user_id, limit, scope))
 
         if needs_document_context(query) and merged:
-            merged = self._expand_primary_memory(
-                user_id, merged, limit=max(limit, 8), source_type=source_type
-            )
+            merged = self._expand_primary_memory(user_id, merged, limit=max(limit, 8), scope=scope)
         return merged[: max(limit, 8) if needs_document_context(query) else limit]
 
-    def _base_query(
-        self,
-        user_id: UUID,
-        source_type: SourceType | None,
-        memory_id: UUID | None,
-    ) -> Select[tuple[MemoryChunk, MemoryItem]]:
+    def _fuse(
+        self, semantic: list[RetrievedChunk], lexical: list[RetrievedChunk]
+    ) -> list[RetrievedChunk]:
+        """Reciprocal-rank fusion of semantic and keyword hits.
+
+        A semantic-only hit survives next to keyword hits only when it is a
+        strong match, so a loosely related vector neighbour cannot outrank the
+        memory that actually contains the words.
+        """
+        if lexical:
+            lexical_ids = {chunk.memory_id for chunk in lexical}
+            strong = float(getattr(self.settings, "rag_strong_distance", 0.4))
+            semantic = [
+                chunk
+                for chunk in semantic
+                if chunk.memory_id in lexical_ids
+                or (chunk.distance is not None and chunk.distance <= strong)
+            ]
+        scores: dict[UUID, float] = {}
+        for ranked, weight in ((semantic, 1.0), (lexical, 1.2)):
+            for position, chunk in enumerate(ranked):
+                scores[chunk.chunk_id] = scores.get(chunk.chunk_id, 0.0) + weight / (
+                    _RRF_K + position + 1
+                )
+        # One entry per chunk: the semantic copy carries the distance, so give it
+        # the keyword rank too when both searches found the same chunk.
+        by_id = {chunk.chunk_id: chunk for chunk in lexical}
+        for chunk in semantic:
+            keyword = by_id.get(chunk.chunk_id)
+            by_id[chunk.chunk_id] = replace(chunk, rank=keyword.rank) if keyword else chunk
+        fused = self._deduplicate_chunks(list(by_id.values()))
+        return sorted(fused, key=lambda chunk: -scores.get(chunk.chunk_id, 0.0))
+
+    def _base_query(self, user_id: UUID, scope: _Scope) -> Select[tuple[MemoryChunk, MemoryItem]]:
         stmt = (
             select(MemoryChunk, MemoryItem)
             .join(MemoryItem, MemoryChunk.memory_id == MemoryItem.id)
@@ -205,10 +248,14 @@ class RetrievalService:
                 MemoryItem.status == ItemStatus.ready,
             )
         )
-        if source_type is not None:
-            stmt = stmt.where(MemoryChunk.source_type == source_type)
-        if memory_id is not None:
-            stmt = stmt.where(MemoryChunk.memory_id == memory_id)
+        if scope.source_type is not None:
+            stmt = stmt.where(MemoryChunk.source_type == scope.source_type)
+        if scope.memory_id is not None:
+            stmt = stmt.where(MemoryChunk.memory_id == scope.memory_id)
+        if scope.date_from is not None:
+            stmt = stmt.where(MemoryItem.captured_at >= scope.date_from)
+        if scope.date_to is not None:
+            stmt = stmt.where(MemoryItem.captured_at < scope.date_to)
         return cast(Select[tuple[MemoryChunk, MemoryItem]], stmt)
 
     def _to_retrieved(
@@ -240,8 +287,7 @@ class RetrievalService:
         user_id: UUID,
         query: str,
         top_k: int,
-        source_type: SourceType | None,
-        memory_id: UUID | None,
+        scope: _Scope,
     ) -> list[RetrievedChunk]:
         adapter = get_embedding_adapter()
         if adapter is None:
@@ -260,7 +306,7 @@ class RetrievalService:
         try:
             distance = MemoryChunk.embedding.cosine_distance(query_vector)
             stmt = (
-                self._base_query(user_id, source_type, memory_id)
+                self._base_query(user_id, scope)
                 .add_columns(distance.label("distance"))
                 .where(MemoryChunk.embedding.is_not(None))
                 .order_by(distance)
@@ -282,8 +328,7 @@ class RetrievalService:
         user_id: UUID,
         query: str,
         top_k: int,
-        source_type: SourceType | None,
-        memory_id: UUID | None,
+        scope: _Scope,
     ) -> list[RetrievedChunk]:
         tokens = _query_tokens(query)
         if not tokens:
@@ -298,7 +343,7 @@ class RetrievalService:
         ]
         candidate_limit = max(top_k * 4, 16)
         stmt = (
-            self._base_query(user_id, source_type, memory_id)
+            self._base_query(user_id, scope)
             .where(or_(*filters))
             .limit(candidate_limit)
         )
@@ -316,11 +361,10 @@ class RetrievalService:
         self,
         user_id: UUID,
         top_k: int,
-        source_type: SourceType | None,
-        memory_id: UUID | None,
+        scope: _Scope,
     ) -> list[RetrievedChunk]:
         stmt = (
-            self._base_query(user_id, source_type, memory_id)
+            self._base_query(user_id, scope)
             .order_by(MemoryItem.captured_at.desc(), MemoryChunk.chunk_index.asc())
             .limit(top_k)
         )
@@ -332,11 +376,11 @@ class RetrievalService:
         user_id: UUID,
         chunks: list[RetrievedChunk],
         limit: int,
-        source_type: SourceType | None,
+        scope: _Scope,
     ) -> list[RetrievedChunk]:
         """Pull additional chunks from the top-ranked memory for summary-style questions."""
         primary_id = chunks[0].memory_id
-        extra = self._chunks_for_memory(user_id, primary_id, source_type, limit)
+        extra = self._chunks_for_memory(user_id, primary_id, scope, limit)
         seen = {chunk.chunk_id for chunk in chunks}
         expanded = list(chunks)
         for chunk in extra:
@@ -352,11 +396,11 @@ class RetrievalService:
         self,
         user_id: UUID,
         memory_id: UUID,
-        source_type: SourceType | None,
+        scope: _Scope,
         limit: int,
     ) -> list[RetrievedChunk]:
         stmt = (
-            self._base_query(user_id, source_type, memory_id)
+            self._base_query(user_id, replace(scope, memory_id=memory_id))
             .order_by(MemoryChunk.chunk_index.asc())
             .limit(limit)
         )

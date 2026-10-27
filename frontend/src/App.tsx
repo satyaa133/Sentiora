@@ -16,6 +16,17 @@ const ComponentsGallery = import.meta.env.DEV
   ? lazy(() => import("./pages/dev/ComponentsGallery"))
   : null;
 
+const DASHBOARD_PATHS = [
+  "dashboard",
+  "intelligence",
+  "timeline",
+  "search",
+  "ask",
+  "sources",
+  "privacy",
+  "settings",
+];
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -34,62 +45,18 @@ export default function App() {
                 </OnboardingRoute>
               }
             />
+            {/* Every app tab renders the same shell; DashboardHome picks the view from the path. */}
             <Route
-              path="dashboard"
               element={
                 <ProtectedRoute>
                   <DashboardHome />
                 </ProtectedRoute>
               }
-            />
-            <Route
-              path="timeline"
-              element={
-                <ProtectedRoute>
-                  <DashboardHome />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="search"
-              element={
-                <ProtectedRoute>
-                  <DashboardHome />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="ask"
-              element={
-                <ProtectedRoute>
-                  <DashboardHome />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="sources"
-              element={
-                <ProtectedRoute>
-                  <DashboardHome />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="privacy"
-              element={
-                <ProtectedRoute>
-                  <DashboardHome />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="settings"
-              element={
-                <ProtectedRoute>
-                  <DashboardHome />
-                </ProtectedRoute>
-              }
-            />
+            >
+              {DASHBOARD_PATHS.map((path) => (
+                <Route key={path} path={path} />
+              ))}
+            </Route>
             {ComponentsGallery ? (
               <Route
                 path="dev/components"

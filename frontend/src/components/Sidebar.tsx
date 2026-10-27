@@ -5,6 +5,7 @@ import {
   Drawer,
   IconButton,
   IconClock,
+  IconEye,
   IconHome,
   IconLink,
   IconLogOut,
@@ -21,7 +22,14 @@ import {
 import { useAuth } from "../context/AuthContext";
 
 export type NavTab =
-  "dashboard" | "timeline" | "search" | "ask" | "sources" | "privacy" | "settings";
+  | "dashboard"
+  | "intelligence"
+  | "timeline"
+  | "search"
+  | "ask"
+  | "sources"
+  | "privacy"
+  | "settings";
 
 interface NavItem {
   id: NavTab;
@@ -31,7 +39,9 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Home", icon: <IconHome /> },
+  { id: "intelligence", label: "Intelligence", icon: <IconEye /> },
   { id: "timeline", label: "Timeline", icon: <IconClock /> },
+  { id: "search", label: "Search", icon: <IconSearch /> },
   { id: "ask", label: "Ask Sentiora", icon: <IconMessage /> },
   { id: "sources", label: "Sources", icon: <IconLink /> },
   { id: "privacy", label: "Privacy", icon: <IconShield /> },

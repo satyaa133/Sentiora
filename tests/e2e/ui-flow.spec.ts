@@ -52,11 +52,11 @@ test("UI: sign up, add a memory, see it processed, and get a grounded cited answ
   await signUpAndOnboard(page);
   await addMemory(page, FACT_TITLE, FACT_CONTENT);
 
-  // Wait (bounded) for the worker to finish: the row loses its "Processing" tag.
+  // Wait (bounded) for the worker to finish: the row reads "Ready for Ask".
   await page.goto("/timeline");
   const row = memoryRow(page, FACT_TITLE);
   await expect(row).toBeVisible({ timeout: 15_000 });
-  await expect(row).not.toContainText(/Processing|Failed/, { timeout: 30_000 });
+  await expect(row).toContainText("Ready for Ask", { timeout: 30_000 });
 
   // Direct navigation + refresh keep the right view.
   await page.goto("/ask");
@@ -100,4 +100,35 @@ test("UI: a capture that cannot be indexed is shown as failed with its reason", 
   const alert = page.getByRole("alert").filter({ hasText: "It is not searchable" });
   await expect(alert).toBeVisible();
   await expect(alert).toContainText(/too short to index/i);
+});
+
+test("UI: two tabs opened at once share one token refresh and both stay signed in", async ({
+  context,
+  page,
+}) => {
+  await signUpAndOnboard(page);
+
+  const refreshStatuses: number[] = [];
+  context.on("response", (response) => {
+    if (response.url().includes("/auth/refresh-token")) refreshStatuses.push(response.status());
+  });
+
+  // New tabs start without an access token (it lives in sessionStorage), so both
+  // must refresh from the shared refresh token at the same moment.
+  const [tabA, tabB] = await Promise.all([context.newPage(), context.newPage()]);
+  await Promise.all([tabA.goto("/dashboard"), tabB.goto("/dashboard")]);
+
+  for (const tab of [tabA, tabB]) {
+    await expect(tab.getByRole("button", { name: "Add memory" }).first()).toBeVisible();
+    await expect(tab).toHaveURL(/\/dashboard/);
+  }
+  // One rotation for both tabs: a second refresh with the same token would be
+  // treated as reuse and revoke every session.
+  expect(refreshStatuses).toEqual([200]);
+
+  // The session is still valid afterwards: another fresh tab can refresh normally.
+  const tabC = await context.newPage();
+  await tabC.goto("/dashboard");
+  await expect(tabC.getByRole("button", { name: "Add memory" }).first()).toBeVisible();
+  expect(refreshStatuses).toEqual([200, 200]);
 });

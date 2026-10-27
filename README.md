@@ -6,13 +6,22 @@
 
 ## Features
 
-- 🧠 **Smart Capture** — Chrome extension that captures webpage text, local PDFs, and YouTube transcripts in the background.
-- 📂 **Connected Memory Sources** — Direct PDF/TXT file uploader and integration hubs (Notion, ChatGPT, Twitter, GitHub, Substack).
-- 💬 **Ask Sentiora AI Assistant** — Natural language Q&A with rich Markdown responses and source citations.
-- 🗂️ **Memory Timeline** — Browse your captures chronologically with compact preview cards, category filters, and detail drawers.
-- 🛡️ **Privacy Center & Control** — Custom domain blocklist (`localStorage` persistent) and 1-click JSON vault data exporter.
-- 👤 **Account & Preferences** — Custom user profiles, timezone selection, and AI summary style preferences.
-- 🔒 **Private by Design** — Local infrastructure support with complete data ownership.
+**Working end to end**
+
+- **Capture** — the Chrome extension extracts webpage text (Readability), local and web PDFs, and YouTube transcripts, and sends them to the API. A manual note can also be added from the popup or the web app.
+- **Processing** — an RQ worker chunks each capture and, when an embedding key is set, embeds it with pgvector.
+- **Ask Sentiora (Echo)** — answers from your own memories with real citations, general-knowledge answers labelled as such, and combined answers that keep the two apart (`POST /api/v1/chat`). Follow-ups keep context, and questions can be limited to one memory or one source type. A local fallback is used when no AI key is set.
+- **Intelligence** — an overview built from real data: memory totals, recent captures, captures that failed or are still indexing, and questions to ask (`GET /api/v1/dashboard/statistics`).
+- **Home, Timeline and Search** — the Timeline is filtered and paged on the server (type, status, date range, title/site search), shows real totals and indexing status, and offers "Ask Echo about this"; delete from the detail drawer.
+- **Privacy** — sensitive sites (banking, health, tax) and pages with visible password fields are never captured; JSON export of loaded memories.
+
+**Partial or not yet built** (UI exists, behaviour is incomplete)
+
+- **Search** in the web app matches text in the loaded memories; the semantic `GET /api/v1/search` endpoint exists but the UI does not call it yet.
+- **Sources**: only the browser extension is a real source. Notion, GitHub, Twitter, Substack and ChatGPT can be toggled but have no integration, and the `.txt`/`.md` uploader is rejected by the API (`CAPTURE_SENSITIVE_BLOCKED`).
+- **Privacy "Blocked sites"** are stored in the browser only; the extension does not read them yet.
+- **Account settings** and **Forgot password** are not saved or sent anywhere yet.
+- **Footprint** and **Shield** modules from the PRD are planned, not started.
 
 ---
 
@@ -40,8 +49,10 @@ Sentiora/
 ├── extension/         Chrome Extension (Manifest V3)
 │   ├── src/           Popup UI, content scripts, background worker
 │   └── dist/          Compiled extension bundle for Chrome loading
-├── shared/            Shared TypeScript types, constants, and utilities
-├── infrastructure/    Docker Compose and pgAdmin configuration
+├── shared/            Shared UI kit and design tokens (`@shared/ui`)
+├── infrastructure/    Postgres image, nginx and pgAdmin config (Compose files are at the root)
+├── scripts/           Python runner, extension packaging and icon scripts
+├── tests/e2e/         Playwright end-to-end specs
 └── docs/              Canonical technical specs and TASKS.md tracker
 ```
 
@@ -87,6 +98,17 @@ copy backend\.env.example backend\.env
 
 - `.env` (repo root): Docker ports plus the **frontend/extension build config** (`VITE_API_BASE_URL`, `VITE_APP_URL`). Vite reads `VITE_*` only from this file; `frontend/.env` and `extension/.env` are ignored.
 - `backend/.env`: API and worker settings (`DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`, AI keys).
+Which process reads which file:
+
+| Process | Reads | Notes |
+|---|---|---|
+| API (`npm run dev:backend`) and worker (`npm run dev:worker`) | root `.env`, then `backend/.env` (later wins) | Run from `backend/`. Put secrets and AI keys in `backend/.env`. |
+| Docker backend/worker (`--profile app`) | `backend/.env` | `REDIS_URL` is overridden to the Compose service. |
+| Vite: web app and extension builds | root `.env` only (`VITE_*`) | Changes need a dev-server restart or an extension rebuild. |
+| Docker Compose (Postgres, Redis, pgAdmin) | root `.env` | Ports and `POSTGRES_PASSWORD`. |
+
+Every backend setting and its default is in `backend/app/core/config.py`; the example files list the ones you are likely to change.
+
 - If port 5432/6379 is already taken on your machine, set `POSTGRES_PORT`/`REDIS_PORT` in `.env` and use the same ports in `backend/.env`'s `DATABASE_URL`/`REDIS_URL`. Use `127.0.0.1`, not `localhost`, as the host in those URLs: the containers listen on IPv4 loopback only, and on Windows `localhost` tries IPv6 first and stalls (about 10 s per connection).
 
 ### Step 3 — Install Node Dependencies
@@ -186,6 +208,10 @@ The worker reconnects on its own if Redis restarts, and re-queues captures left 
 
 The extension picks up the web app's sign-in only from the exact `VITE_APP_URL` origin. `http://127.0.0.1:5173` is not the same origin as `http://localhost:5173`.
 
+- **Developing the extension:** `npm run dev:extension` rebuilds `extension/dist` on every change, but Chrome does not reload it. Click the reload icon on the Sentiora card in `chrome://extensions`, then refresh the page you are testing.
+- **Local PDFs:** to capture `file://` PDFs, open the extension's **Details** page and turn on **Allow access to file URLs**.
+- **Privacy behaviour:** once signed in, the extension saves every page you load (about a second after it finishes loading), except blocked sensitive domains, `noindex` pages, pages with a visible password field, and Sentiora itself. Nothing is saved while the extension is signed out (pages are still read locally, but the API refuses the upload).
+
 ### Access From Another PC on Your LAN (optional)
 
 By default the backend, the frontend and Docker services listen on this machine only. For a teammate on the same network to use your instance:
@@ -264,12 +290,12 @@ See [docs/RELEASE.md](docs/RELEASE.md): `docker-compose.prod.yml` (non-root imag
 - GitHub Actions CI pipeline configuration
 
 ### ✅ Phase 1 — Authentication
-- `POST /api/v1/auth/register`, `/login`, `/refresh`, `/users/me`
+- `POST /api/v1/auth/register`, `/login`, `/refresh-token`, `GET /users/me`
 - JWT authentication middleware and password hashing
 - React Auth Context, Login/SignUp UI, and protected route guards
 
 ### ✅ Phase 2 — Chrome Extension Skeleton
-- Manifest V3 extension configuration (`tabs`, `storage`, `activeTab`)
+- Manifest V3 extension configuration (`storage`, `scripting`, host access for capture)
 - React popup UI showing login status and capture triggers
 - Extension API client and background message bus
 
@@ -287,14 +313,14 @@ See [docs/RELEASE.md](docs/RELEASE.md): `docker-compose.prod.yml` (non-root imag
 ### ✅ Phase 5 — Frontend Dashboard
 - Memory Timeline View with compact card previews and sequential date grouping
 - Memory Detail Reader Drawer for full reading, metadata breakdown, and deletion
-- Connected Sources hub with PDF/document drag & drop parser and integration modal
-- Privacy Center with custom domain blocklist and complete JSON vault exporter
-- Account Settings with avatar initials, personal preferences, and timezone options
+- Connected Sources hub (UI only for third-party integrations; see Features)
+- Privacy Center with a browser-only site list and a JSON export of loaded memories
+- Account Settings screen (preferences are not saved yet)
 
 ### ✅ Phase 6 — Semantic Search
 - `GET /api/v1/search?q=` with pgvector semantic retrieval and lexical fallback
 - User-scoped chunk retrieval with distance scoring (`RAG_MAX_DISTANCE`)
-- Background embedding generation in the capture worker when `OPENAI_API_KEY` is set
+- Background embedding generation in the capture worker when `OPENAI_API_KEY` or `GEMINI_API_KEY` is set
 
 ### ✅ Phase 7 — AI / RAG Chat
 - `POST /api/v1/chat` grounded RAG pipeline with citations and insufficient-context handling
@@ -314,16 +340,35 @@ See [docs/RELEASE.md](docs/RELEASE.md): `docker-compose.prod.yml` (non-root imag
 
 ## Ask Sentiora / RAG Behavior
 
+Each answer has a `mode` (`backend/app/services/ask_intent.py` picks it, `rag_service.py` answers):
+
+| Question | `mode` | Behavior |
+|---|---|---|
+| General ("What is a sliding window?"), nothing relevant saved | `general` | Answer plus a short example from the LLM, no citations, labelled "General knowledge" in the UI |
+| General, relevant memory found | `combined` | General explanation, then a separate `### From your saved memory` part citing only retrieved sources |
+| Explained through a save ("Explain X based on the playlist I saved") | `combined` | As above; if nothing matches, it says the source wasn't found and answers generally |
+| Personal ("What did I capture yesterday?", "Which sources mention RAG?", "Summarize the video") | `memory` | Memory only. Date questions list the real captures in that window; when nothing matches it says so (`insufficient_context: true`) and never answers generally |
+
 | Scenario | HTTP status | Behavior |
 |---|---|---|
-| LLM configured, relevant memories found | `200` | Grounded answer with citations |
-| LLM configured, insufficient context | `200` | `insufficient_context: true`, no fabricated citations |
 | Provider key missing, relevant memories found | `200` | Grounded local fallback, `used_fallback: true`, real citations |
-| LLM request fails at runtime, memories found | `200` | Same grounded local fallback |
-| No relevant memory | `200` | `insufficient_context: true` |
+| Provider key missing, general question | `200` | `insufficient_context: true`; says general answers need the AI model |
+| LLM configured but the request fails | `502` | `ASK_LLM_FAILED`; details stay in the server log |
 | Unexpected server error | `502` | `ASK_SYSTEM_FAILED` |
 
-Embeddings and chat completions use the configured provider (OpenAI or Gemini). Retrieval is scoped per authenticated user.
+- **Citations** are validated against the retrieved set: `[Source N]` markers that point at nothing are removed, and the rest are renumbered to match `citations` (each carries `captured_at` and a short `excerpt`).
+- **Retrieval** fuses semantic (pgvector) and keyword hits. A semantic-only hit is kept next to keyword hits only below `RAG_STRONG_DISTANCE` (default 0.4). Date windows ("this week", in the request's `tz`) and source cues ("my videos") narrow retrieval for personal questions.
+- **Follow-ups** send up to 4 earlier turns as `history`. Nothing is stored server-side, so a reload starts a new conversation.
+- **Scope**: `memory_id` or `source_type` limits a question to one memory or one type ("Ask Echo about this" from Timeline, Intelligence, Sources and the drawer).
+
+Retrieval is scoped per authenticated user. Chat uses the configured provider (OpenAI, Gemini or OpenRouter); embeddings need an OpenAI or Gemini key.
+
+General-knowledge answers go beyond PRD §15, which limits Ask to saved memory. This was approved for this change, with the condition that general answers are always labelled and never cited as memory.
+
+### Memory list and statistics
+
+- `GET /api/v1/memory-items` accepts optional `source_type`, `status`, `date_from`, `date_to` (ISO 8601, `date_to` exclusive) and `q`, a metadata match on title, domain and URL, as well as `page`/`per_page` (max 100).
+- `GET /api/v1/dashboard/statistics?tz=Europe/Berlin` returns `total`, `today`, `this_week`, `by_source_type`, `by_status`, `ready_for_ai` (ready items that have searchable chunks), `daily` (the last 14 days, zeros included) and `last_captured_at`. All counts are real, user-scoped aggregates.
 
 ---
 
@@ -334,6 +379,9 @@ All canonical engineering specifications live in `docs/`:
 | File | Description |
 |---|---|
 | `docs/TASKS.md` | Live engineering progress tracker and deliverables |
+| `docs/qa-audit/TEAM_SETUP.md` | Team setup walkthrough and **troubleshooting** table |
+| `docs/DESIGN.md` | UI design system and redesign handoff (screenshots in `docs/design/`) |
+| `docs/Capture_Module_v2_Technical_Design.pdf` | Capture module v2 technical design |
 | `docs/RELEASE.md` | Production deployment, Chrome Web Store packaging, YouTube capture limits |
 | `docs/01_PRD_v2.1_FINAL.pdf` | Product Requirements Document |
 | `docs/02_SRS_v1.0.pdf` | Software Requirements Specification |

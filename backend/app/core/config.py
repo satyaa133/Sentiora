@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     # RAG retrieval tuning
     rag_top_k: int = 15
     rag_max_distance: float = 0.65
+    # A semantic-only hit is kept next to keyword hits only below this distance.
+    rag_strong_distance: float = 0.4
     # Maximum total characters of retrieved chunk content sent to the LLM.
     # Keeps prompt size predictable and within token budget.
     rag_max_context_chars: int = 12000
@@ -64,6 +66,8 @@ class Settings(BaseSettings):
     rate_limit_register_per_minute: int = 5
     rate_limit_chat_per_minute: int = 20
     rate_limit_chat_per_user_per_minute: int = 10
+    rate_limit_refresh_per_minute: int = 30
+    rate_limit_search_per_user_per_minute: int = 30
     failed_login_max_attempts: int = 5
     failed_login_base_backoff_seconds: int = 2
     failed_login_max_backoff_seconds: int = 60

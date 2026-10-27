@@ -42,6 +42,7 @@
 * Async RQ background worker job (`process_capture.py`) for content normalization, chunking, embeddings, and deduplication
 * Semantic search (`GET /api/v1/search`) with pgvector retrieval and lexical fallback
 * Ask Sentiora RAG chat (`POST /api/v1/chat`) with citations, insufficient-context handling, and a grounded local fallback when the LLM provider is missing or fails
+* Echo answer modes (memory / general / combined), hybrid retrieval with date and source scoping, validated citations, client-sent follow-up history; Timeline server filters and paging; Intelligence view backed by `GET /api/v1/dashboard/statistics`
 
 **Frontend (React + Vite + Tailwind)**
 * Vite + React + TypeScript initialized with Parchment glassmorphism design system

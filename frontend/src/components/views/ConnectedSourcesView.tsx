@@ -12,6 +12,7 @@ import {
   IconCheck,
   IconFile,
   IconLink,
+  IconMessage,
   IconPlus,
   IconSearch,
   IconUpload,
@@ -23,7 +24,6 @@ import type { MemoryItem, SourceType } from "../../types/memory";
 import { SOURCE_ICONS } from "../sourceIcons";
 import { useAuth } from "../../context/AuthContext";
 import { createMemoryItem } from "../../services/memoryService";
-import { parsePdf } from "../../utils/pdfParser";
 import {
   SOURCE_CATALOG,
   statusToUiLabel,
@@ -34,6 +34,8 @@ import {
 interface ConnectedSourcesViewProps {
   items?: MemoryItem[];
   onRefreshFeed?: () => void;
+  /** Opens Ask limited to one source type. */
+  onAskAboutSource?: (sourceType: SourceType, label: string) => void;
 }
 
 interface IntegrationChannel {
@@ -64,9 +66,17 @@ const MEMORY_SOURCE_MAP: Partial<Record<SourceId, SourceType>> = {
   youtube: "youtube",
 };
 
+// What the Ask scope chip says: the content, not the integration's name.
+const SCOPE_LABELS: Record<SourceType, string> = {
+  webpage: "Your web pages",
+  pdf: "Your PDFs",
+  youtube: "Your videos",
+};
+
 export default function ConnectedSourcesView({
   items = [],
   onRefreshFeed,
+  onAskAboutSource,
 }: ConnectedSourcesViewProps) {
   const { user, updateSourcePreference } = useAuth();
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
@@ -198,6 +208,8 @@ export default function ConnectedSourcesView({
 
         if (file.name.toLowerCase().endsWith(".pdf")) {
           try {
+            // PDF.js is large; load it only when a PDF is actually uploaded.
+            const { parsePdf } = await import("../../utils/pdfParser");
             const buffer = await file.arrayBuffer();
             const nodes = await parsePdf(buffer);
             if (nodes && nodes.length > 0) {
@@ -340,6 +352,19 @@ export default function ConnectedSourcesView({
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3 self-end sm:self-center">
+                  {onAskAboutSource && MEMORY_SOURCE_MAP[src.id] && (src.count ?? 0) > 0 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={<IconMessage size={16} />}
+                      onClick={() => {
+                        const type = MEMORY_SOURCE_MAP[src.id] as SourceType;
+                        onAskAboutSource(type, SCOPE_LABELS[type]);
+                      }}
+                    >
+                      Ask Echo about these
+                    </Button>
+                  ) : null}
                   <span
                     className={cx(
                       "text-[15px] font-medium",
