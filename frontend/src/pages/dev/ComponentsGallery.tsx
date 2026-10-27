@@ -99,6 +99,7 @@ function Showcase() {
     <div className="space-y-8">
       <Section title="Logo & Echo">
         <div className="flex flex-wrap items-center gap-6">
+          <Logo size={40} />
           <Logo />
           <Logo markOnly />
           <span className="rounded-btn bg-inverse px-3 py-2">

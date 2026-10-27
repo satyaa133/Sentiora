@@ -78,7 +78,7 @@ export default function Sidebar({
       )}
     >
       <div className={cx("mb-6", rail ? "flex justify-center" : "px-2")}>
-        {rail ? <LogoMark size={28} title="Sentiora" /> : <Logo size={22} />}
+        {rail ? <LogoMark size={28} title="sentiora" /> : <Logo size={22} />}
       </div>
 
       <nav aria-label="Main" className="flex-1">

@@ -23,6 +23,7 @@
     "build:shared": "npm run build --workspace shared",
     "package:extension": "node scripts/package-extension.mjs",
     "icons:extension": "node scripts/generate-extension-icons.mjs",
+    "og:image": "node scripts/generate-og-image.mjs",
     "lint": "npm run lint:frontend && npm run lint:extension && npm run lint:shared && npm run lint:backend",
     "lint:frontend": "npm run lint --workspace frontend",
     "lint:extension": "npm run lint --workspace extension",

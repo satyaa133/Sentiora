@@ -1,9 +1,6 @@
-<!-- Sentiora extension icon (DESIGN.md §4): Echo on a coral rounded square. Also the web app favicon. -->
+<!-- Sentiora icon (DESIGN.md §13): dotless ı with the coral dot, on graphite. Also the web favicon. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="28" fill="#FF5A3C"/>
-  <g transform="translate(64 64) scale(0.98) translate(-60 -65.75)">
-    <path d="M30 60 C30 22 90 22 90 60 V100 L80 92 L70 100 L60 92 L50 100 L40 92 L30 100 Z" fill="#111111"/>
-    <ellipse cx="50" cy="56" rx="6" ry="8" fill="#F4F4F3"/>
-    <ellipse cx="70" cy="56" rx="6" ry="8" fill="#F4F4F3"/>
-  </g>
+  <rect width="128" height="128" rx="28" fill="#111111"/>
+  <circle cx="64" cy="38" r="15" fill="#FF5A3C"/>
+  <rect x="53" y="59" width="22" height="44" rx="4" fill="#F4F4F3"/>
 </svg>
