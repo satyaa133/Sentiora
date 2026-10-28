@@ -55,7 +55,7 @@
 * Async RQ background worker job (`process_capture.py`) for content normalization, chunking, embeddings, and deduplication
 * Semantic search (`GET /api/v1/search`) with pgvector retrieval and lexical fallback
 * Ask Sentiora RAG chat (`POST /api/v1/chat`) with citations, insufficient-context handling, and a grounded local fallback when the LLM provider is missing or fails
-* Echo answer modes (memory / general / combined), hybrid retrieval with date and source scoping, validated citations, client-sent follow-up history; Timeline server filters and paging; Intelligence view backed by `GET /api/v1/dashboard/statistics`
+* Echo answer modes (memory / general / combined), hybrid retrieval with date and source scoping, validated citations, client-sent follow-up history; Ask rotates across every configured chat key (`OPENROUTER_API_KEY`, optional `OPENROUTER_API_KEY_2`, `GEMINI_API_KEY`, `OPENAI_API_KEY`) and skips an exhausted or rate-limited key for `LLM_KEY_COOLDOWN_SECONDS`; the Search page uses hybrid semantic search (`GET /api/v1/search`); unbuilt integrations show as "Coming soon"; Timeline server filters and paging; Intelligence view backed by `GET /api/v1/dashboard/statistics`
 
 **Frontend (React + Vite + Tailwind)**
 * Vite + React + TypeScript initialized with Parchment glassmorphism design system
@@ -98,7 +98,7 @@
   * Pytest coverage for capture, search, and Ask/RAG (including grounded fallback, multi-memory retrieval, and insufficient-context cases)
   * Vitest suites for dashboard, extension capture utilities, and shared packages
   * GitHub Actions CI running lint, typecheck, test, and build on pull requests
-* **Current blockers**: YouTube blocks caption downloads outside its player and its transcript panel fails in automated/signed-out browsers, so live transcript capture is unverified in a real signed-in profile. Brand icons, store assets and privacy policy need owner decisions. Semantic search needs `OPENAI_API_KEY` or `GEMINI_API_KEY` (OpenRouter is chat-only).
+* **Current blockers**: YouTube blocks caption downloads outside its player and its transcript panel fails in automated/signed-out browsers, so live transcript capture is unverified in a real signed-in profile. Brand icons, store assets and privacy policy need owner decisions. Semantic search needs `OPENAI_API_KEY` or `GEMINI_API_KEY` (OpenRouter is chat-only); the local `.env` has a Gemini key. The local OpenRouter key is out of credits, so Ask answers through the next configured key until it is topped up or `OPENROUTER_API_KEY_2` is set.
 * **Current branch**: `feat/echo-intelligence`
 
 ---
