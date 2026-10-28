@@ -123,7 +123,7 @@ export default function Login() {
       </div>
 
       <Button variant="secondary" fullWidth disabled>
-        Continue with Google
+        Continue with Google (coming soon)
       </Button>
     </AuthLayout>
   );

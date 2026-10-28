@@ -105,6 +105,40 @@ describe("Ask answer actions (DESIGN.md §5.5)", () => {
     expect(payload?.content).toContain("[1] Production Dockerfiles, a talk");
   });
 
+  it("renders '*' bullets as list items without stray asterisks", async () => {
+    vi.mocked(askSentiora).mockResolvedValue({
+      answer: "Revalidation works like this:\n\n*   **304 Response**: reuse the stored copy.",
+      citations: [],
+      insufficient_context: false,
+    });
+    render(<AskSentioraView items={[]} />);
+    fireEvent.change(screen.getByLabelText("Your question"), {
+      target: { value: "How does revalidation work?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+    const item = await screen.findByRole("listitem");
+    expect(item).toHaveTextContent("304 Response: reuse the stored copy.");
+    expect(item.textContent).not.toContain("*");
+    expect(within(item).getByText("304 Response").tagName).toBe("STRONG");
+  });
+
+  it("keeps fenced code as one block, with comments not turned into headings", async () => {
+    vi.mocked(askSentiora).mockResolvedValue({
+      answer: "Here it is:\n\n```python\ndef f(n):\n    # Base case\n    return 1\n```\nDone.",
+      citations: [],
+      insufficient_context: false,
+    });
+    const { container } = render(<AskSentioraView items={[]} />);
+    fireEvent.change(screen.getByLabelText("Your question"), {
+      target: { value: "Show code" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+    await screen.findByText("Done.");
+    const code = container.querySelector("pre code");
+    expect(code?.textContent).toBe("def f(n):\n    # Base case\n    return 1");
+    expect(screen.queryByRole("heading", { name: "Base case" })).toBeNull();
+  });
+
   it("says so when the note could not be saved", async () => {
     vi.mocked(createMemoryItem).mockRejectedValue(new Error("offline"));
     await askOnce();

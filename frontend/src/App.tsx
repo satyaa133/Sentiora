@@ -49,8 +49,9 @@ export default function App() {
                   </ProtectedRoute>
                 }
               >
+                {/* element={null}: the shell renders the view, not an <Outlet />. */}
                 {DASHBOARD_PATHS.map((path) => (
-                  <Route key={path} path={path} />
+                  <Route key={path} path={path} element={null} />
                 ))}
               </Route>
               {ComponentsGallery ? (

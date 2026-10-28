@@ -38,7 +38,7 @@ const PAGE_HEADINGS: Partial<Record<NavTab, { title: string; subtitle: string }>
     subtitle: "What your memory holds, what needs attention, and what to ask next.",
   },
   timeline: { title: "Timeline", subtitle: "Everything you've saved, newest first." },
-  search: { title: "Search", subtitle: "Find a memory by its title, text or address." },
+  search: { title: "Search", subtitle: "Find a memory by what it said, its title or its address." },
   sources: {
     title: "Sources",
     subtitle: "Choose what Sentiora saves, and upload files.",
@@ -196,7 +196,12 @@ export default function DashboardHome() {
         <main
           id="main"
           className={
-            isAsk ? "flex min-h-0 flex-1 flex-col" : "min-h-0 flex-1 overflow-y-auto"
+            // relative keeps absolutely positioned children (sr-only labels)
+            // inside the scroll area instead of stretching the document;
+            // pb-36 lets the end of every page scroll clear of the corner Echo.
+            isAsk
+              ? "relative flex min-h-0 flex-1 flex-col"
+              : "relative min-h-0 flex-1 overflow-y-auto pb-36"
           }
         >
           {activeTab === "dashboard" && (
@@ -275,7 +280,7 @@ export default function DashboardHome() {
                 />
               )}
 
-              {activeTab === "privacy" && <PrivacyCenterView items={items} />}
+              {activeTab === "privacy" && <PrivacyCenterView />}
 
               {activeTab === "settings" && <AccountSettingsView />}
             </div>

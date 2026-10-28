@@ -39,6 +39,7 @@ def get_statistics(
             },
         ) from None
     data = DashboardService(db).statistics(current_user.id, tz)
-    # Per-user data: only the browser may cache it, and only briefly.
-    response.headers["Cache-Control"] = "private, max-age=30"
+    # Per-user data that must reflect a save or delete at once: never cached.
+    # The app refetches only when its memories change, so caching saves nothing.
+    response.headers["Cache-Control"] = "private, no-store"
     return APIResponse(data=data, meta=response_meta(request))

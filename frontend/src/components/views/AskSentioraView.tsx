@@ -26,7 +26,7 @@ import {
   type AskTurn,
 } from "../../services/askService";
 import { browserTimeZone } from "../../services/dashboardService";
-import { safeHref } from "../../utils/safeHref";
+import { sourceHref } from "../../utils/safeHref";
 import { emitEcho } from "../echo/echoEvents";
 import { createMemoryItem } from "../../services/memoryService";
 import { videoJumpUrl, videoStart } from "../../utils/videoJump";
@@ -57,6 +57,8 @@ interface Message {
 
 const MEMORY_HEADING_RE = /^#{2,4}\s*From your saved memory\s*:?\s*$/im;
 const HISTORY_TURNS = 4;
+// A list item: optional indent, then "1.", "-", "•" or a lone "*", then space.
+const LIST_ITEM_RE = /^\s*(?:\d+\.|[-•*])\s+/;
 
 const MODE_LABELS: Record<AnswerMode, string> = {
   memory: "From your memory",
@@ -295,16 +297,45 @@ export default function AskSentioraView({
   }
 
   function originalHref(citation: AskCitation): string | undefined {
-    if (citation.source_available === false || citation.url.startsWith("file:"))
-      return undefined;
-    return safeHref(citation.url);
+    if (citation.source_available === false) return undefined;
+    return sourceHref(citation.url);
   }
 
   function renderFormattedMessage(text: string, withCitations: boolean) {
-    const lines = text.split("\n");
+    // Fenced code blocks first: their lines keep indentation and are never
+    // read as headings ("# comment") or bullets.
+    const blocks: Array<{ code: string } | { line: string }> = [];
+    let fence: string[] | null = null;
+    for (const line of text.split("\n")) {
+      if (/^\s*```/.test(line)) {
+        if (fence) {
+          blocks.push({ code: fence.join("\n") });
+          fence = null;
+        } else {
+          fence = [];
+        }
+      } else if (fence) {
+        fence.push(line);
+      } else {
+        blocks.push({ line });
+      }
+    }
+    if (fence) blocks.push({ code: fence.join("\n") });
+
     return (
       <div className="space-y-2 text-[17px] leading-relaxed text-fg">
-        {lines.map((line, idx) => {
+        {blocks.map((block, idx) => {
+          if ("code" in block) {
+            return (
+              <pre
+                key={idx}
+                className="overflow-x-auto rounded-btn bg-raised p-4 font-mono text-[15px] leading-normal"
+              >
+                <code>{block.code}</code>
+              </pre>
+            );
+          }
+          const { line } = block;
           if (!line.trim() || /^-{3,}$/.test(line.trim())) return null;
 
           if (/^#{1,4}\s+/.test(line)) {
@@ -315,17 +346,11 @@ export default function AskSentioraView({
             );
           }
 
-          if (
-            /^\d+\.\s+/.test(line) ||
-            line.startsWith("• ") ||
-            line.startsWith("- ")
-          ) {
+          // "1. ", "- ", "• " and "* " bullets (Gemini uses "*   **Term:**").
+          if (LIST_ITEM_RE.test(line)) {
             return (
               <li key={idx} className="ml-5 list-disc">
-                {formatInlineText(
-                  line.replace(/^\d+\.\s+/, "").replace(/^[•-]\s*/, ""),
-                  withCitations,
-                )}
+                {formatInlineText(line.replace(LIST_ITEM_RE, ""), withCitations)}
               </li>
             );
           }

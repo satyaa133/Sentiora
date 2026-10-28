@@ -386,7 +386,8 @@ def test_dashboard_statistics_counts_real_data_per_user() -> None:
 
     resp = client.get("/api/v1/dashboard/statistics", params={"tz": "UTC"}, headers=headers)
     assert resp.status_code == 200, resp.text
-    assert "private" in resp.headers["cache-control"]
+    # Never served from the browser cache, so counts update right after a delete.
+    assert resp.headers["cache-control"] == "private, no-store"
     stats = resp.json()["data"]
     assert stats["total"] == 3
     assert stats["today"] == 2

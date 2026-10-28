@@ -221,7 +221,7 @@ export default function SignUp() {
       </div>
 
       <Button variant="secondary" fullWidth disabled>
-        Continue with Google
+        Continue with Google (coming soon)
       </Button>
     </AuthLayout>
   );

@@ -24,7 +24,7 @@ import {
   type SourceFilter,
 } from "../../types/memory";
 import { formatExtractedContent } from "../../utils/contentFormatter";
-import { safeHref } from "../../utils/safeHref";
+import { sourceHref } from "../../utils/safeHref";
 
 type RangeFilter = "all" | "today" | "7d" | "30d";
 type StatusFilter = "all" | ItemStatus;
@@ -292,7 +292,7 @@ function TimelineRow({
   onSelect: () => void;
   onAsk: () => void;
 }) {
-  const href = item.url.startsWith("file:") ? undefined : safeHref(item.url);
+  const href = sourceHref(item.url);
   const meta = [
     item.domain,
     item.word_count > 0 ? `${item.word_count.toLocaleString()} words` : null,
