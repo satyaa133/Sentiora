@@ -1,0 +1,6 @@
+<!-- Sentiora icon (DESIGN.md §13): dotless ı with the coral dot, on graphite. Also the web favicon. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="28" fill="#111111"/>
+  <circle cx="64" cy="38" r="15" fill="#FF5A3C"/>
+  <rect x="53" y="59" width="22" height="44" rx="4" fill="#F4F4F3"/>
+</svg>

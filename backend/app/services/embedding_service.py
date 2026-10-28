@@ -1,4 +1,4 @@
-"""OpenAI embeddings for MemoryChunk vectors. Never writes synthetic vectors."""
+"""OpenAI/Gemini embeddings for MemoryChunk vectors. Never writes synthetic vectors."""
 
 from __future__ import annotations
 
@@ -10,9 +10,6 @@ from app.core.config import get_settings
 from app.services.embedding_port import EmbeddingPort
 
 logger = logging.getLogger(__name__)
-
-EMBEDDING_DIMENSIONS = 1536
-
 
 class EmbeddingNotConfiguredError(RuntimeError):
     pass
@@ -38,11 +35,15 @@ class OpenAIEmbeddingAdapter(EmbeddingPort):
 class GeminiEmbeddingAdapter(EmbeddingPort):
     def __init__(self) -> None:
         from google import genai
+        from google.genai import types
 
         settings = get_settings()
         if not settings.gemini_api_key:
             raise EmbeddingNotConfiguredError("GEMINI_API_KEY is not configured.")
-        self._client = genai.Client(api_key=settings.gemini_api_key)
+        self._client = genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options=types.HttpOptions(timeout=30_000),  # ms; matches OpenAI
+        )
         self._model = settings.gemini_embedding_model
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -72,16 +73,46 @@ class GeminiEmbeddingAdapter(EmbeddingPort):
         return vectors
 
 
-def get_embedding_adapter() -> EmbeddingPort | None:
+EMBEDDING_PROVIDERS = ("auto", "openai", "gemini", "none")
+
+
+def resolve_embedding_provider() -> str | None:
+    """Return "openai", "gemini", or None (lexical-only search)."""
     settings = get_settings()
+    choice = (settings.embedding_provider or "auto").strip().lower()
+    if choice not in EMBEDDING_PROVIDERS:
+        logger.error(
+            "Unknown EMBEDDING_PROVIDER=%r; expected one of %s. Semantic search disabled.",
+            choice,
+            ", ".join(EMBEDDING_PROVIDERS),
+        )
+        return None
+    if choice == "none":
+        return None
+    if choice == "openai":
+        return "openai" if settings.openai_api_key else None
+    if choice == "gemini":
+        return "gemini" if settings.gemini_api_key else None
+    # auto
+    if settings.llm_provider == "gemini":
+        return "gemini" if settings.gemini_api_key else None
+    if settings.llm_provider == "openai":
+        return "openai" if settings.openai_api_key else None
+    if settings.openai_api_key:
+        return "openai"
+    if settings.gemini_api_key:
+        return "gemini"
+    return None
+
+
+def get_embedding_adapter() -> EmbeddingPort | None:
     try:
-        if settings.llm_provider == "gemini":
-            if not settings.gemini_api_key:
-                return None
+        provider = resolve_embedding_provider()
+        if provider == "gemini":
             return GeminiEmbeddingAdapter()
-        if not settings.openai_api_key:
-            return None
-        return OpenAIEmbeddingAdapter()
+        if provider == "openai":
+            return OpenAIEmbeddingAdapter()
+        return None
     except Exception:
         logger.exception("Failed to initialize embedding adapter")
         return None

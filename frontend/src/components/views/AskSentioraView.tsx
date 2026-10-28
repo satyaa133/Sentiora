@@ -1,13 +1,44 @@
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
+import {
+  Button,
+  Chip,
+  Echo,
+  IconArrowUp,
+  IconCheck,
+  IconClose,
+  IconCopy,
+  IconNote,
+  IconExternalLink,
+  IconPlus,
+  IconRefresh,
+  cx,
+  sourceKind,
+} from "@shared/ui";
 import type { MemoryItem } from "../../types/memory";
-import { askSentiora, AskApiError, type AskCitation, type AskRequest } from "../../services/askService";
-
+import {
+  askSentiora,
+  AskApiError,
+  type AnswerMode,
+  type AskCitation,
+  type AskLaunch,
+  type AskRequest,
+  type AskScope,
+  type AskTurn,
+} from "../../services/askService";
+import { browserTimeZone } from "../../services/dashboardService";
+import { sourceHref } from "../../utils/safeHref";
+import { emitEcho } from "../echo/echoEvents";
+import { createMemoryItem } from "../../services/memoryService";
+import { videoJumpUrl, videoStart } from "../../utils/videoJump";
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
-  initialQuery?: string;
-  focusMemoryId?: string;
-  onClearInitialQuery?: () => void;
+  /** A question and/or scope sent from another view ("Ask Echo about this"). */
+  launch?: AskLaunch | null;
+  /** Called once the launch has been copied into the view's own state. */
+  onLaunchConsumed?: () => void;
+  /** Opens the memory drawer; returns false when the memory isn't loaded. */
+  onOpenMemory?: (memoryId: string) => boolean;
 }
 
 interface Message {
@@ -15,239 +46,352 @@ interface Message {
   sender: "user" | "ai";
   text: string;
   citations?: AskCitation[];
+  mode?: AnswerMode;
+  followups?: string[];
   isNotFound?: boolean;
   isError?: boolean;
   usedFallback?: boolean;
+  /** The question to resend when an error answer offers Retry. */
+  retryQuestion?: string;
+}
+
+const MEMORY_HEADING_RE = /^#{2,4}\s*From your saved memory\s*:?\s*$/im;
+const HISTORY_TURNS = 4;
+// A list item: optional indent, then "1.", "-", "•" or a lone "*", then space.
+const LIST_ITEM_RE = /^\s*(?:\d+\.|[-•*])\s+/;
+
+const MODE_LABELS: Record<AnswerMode, string> = {
+  memory: "From your memory",
+  general: "General knowledge · not from your saved memory",
+  combined: "General knowledge and your saved memory",
+};
+
+let messageCounter = 0;
+const nextId = () => `m${Date.now()}-${messageCounter++}`;
+
+function clip(title: string, limit = 40) {
+  return title.length > limit ? `${title.slice(0, limit - 1).trimEnd()}…` : title;
 }
 
 export default function AskSentioraView({
   items = [],
-  initialQuery,
-  focusMemoryId,
-  onClearInitialQuery,
+  launch,
+  onLaunchConsumed,
+  onOpenMemory,
 }: AskSentioraViewProps) {
   const [input, setInput] = useState("");
-  const [hasProcessedInitial, setHasProcessedInitial] = useState(false);
+  const [scope, setScope] = useState<AskScope | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isWriting, setIsWriting] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Save as note (DESIGN.md §5.5): per answer, saving / saved / failed.
+  const [noteState, setNoteState] = useState<
+    Record<string, "saving" | "saved" | "failed">
+  >({});
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Effects can run twice (StrictMode); act on each launch only once.
+  const handledLaunchId = useRef<number | null>(null);
 
   const readyItems = items.filter(
-    (item) => item.status === "ready" && (item.word_count > 0 || Boolean(item.content?.trim())),
+    (item) =>
+      item.status === "ready" && (item.word_count > 0 || Boolean(item.content?.trim())),
   );
-  const isIndexing = items.some((item) => item.status === "pending" || item.status === "processing");
+  const isIndexing = items.some(
+    (item) => item.status === "pending" || item.status === "processing",
+  );
 
-  const initialWelcomeText = readyItems.length > 0
-    ? `Hello! I am **Sentiora AI**. I can synthesize answers strictly based on your **${readyItems.length} saved memory source${readyItems.length > 1 ? "s" : ""}**:\n\n${readyItems.slice(0, 3).map((i) => `• **"${i.title}"**`).join("\n")}\n\nAsk me anything about your saved archive!`
-    : isIndexing
-      ? "Hello! I am **Sentiora AI**. Your latest captures are still being indexed. Ask again once they show as Ready."
-      : "Hello! I am **Sentiora AI**. You currently have no saved memories in your vault. Connect browser sources or save pages to enable AI Q&A.";
+  const introText =
+    readyItems.length > 0
+      ? `Echo answers from your ${readyItems.length} saved ${readyItems.length === 1 ? "memory" : "memories"} and links the sources. General questions get a general answer, labelled as such.`
+      : isIndexing
+        ? "Your latest saves are still being indexed. Until then Echo can answer general questions."
+        : "Nothing saved yet, so Echo answers general questions only. Save a page with the extension to ask about it here.";
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      sender: "ai",
-      text: initialWelcomeText,
-    },
-  ]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Starters cover each answer mode, built from real saves where possible.
+  const starters = [
+    readyItems[0] ? `Summarize “${clip(readyItems[0].title)}”` : null,
+    readyItems[1] ? `What are the key ideas in “${clip(readyItems[1].title)}”?` : null,
+    items.length > 0 ? "What did I capture this week?" : null,
+    "Explain recursion with a short example",
+  ].filter((prompt): prompt is string => Boolean(prompt));
 
-  const firstTitle = readyItems[0]?.title || "";
-  const secondTitle = readyItems[1]?.title || "";
+  // Copy a launch (question + scope) into local state, then release it, so the
+  // scope survives until the user removes it.
+  useEffect(() => {
+    if (!launch || handledLaunchId.current === launch.id) return;
+    handledLaunchId.current = launch.id;
+    const nextScope = launch.scope !== undefined ? (launch.scope ?? null) : scope;
+    setScope(nextScope);
+    if (launch.question && launch.autoSend) {
+      void handleSendQuery(launch.question, nextScope);
+    } else if (launch.question) {
+      setInput(launch.question);
+    }
+    inputRef.current?.focus();
+    onLaunchConsumed?.();
+    // Runs once per launch; handleSendQuery and scope are read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launch, onLaunchConsumed]);
 
-  // Dynamic suggested prompt chips from real items
-  const suggestedPrompts = readyItems.length > 0 && firstTitle
-    ? [
-        `What is "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}" about?`,
-        `Summarize "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}"`,
-        secondTitle
-          ? `Key details from "${secondTitle.length > 22 ? secondTitle.slice(0, 22) + "..." : secondTitle}"`
-          : `What design & topic details are saved?`,
-      ]
-    : [
-        "What web sources can I capture?",
-        "How does Sentiora memory vault work?",
-        "How to save YouTube transcripts?",
-      ];
+  // Staged status while waiting: retrieval first, then generation.
+  useEffect(() => {
+    if (!isGenerating) {
+      setIsWriting(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setIsWriting(true), 1500);
+    return () => window.clearTimeout(timer);
+  }, [isGenerating]);
 
-  const dynamicPlaceholder = readyItems.length > 0 && firstTitle
-    ? `Ask about "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}" or your ${readyItems.length} saved source${readyItems.length > 1 ? "s" : ""}...`
-    : "Ask a question about your saved articles, notes, or YouTube transcripts...";
+  function historyFor(previous: Message[]): AskTurn[] {
+    return previous
+      .filter((msg) => !msg.isError)
+      .slice(-HISTORY_TURNS)
+      .map((msg) => ({
+        role: msg.sender === "user" ? "user" : "assistant",
+        content: msg.text.slice(0, 4000),
+      }));
+  }
 
-  async function handleSendQuery(queryText: string) {
-    if (!queryText.trim()) return;
+  async function handleSendQuery(queryText: string, scopeOverride?: AskScope | null) {
+    const question = queryText.trim();
+    if (!question || isGenerating) return;
+    const activeScope = scopeOverride !== undefined ? scopeOverride : scope;
 
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: queryText,
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
+    const history = historyFor(messages);
+    setMessages((prev) => [...prev, { id: nextId(), sender: "user", text: question }]);
     setInput("");
     setIsGenerating(true);
-
-    if (items.length === 0) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: "ai",
-          text: "Your vault is empty. Capture a webpage, PDF, or YouTube video before asking Sentiora.",
-          isNotFound: true,
-        },
-      ]);
-      setIsGenerating(false);
-      return;
-    }
-
-    if (readyItems.length === 0 && isIndexing) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: "ai",
-          text: "Your captures are still being indexed. Ask again once they show as Ready.",
-          isNotFound: true,
-        },
-      ]);
-      setIsGenerating(false);
-      return;
-    }
+    emitEcho({ type: "ask" });
 
     try {
-      const payload: AskRequest = { question: queryText.trim() };
-      if (focusMemoryId) {
-        payload.memory_id = focusMemoryId;
-      }
+      const payload: AskRequest = { question, tz: browserTimeZone() };
+      if (history.length > 0) payload.history = history;
+      if (activeScope?.memoryId) payload.memory_id = activeScope.memoryId;
+      if (activeScope?.sourceType) payload.source_type = activeScope.sourceType;
       const result = await askSentiora(payload);
       setMessages((prev) => [
         ...prev,
         {
-          id: (Date.now() + 1).toString(),
+          id: nextId(),
           sender: "ai",
           text: result.answer,
           citations: result.citations,
+          mode: result.mode ?? "memory",
+          followups: result.suggested_followups ?? [],
           isNotFound: result.insufficient_context,
           usedFallback: Boolean(result.used_fallback),
         },
       ]);
+      emitEcho({
+        type: "answer",
+        status: result.insufficient_context ? "not_found" : "ready",
+        cited: (result.citations?.length ?? 0) > 0,
+      });
     } catch (err) {
-      let errorText =
-        "Sentiora could not reach the server. Confirm the backend is running, then try again.";
-      let isError = true;
-
-      if (err instanceof AskApiError) {
-        if (err.status === 401 || err.status === 403) {
-          errorText =
-            "Your session expired or you are not signed in. Please sign in again to ask questions.";
-        } else if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
-          errorText =
-            err.message ||
-            "Sentiora AI is not configured, and no saved memory could be used to answer.";
-        } else if (err.code === "ASK_LLM_FAILED") {
-          errorText =
-            err.message ||
-            "The language model failed while answering. Your memories were found; try again in a moment.";
-        } else if (err.code === "ASK_SYSTEM_FAILED" || err.status === 502) {
-          errorText =
-            err.message ||
-            "The Sentiora server had a problem answering this question. This is not an AI configuration issue.";
-        } else if (err.status >= 500) {
-          errorText =
-            err.message ||
-            "The Sentiora server had a problem. This is not an AI configuration issue.";
-        } else {
-          errorText = err.message || errorText;
-        }
-      }
-
       setMessages((prev) => [
         ...prev,
         {
-          id: (Date.now() + 1).toString(),
+          id: nextId(),
           sender: "ai",
-          text: errorText,
-          isError,
+          text: errorMessage(err),
+          isError: true,
+          retryQuestion: question,
         },
       ]);
+      emitEcho({ type: "answer", status: "error", cited: false });
     } finally {
       setIsGenerating(false);
     }
   }
 
-  useEffect(() => {
-    if (initialQuery && !hasProcessedInitial && !isGenerating) {
-      setHasProcessedInitial(true);
-      setInput(initialQuery); // Just set the input instead of auto-sending to let user edit, or auto-send. The prompt says "pre-filled with the context query".
-      if (onClearInitialQuery) {
-        onClearInitialQuery();
-      }
-    }
-  }, [initialQuery, hasProcessedInitial, isGenerating, onClearInitialQuery]);
-
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    handleSendQuery(input);
+    void handleSendQuery(input);
+  }
+
+  /**
+   * Keep an answer as a note memory, the same way the extension saves notes:
+   * POST /memory-items with a sentiora.app/notes URL. The question, the answer
+   * and its sources become the note's text.
+   */
+  async function handleSaveNote(message: Message) {
+    if (noteState[message.id] === "saving" || noteState[message.id] === "saved") return;
+    const index = messages.findIndex((msg) => msg.id === message.id);
+    const question =
+      [...messages.slice(0, index)].reverse().find((msg) => msg.sender === "user")
+        ?.text ?? "";
+    const sources = (message.citations ?? []).map(
+      (citation, i) => `[${i + 1}] ${citation.title} (${citation.url})`,
+    );
+    setNoteState((prev) => ({ ...prev, [message.id]: "saving" }));
+    try {
+      await createMemoryItem({
+        source_type: "webpage",
+        title: clip(`Note: ${question || "Ask Sentiora answer"}`, 120),
+        url: `https://sentiora.app/notes/${Date.now()}`,
+        content: [
+          question && `Q: ${question}`,
+          message.text,
+          sources.length ? `Sources:\n${sources.join("\n")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      });
+      setNoteState((prev) => ({ ...prev, [message.id]: "saved" }));
+    } catch {
+      setNoteState((prev) => ({ ...prev, [message.id]: "failed" }));
+    }
   }
 
   function handleCopy(id: string, text: string) {
-    navigator.clipboard.writeText(text);
+    void navigator.clipboard?.writeText(text);
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    window.setTimeout(() => setCopiedId(null), 2000);
   }
 
-  function renderFormattedMessage(text: string) {
-    const lines = text.split("\n");
-    return (
-      <div className="space-y-1.5 leading-relaxed text-xs">
-        {lines.map((line, idx) => {
-          if (!line.trim()) return <div key={idx} className="h-1" />;
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void handleSendQuery(input);
+    }
+  }
 
-          if (line.startsWith("## ")) {
+  function startNewChat() {
+    setMessages([]);
+    setScope(null);
+    setInput("");
+    inputRef.current?.focus();
+  }
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView?.({ block: "end" });
+  }, [messages, isGenerating]);
+
+  const firstQuestion = messages.find((msg) => msg.sender === "user")?.text;
+  const conversationTitle = firstQuestion ? clip(firstQuestion, 60) : "Ask Sentiora";
+  const latestCitations =
+    [...messages].reverse().find((msg) => msg.sender === "ai" && msg.citations?.length)
+      ?.citations ?? [];
+  const lastAiId = [...messages].reverse().find((msg) => msg.sender === "ai")?.id;
+
+  function citationMeta(citation: AskCitation) {
+    const kind = sourceKind(citation.source_type);
+    const label = kind === "video" ? "Video" : kind === "pdf" ? "PDF" : "Web";
+    const saved = citation.captured_at
+      ? new Date(citation.captured_at).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })
+      : null;
+    return [
+      label,
+      citation.domain,
+      citation.page_number ? `p. ${citation.page_number}` : null,
+      saved,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function originalHref(citation: AskCitation): string | undefined {
+    if (citation.source_available === false) return undefined;
+    return sourceHref(citation.url);
+  }
+
+  function renderFormattedMessage(text: string, withCitations: boolean) {
+    // Fenced code blocks first: their lines keep indentation and are never
+    // read as headings ("# comment") or bullets.
+    const blocks: Array<{ code: string } | { line: string }> = [];
+    let fence: string[] | null = null;
+    for (const line of text.split("\n")) {
+      if (/^\s*```/.test(line)) {
+        if (fence) {
+          blocks.push({ code: fence.join("\n") });
+          fence = null;
+        } else {
+          fence = [];
+        }
+      } else if (fence) {
+        fence.push(line);
+      } else {
+        blocks.push({ line });
+      }
+    }
+    if (fence) blocks.push({ code: fence.join("\n") });
+
+    return (
+      <div className="space-y-2 text-[17px] leading-relaxed text-fg">
+        {blocks.map((block, idx) => {
+          if ("code" in block) {
             return (
-              <h3 key={idx} className="font-serif font-bold text-sm text-ink-900 mt-2 mb-1">
-                {formatInlineText(line.replace(/^##\s+/, ""))}
+              <pre
+                key={idx}
+                className="overflow-x-auto rounded-btn bg-raised p-4 font-mono text-[15px] leading-normal"
+              >
+                <code>{block.code}</code>
+              </pre>
+            );
+          }
+          const { line } = block;
+          if (!line.trim() || /^-{3,}$/.test(line.trim())) return null;
+
+          if (/^#{1,4}\s+/.test(line)) {
+            return (
+              <h3 key={idx} className="pt-2 text-[17px] font-semibold text-fg">
+                {formatInlineText(line.replace(/^#{1,4}\s+/, ""), withCitations)}
               </h3>
             );
           }
 
-          if (line.startsWith("### ")) {
+          // "1. ", "- ", "• " and "* " bullets (Gemini uses "*   **Term:**").
+          if (LIST_ITEM_RE.test(line)) {
             return (
-              <h4 key={idx} className="font-serif font-bold text-xs sm:text-sm text-ink-900 mt-2 mb-1">
-                {formatInlineText(line.replace("### ", ""))}
-              </h4>
-            );
-          }
-
-          if (/^\d+\.\s+/.test(line) || line.startsWith("• ") || line.startsWith("- ")) {
-            return (
-              <li key={idx} className="ml-4 list-disc text-ink-800">
-                {formatInlineText(line.replace(/^\d+\.\s+/, "").replace(/^[•-]\s*/, ""))}
+              <li key={idx} className="ml-5 list-disc">
+                {formatInlineText(line.replace(LIST_ITEM_RE, ""), withCitations)}
               </li>
             );
           }
 
-          return (
-            <p key={idx} className="text-ink-800">
-              {formatInlineText(line)}
-            </p>
-          );
+          return <p key={idx}>{formatInlineText(line, withCitations)}</p>;
         })}
       </div>
     );
   }
 
-  function formatInlineText(text: string) {
-    const parts = text.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g);
+  function formatInlineText(text: string, withCitations: boolean) {
+    const parts = text.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*|\[\d+\])/g);
     return parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {
-        return <strong key={i} className="font-bold text-ink-900">{part.slice(2, -2)}</strong>;
+        return (
+          <strong key={i} className="font-semibold">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      // Citation pills only where real citations exist; elsewhere "[1]" is text.
+      if (withCitations && /^\[\d+\]$/.test(part)) {
+        return (
+          <span
+            key={i}
+            className="mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded bg-accent-soft px-1 align-[2px] font-mono text-xs font-semibold text-accent-soft-fg"
+          >
+            <span className="sr-only">source </span>
+            {part.slice(1, -1)}
+          </span>
+        );
       }
       if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
-        return <em key={i} className="italic text-ink-600">{part.slice(1, -1)}</em>;
+        return <em key={i}>{part.slice(1, -1)}</em>;
       }
       if (part.startsWith("`") && part.endsWith("`")) {
         return (
-          <code key={i} className="px-1.5 py-0.5 rounded bg-parchment-100 font-mono text-[11px] text-moss-700 font-semibold border border-parchment-200/60">
+          <code
+            key={i}
+            className="rounded bg-raised px-1.5 py-0.5 font-mono text-[15px]"
+          >
             {part.slice(1, -1)}
           </code>
         );
@@ -256,145 +400,397 @@ export default function AskSentioraView({
     });
   }
 
-  return (
-    <div className="flex flex-col h-[calc(100vh-140px)] max-w-4xl bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl shadow-xl overflow-hidden font-sans">
-      {/* Header */}
-      <div className="p-4 border-b border-parchment-200/80 bg-parchment-50/90 backdrop-blur-md flex items-center justify-between">
-        <div>
-          <h2 className="font-serif font-bold text-base text-ink-900">Ask Sentiora RAG Assistant</h2>
-          <p className="text-[11px] text-ink-500">
-            {readyItems.length > 0
-              ? `Synthesizing answers strictly from your ${readyItems.length} indexed memory source${readyItems.length !== 1 ? "s" : ""}.`
-              : isIndexing
-                ? "Waiting for captures to finish indexing before answers can be grounded."
-                : "No indexed memories yet. Capture a page to enable grounded answers."}
-            {isIndexing && readyItems.length > 0 ? " Newer captures are still processing." : ""}
-          </p>
-        </div>
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-moss-100/90 backdrop-blur-xs text-moss-700 text-[10px] font-bold shadow-xs">
-          <span className="w-1.5 h-1.5 rounded-full bg-moss-600 animate-pulse" />
-          {readyItems.length > 0
-            ? `RAG Engine Active (${readyItems.length} Sources)`
-            : isIndexing
-              ? "Indexing memories"
-              : "No indexed sources"}
-        </span>
-      </div>
-
-      {/* Suggested Prompt Chips */}
-      <div className="px-4 py-2.5 bg-parchment-50/70 backdrop-blur-xs border-b border-parchment-200/80 flex items-center gap-2 overflow-x-auto text-xs">
-        <span className="text-ink-500 font-semibold shrink-0">Try asking:</span>
-        {suggestedPrompts.map((prompt, idx) => (
-          <button
-            key={idx}
-            onClick={() => handleSendQuery(prompt)}
-            className="px-3 py-1 rounded-lg bg-white/80 hover:bg-white backdrop-blur-xs border border-parchment-200/80 hover:border-moss-600 hover:text-moss-600 text-ink-700 text-[11px] font-medium transition-all hover:scale-105 whitespace-nowrap shrink-0 shadow-xs"
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
-
-      {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-parchment-0/50 backdrop-blur-xs">
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
-          >
-            <div
-              className={`p-4 rounded-2xl text-xs leading-relaxed space-y-2 relative group transition-all ${
-                msg.sender === "user"
-                  ? "max-w-xl bg-moss-600/95 text-white rounded-br-none shadow-md"
-                  : msg.isError
-                  ? "max-w-2xl bg-rose-50/90 border border-rose-200/90 text-rose-950 rounded-bl-none shadow-card"
-                  : msg.isNotFound
-                  ? "max-w-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 rounded-bl-none shadow-card"
-                  : "max-w-2xl bg-white/90 backdrop-blur-md border border-parchment-200/80 text-ink-900 rounded-bl-none shadow-card hover:shadow-md"
-              }`}
-            >
-              {msg.sender === "ai" && (
-                <div className="flex items-center justify-between border-b border-parchment-200/60 pb-2 mb-2 text-[11px]">
-                  <span className="flex items-center gap-1 font-serif font-bold text-moss-700">
-                    <span>✨</span> Sentiora AI Assistant
-                  </span>
-                  <button
-                    onClick={() => handleCopy(msg.id, msg.text)}
-                    className="text-[10px] text-ink-500 hover:text-moss-600 font-semibold px-2 py-0.5 rounded bg-parchment-100/60 hover:bg-parchment-100 transition-colors"
-                  >
-                    {copiedId === msg.id ? "✓ Copied" : "📋 Copy"}
-                  </button>
-                </div>
-              )}
-
-              {msg.sender === "user" ? (
-                <p className="whitespace-pre-wrap">{msg.text}</p>
-              ) : (
-                <>
-                  {msg.usedFallback && (
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">
-                      Answered from your saved memory (AI provider unavailable)
-                    </p>
-                  )}
-                  {renderFormattedMessage(msg.text)}
-                </>
-              )}
-
-              {/* Citations */}
-              {msg.citations && msg.citations.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-parchment-200/80 space-y-1.5">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500">
-                    Source Citations:
-                  </p>
-                  {msg.citations.map((c, i) => (
-                    <a
-                      key={i}
-                      href={c.source_available === false || c.url.startsWith("file:") ? undefined : c.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between p-2 rounded-lg bg-parchment-50/90 backdrop-blur-xs border border-parchment-200/80 text-[11px] text-moss-600 hover:underline font-medium transition-colors"
-                    >
-                      <span className="truncate">
-                        [{i + 1}] {c.title}
-                        {c.page_number ? ` · p.${c.page_number}` : ""}
-                        {c.source_available === false || c.url.startsWith("file:") ? " · original unavailable" : ""}
-                      </span>
-                      <svg className="w-3 h-3 text-moss-600 shrink-0 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </a>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {isGenerating && (
-          <div className="flex items-center gap-2 text-xs text-ink-500 p-3 bg-white/90 backdrop-blur-md border border-parchment-200/80 rounded-2xl w-fit shadow-card">
-            <span className="w-2 h-2 rounded-full bg-moss-600 animate-ping" />
-            Synthesizing answer from your personal memory archive...
-          </div>
-        )}
-      </div>
-
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-parchment-200/80 bg-white/90 backdrop-blur-md flex gap-3">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={dynamicPlaceholder}
-          className="flex-1 bg-parchment-50/80 backdrop-blur-xs border border-parchment-200/80 rounded-xl px-4 py-2.5 text-xs text-ink-900 placeholder-ink-500 focus:outline-none focus:border-moss-600 focus:bg-white font-medium transition-colors"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || isGenerating}
-          className="px-5 py-2.5 bg-moss-600 hover:bg-moss-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm"
+  /** Combined answers: general explanation, then a visibly separate memory part. */
+  function renderAnswer(msg: Message) {
+    const withCitations = Boolean(msg.citations?.length);
+    const match = MEMORY_HEADING_RE.exec(msg.text);
+    if (!match) return renderFormattedMessage(msg.text, withCitations);
+    const general = msg.text.slice(0, match.index);
+    const memory = msg.text.slice(match.index + match[0].length);
+    return (
+      <div className="space-y-4">
+        {general.trim() ? renderFormattedMessage(general, false) : null}
+        <section
+          aria-label="From your saved memory"
+          className="rounded-btn border-l-4 border-accent bg-raised px-4 py-3"
         >
-          Send Query
-        </button>
-      </form>
+          <h3 className="font-mono text-eyebrow uppercase text-muted">
+            From your saved memory
+          </h3>
+          <div className="mt-2">{renderFormattedMessage(memory, withCitations)}</div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderSourceCard(citation: AskCitation, index: number) {
+    const href = originalHref(citation);
+    const start = videoStart(citation.heading);
+    const jumpHref = href && start ? videoJumpUrl(href, start.seconds) : null;
+    return (
+      <li
+        key={`${citation.memory_id}-${index}`}
+        className="rounded-card border border-line bg-surface p-4"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-accent px-1.5 font-mono text-xs font-semibold text-on-accent">
+            {index + 1}
+          </span>
+          <span className="truncate font-mono text-xs text-muted">
+            {citationMeta(citation)}
+          </span>
+        </div>
+        <p className="mt-2 font-semibold leading-snug text-fg">{citation.title}</p>
+        {citation.heading && citation.heading !== citation.title ? (
+          <p className="mt-2 rounded-btn bg-raised px-3 py-2 text-[15px] text-muted">
+            {citation.heading}
+          </p>
+        ) : citation.excerpt ? (
+          <p className="mt-2 line-clamp-3 text-[15px] text-muted">{citation.excerpt}</p>
+        ) : null}
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+          {onOpenMemory ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (!onOpenMemory(citation.memory_id) && href)
+                  window.open(href, "_blank", "noopener");
+              }}
+              className="inline-flex min-h-touch items-center text-[15px] font-semibold text-link hover:underline"
+            >
+              Open memory
+            </button>
+          ) : null}
+          {href ? (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-touch items-center gap-1 text-[15px] text-muted hover:text-fg hover:underline"
+            >
+              Original
+              <IconExternalLink size={14} />
+              <span className="sr-only">(opens in a new tab)</span>
+            </a>
+          ) : (
+            <span className="inline-flex min-h-touch items-center text-[15px] text-muted">
+              Original unavailable
+            </span>
+          )}
+          {jumpHref && start ? (
+            <a
+              href={jumpHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-touch items-center gap-1 text-[15px] font-semibold text-link hover:underline"
+            >
+              Jump to {start.label}
+              <span className="sr-only">(opens the video in a new tab)</span>
+            </a>
+          ) : null}
+        </div>
+      </li>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1">
+      <section aria-labelledby="ask-title" className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6">
+          <Echo state="idle" size={32} still className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-eyebrow uppercase text-muted">Echo</p>
+            <h1
+              id="ask-title"
+              className="truncate text-[17px] font-semibold leading-tight text-fg"
+            >
+              {conversationTitle}
+            </h1>
+          </div>
+          {messages.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              leadingIcon={<IconPlus size={16} />}
+              onClick={startNewChat}
+            >
+              New chat
+            </Button>
+          ) : null}
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[780px] space-y-8 px-4 py-8 sm:px-6">
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center pt-6 text-center sm:pt-12">
+                <Echo state={readyItems.length > 0 ? "idle" : "faded"} size={88} />
+                <h2 className="mt-5 font-display text-[28px] font-bold tracking-tight text-fg">
+                  Ask Echo
+                </h2>
+                <p className="mt-2 max-w-md text-[17px] text-muted">{introText}</p>
+                <ul
+                  aria-label="Suggested questions"
+                  className="mt-6 flex w-full max-w-lg flex-col gap-2"
+                >
+                  {starters.map((prompt) => (
+                    <li key={prompt}>
+                      <button
+                        type="button"
+                        onClick={() => void handleSendQuery(prompt)}
+                        className="w-full rounded-card border border-line bg-surface px-4 py-3 text-left text-[16px] text-fg transition-colors hover:bg-raised"
+                      >
+                        {prompt}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {messages.map((msg) =>
+              msg.sender === "user" ? (
+                <div key={msg.id} className="flex justify-end">
+                  <p className="max-w-[85%] whitespace-pre-wrap rounded-card border border-inverse-border bg-inverse px-4 py-3 text-[16px] text-on-inverse">
+                    {msg.text}
+                  </p>
+                </div>
+              ) : (
+                <article key={msg.id} aria-label="Echo's answer" className="flex gap-3">
+                  <Echo
+                    state={msg.isError || msg.isNotFound ? "faded" : "happy"}
+                    size={36}
+                    still
+                    className="mt-0.5 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1 space-y-3">
+                    {msg.isError ? null : (
+                      <p className="font-mono text-eyebrow uppercase text-muted">
+                        {msg.usedFallback
+                          ? "From your saved memories, without the AI model"
+                          : msg.isNotFound
+                            ? "Not found in your saved memory"
+                            : MODE_LABELS[msg.mode ?? "memory"]}
+                      </p>
+                    )}
+                    {msg.isError ? (
+                      <div
+                        role="alert"
+                        className="space-y-3 rounded-btn bg-accent-soft px-4 py-3"
+                      >
+                        <p className="text-[16px] text-accent-soft-fg">{msg.text}</p>
+                        {msg.retryQuestion ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            leadingIcon={<IconRefresh size={16} />}
+                            disabled={isGenerating}
+                            onClick={() =>
+                              void handleSendQuery(msg.retryQuestion ?? "")
+                            }
+                          >
+                            Try again
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : msg.isNotFound ? (
+                      <div className="text-muted [&_*]:text-muted">
+                        {renderFormattedMessage(
+                          msg.text,
+                          Boolean(msg.citations?.length),
+                        )}
+                      </div>
+                    ) : (
+                      renderAnswer(msg)
+                    )}
+
+                    {msg.citations && msg.citations.length > 0 ? (
+                      <ol aria-label="Sources" className="space-y-3 xl:hidden">
+                        {msg.citations.map((citation, index) =>
+                          renderSourceCard(citation, index),
+                        )}
+                      </ol>
+                    ) : null}
+
+                    {!msg.isError ? (
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leadingIcon={
+                            copiedId === msg.id ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconCopy size={16} />
+                            )
+                          }
+                          onClick={() => handleCopy(msg.id, msg.text)}
+                        >
+                          {copiedId === msg.id ? "Copied" : "Copy answer"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leadingIcon={
+                            noteState[msg.id] === "saved" ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconNote size={16} />
+                            )
+                          }
+                          loading={noteState[msg.id] === "saving"}
+                          disabled={noteState[msg.id] === "saved"}
+                          onClick={() => void handleSaveNote(msg)}
+                        >
+                          {noteState[msg.id] === "saved"
+                            ? "Saved as note"
+                            : "Save as note"}
+                        </Button>
+                        {noteState[msg.id] === "failed" ? (
+                          <p role="alert" className="w-full text-[15px] text-link">
+                            Could not save this note. Try again.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {msg.id === lastAiId && !isGenerating && msg.followups?.length ? (
+                      <div
+                        role="group"
+                        aria-label="Follow-up questions"
+                        className="flex flex-wrap gap-2"
+                      >
+                        {msg.followups.map((followup) => (
+                          <Chip
+                            key={followup}
+                            onClick={() => void handleSendQuery(followup)}
+                          >
+                            {followup}
+                          </Chip>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ),
+            )}
+
+            {isGenerating && (
+              <div
+                role="status"
+                className="flex items-center gap-3 text-[16px] text-muted"
+              >
+                <Echo state="saving" size={36} still />
+                {isWriting ? "Writing the answer…" : "Looking through your memories…"}
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        <form
+          data-echo-dock=""
+          onSubmit={handleSubmit}
+          className="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-4 pt-2 sm:px-6"
+        >
+          {scope ? (
+            <div className="mb-2 flex items-center gap-2 text-[15px] text-muted">
+              <span>Asking about</span>
+              <span className="inline-flex max-w-[70%] items-center gap-1 rounded-full border border-line bg-surface py-1 pl-3 pr-1 text-fg">
+                <span className="truncate">{scope.label}</span>
+                <button
+                  type="button"
+                  onClick={() => setScope(null)}
+                  aria-label={`Stop limiting answers to ${scope.label}`}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-raised hover:text-fg"
+                >
+                  <IconClose size={14} />
+                </button>
+              </span>
+            </div>
+          ) : null}
+          <div className="flex items-end gap-2 rounded-panel border border-line bg-surface p-2 pl-4 shadow-pop focus-within:border-accent">
+            <label htmlFor="ask-input" className="sr-only">
+              Your question
+            </label>
+            <textarea
+              id="ask-input"
+              ref={inputRef}
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              placeholder={
+                messages.length > 0 ? "Ask a follow-up..." : "Ask Echo anything..."
+              }
+              className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent py-2.5 text-[17px] text-fg placeholder:text-muted focus:outline-none"
+            />
+            <button
+              type="submit"
+              aria-label="Send question"
+              disabled={!input.trim() || isGenerating}
+              className={cx(
+                "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-btn bg-accent text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              <IconArrowUp size={20} />
+            </button>
+          </div>
+          <p className="mt-2 text-center text-[15px] text-muted">
+            Memory answers cite your saves. General answers are labelled as general
+            knowledge.
+          </p>
+        </form>
+      </section>
+
+      <aside
+        aria-labelledby="sources-used"
+        className="hidden w-[340px] shrink-0 overflow-y-auto border-l border-line bg-surface p-5 xl:block"
+      >
+        <h2 id="sources-used" className="text-[18px] font-semibold text-fg">
+          Sources used
+        </h2>
+        {latestCitations.length > 0 ? (
+          <ol className="mt-4 space-y-3 [&>li]:bg-bg">
+            {latestCitations.map((citation, index) =>
+              renderSourceCard(citation, index),
+            )}
+          </ol>
+        ) : (
+          <p className="mt-2 text-[15px] text-muted">
+            Sources for the latest memory answer show up here.
+          </p>
+        )}
+      </aside>
     </div>
   );
+}
+
+function errorMessage(err: unknown): string {
+  if (!(err instanceof AskApiError)) {
+    return "Echo could not reach the server. Confirm the backend is running, then try again.";
+  }
+  if (err.status === 401 || err.status === 403) {
+    return "Your session expired or you are not signed in. Please sign in again to ask questions.";
+  }
+  if (err.status === 429) {
+    return "You're asking faster than the limit allows. Wait a moment, then try again.";
+  }
+  if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
+    return (
+      err.message ||
+      "Sentiora AI is not configured, and no saved memory could be used to answer."
+    );
+  }
+  if (err.code === "ASK_LLM_FAILED") {
+    return (
+      err.message || "The language model failed while answering. Try again in a moment."
+    );
+  }
+  if (err.code === "ASK_SYSTEM_FAILED" || err.status === 502) {
+    return err.message || "The Sentiora server had a problem answering this question.";
+  }
+  if (err.status >= 500) {
+    return err.message || "The Sentiora server had a problem.";
+  }
+  return err.message || "Echo could not answer right now.";
 }

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session as DBSession
 from datetime import datetime, UTC
 from app.models.memory_item import ItemStatus, MemoryItem
 from app.repositories.chunk_repository import ChunkRepository
-from app.repositories.memory_repository import MemoryRepository
+from app.repositories.memory_repository import MemoryFilters, MemoryRepository
 from app.schemas.memory_item import (
     MemoryItemCreate,
     MemoryItemListResponse,
@@ -131,9 +131,15 @@ class MemoryService:
         return MemoryItemResponse.model_validate(item)
 
     def list_items(
-        self, user_id: UUID, page: int = 1, per_page: int = 20
+        self,
+        user_id: UUID,
+        page: int = 1,
+        per_page: int = 20,
+        filters: MemoryFilters | None = None,
     ) -> MemoryItemListResponse:
-        items, total = self.repo.list_for_user(user_id, page=page, per_page=per_page)
+        items, total = self.repo.list_for_user(
+            user_id, page=page, per_page=per_page, filters=filters
+        )
         return MemoryItemListResponse(
             items=[MemoryItemResponse.model_validate(i) for i in items],
             total=total,

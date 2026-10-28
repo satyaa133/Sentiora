@@ -1,0 +1,145 @@
+# Sentiora production stack (single host). Local validation:
+#   cp .env.production.example .env.production   # fill in real secrets
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Only the web container publishes a port (WEB_PORT, default 8080). PostgreSQL,
+# Redis and the API stay on the internal network. TLS should terminate in front
+# of the web container. pgAdmin is opt-in (profile "admin") and bound to
+# localhost only.
+
+name: sentiora-prod
+
+x-backend-env: &backend-env
+  APP_ENVIRONMENT: production
+  APP_NAME: ${APP_NAME:-Sentiora}
+  APP_VERSION: ${APP_VERSION:-0.1.0}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentiora}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-sentiora}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required (32+ chars)}
+  CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required, e.g. ["https://app.example.com"]}
+  # The web container's fixed address on the internal network (see below).
+  TRUSTED_PROXY_IPS: '["172.30.0.10"]'
+  LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_CHAT_MODEL: ${OPENROUTER_CHAT_MODEL:-anthropic/claude-haiku-4.5}
+
+services:
+  postgres:
+    build:
+      context: ./infrastructure/postgres
+    image: sentiora-postgres-pgvector:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sentiora}
+      POSTGRES_USER: ${POSTGRES_USER:-sentiora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
+    volumes:
+      - redis_data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+
+  migrate:
+    build:
+      context: ./backend
+    image: sentiora-backend:prod
+    command: ["sh", "-c", "python -c \"import psycopg,os; c=psycopg.connect(os.environ['DATABASE_URL'].replace('+psycopg','')); c.execute('CREATE EXTENSION IF NOT EXISTS vector'); c.commit()\" && alembic upgrade head"]
+    environment: *backend-env
+    networks: [internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    image: sentiora-backend:prod
+    restart: unless-stopped
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${API_WORKERS:-2}"]
+    environment: *backend-env
+    networks: [internal]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: sentiora-backend:prod
+    restart: unless-stopped
+    command: ["python", "-m", "app.workers.worker"]
+    environment: *backend-env
+    networks: [internal]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Healthy when this container's RQ worker is registered with Redis.
+      test: ["CMD", "python", "-c", "import socket,sys; from redis import Redis; from rq import Worker; from app.core.config import get_settings; ws=Worker.all(connection=Redis.from_url(get_settings().redis_url)); sys.exit(0 if any(w.hostname==socket.gethostname() for w in ws) else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    image: sentiora-web:prod
+    restart: unless-stopped
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-8080}:8080"
+    networks:
+      internal:
+        ipv4_address: 172.30.0.10
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  pgadmin:
+    profiles: ["admin"]
+    image: dpage/pgadmin4:8
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-}
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5051}:80"
+    networks: [internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+networks:
+  internal:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  postgres_data:
+  redis_data:

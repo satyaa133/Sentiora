@@ -3,7 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Sentiora</title>
+    <meta
+      name="description"
+      content="Sentiora saves the articles, PDFs and videos you read, then answers your questions from them, with the sources linked."
+    />
+    <meta name="theme-color" content="#111111" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- Link previews (DESIGN.md §10). Image: npm run og:image. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Sentiora" />
+    <meta property="og:title" content="Sentiora: remember everything you read" />
+    <meta
+      property="og:description"
+      content="Saves the articles, PDFs and videos you read, then answers your questions with sources."
+    />
+    <meta property="og:url" content="%VITE_APP_URL%/" />
+    <meta property="og:image" content="%VITE_APP_URL%/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Echo the ghost next to the headline: Remember everything you read." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap"
+    />
+    <!-- Applies the saved light/dark choice before first paint (external: CSP is script-src 'self'). -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

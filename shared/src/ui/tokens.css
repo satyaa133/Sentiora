@@ -1,0 +1,360 @@
+/*
+ * Sentiora design tokens (Graphite & Coral). Source of truth: docs/DESIGN.md §2–3.
+ *
+ * Theme follows the OS by default. Setting data-theme="light" | "dark" on <html>
+ * overrides it (see theme.ts). The same attribute on any element scopes a theme to
+ * that subtree (used by /dev/components to show both themes side by side).
+ * Components must use these variables, never raw hex.
+ */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #f4f4f3;
+  --surface: #ffffff;
+  --surface-raised: #ebebe8;
+  --text: #111111;
+  --text-muted: #5f5f5c;
+  --border: #e5e5e2;
+  --border-soft: #f0f0ee;
+  --accent: #ff5a3c;
+  --accent-hover: #e0472b;
+  --on-accent: #111111;
+  --link: #c93520;
+  --accent-soft: #ffe3dd;
+  --accent-soft-text: #a12a18;
+
+  /* Inverse surfaces: graphite panels, user bubbles, the onboarding rail. */
+  --inverse: #111111;
+  --on-inverse: #f4f4f3;
+  --on-inverse-muted: #a8a8a4;
+  /* Edge for inverse fills; only visible in dark mode, where --inverse is close to --surface. */
+  --inverse-border: #111111;
+
+  --shadow-float: 0 30px 60px -30px rgba(17, 17, 17, 0.25);
+  --shadow-pop: 0 12px 32px -12px rgba(17, 17, 17, 0.18);
+  --overlay: rgba(17, 17, 17, 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #111111;
+    --surface: #1a1a1a;
+    --surface-raised: #1f1f1f;
+    --text: #f4f4f3;
+    --text-muted: #a8a8a4;
+    --border: #2a2a2a;
+    --border-soft: #222222;
+    --link: #ff5a3c;
+    --accent-soft: #3b2420;
+    --accent-soft-text: #ff8a73;
+
+    --inverse: #1f1f1f;
+    --on-inverse: #f4f4f3;
+    --on-inverse-muted: #a8a8a4;
+    --inverse-border: #333333;
+
+    --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
+    --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+    --overlay: rgba(0, 0, 0, 0.65);
+  }
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #111111;
+  --surface: #1a1a1a;
+  --surface-raised: #1f1f1f;
+  --text: #f4f4f3;
+  --text-muted: #a8a8a4;
+  --border: #2a2a2a;
+  --border-soft: #222222;
+  --link: #ff5a3c;
+  --accent-soft: #3b2420;
+  --accent-soft-text: #ff8a73;
+
+  --inverse: #1f1f1f;
+  --on-inverse: #f4f4f3;
+  --on-inverse-muted: #a8a8a4;
+  --inverse-border: #333333;
+
+  --shadow-float: 0 30px 60px -30px rgba(0, 0, 0, 0.7);
+  --shadow-pop: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  --overlay: rgba(0, 0, 0, 0.65);
+}
+
+/* Source-type badges keep the same pair in both modes (DESIGN.md §2). */
+:root {
+  --badge-web-bg: #ffe3dd;
+  --badge-web-text: #a12a18;
+  --badge-pdf-bg: #fdf0d9;
+  --badge-pdf-text: #7a4b00;
+  --badge-video-bg: #fbe4e1;
+  --badge-video-text: #8a2a1e;
+  --badge-note-bg: #e6f2d0;
+  --badge-note-text: #3d5410;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --duration: 200ms;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", sans-serif;
+  --font-display:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+[data-theme] {
+  color: var(--text);
+}
+
+html {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  line-height: 1.55;
+}
+
+/*
+ * Touch targets are at least 44px (DESIGN.md §2) without changing how compact
+ * controls look: an invisible, centred hit area grows to 44 x 44.
+ * Loaded before Tailwind utilities, so an explicit "absolute" still wins.
+ */
+.touch-target {
+  position: relative;
+}
+
+.touch-target::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background-color: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+/* Echo motion (DESIGN.md §4): 4px bob on a 3s loop; quick float on save. */
+@keyframes echo-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes echo-float {
+  0% {
+    transform: translateY(6px);
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.echo-bob {
+  animation: echo-bob 3s ease-in-out infinite;
+}
+
+.echo-float {
+  animation: echo-float 250ms var(--ease) both;
+}
+
+/* Echo props and mouths (DESIGN.md §8.3). SVG parts scale around their own box. */
+.echo-chomp-mouth,
+.echo-prop-search,
+.echo-prop-heart,
+.echo-prop-think {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes echo-chomp {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.15);
+  }
+}
+
+.echo-chomp-mouth {
+  animation: echo-chomp 240ms ease-in-out infinite;
+}
+
+@keyframes echo-search-sweep {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate(-6px, -3px) rotate(-8deg);
+  }
+}
+
+.echo-prop-search {
+  animation: echo-search-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes echo-heart-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.18);
+  }
+}
+
+.echo-prop-heart {
+  animation: echo-heart-pulse 900ms ease-in-out infinite;
+}
+
+@keyframes echo-think-dots {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.echo-prop-think {
+  animation: echo-think-dots 1.2s ease-in-out infinite;
+}
+
+/*
+ * Logo wordmark (DESIGN.md §13): "sentiora" with a coral dot on the dotless ı.
+ * The wave hops the letters 60ms apart on a springy ease; the dot hops higher
+ * and squashes on landing. Logo.tsx adds .logo-waving for one cycle.
+ */
+.logo-wordmark {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.logo-letter {
+  display: inline-block;
+}
+
+.logo-i {
+  position: relative;
+}
+
+.logo-dot {
+  position: absolute;
+  left: 50%;
+  /* The ı stem starts ~0.34em below the box top (line-height 1); leave a small gap. */
+  top: -0.03em;
+  width: 0.3em;
+  height: 0.3em;
+  margin-left: -0.15em;
+  border-radius: 999px;
+  background-color: var(--accent);
+}
+
+@keyframes logo-hop {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  35% {
+    transform: translateY(-0.16em);
+  }
+  65% {
+    transform: translateY(0.02em);
+  }
+}
+
+@keyframes logo-dot-hop {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-0.45em) scale(0.92, 1.1);
+  }
+  62% {
+    transform: translateY(0.03em) scale(1.25, 0.75);
+  }
+  80% {
+    transform: translateY(0) scale(0.96, 1.04);
+  }
+}
+
+.logo-waving .logo-letter {
+  animation: logo-hop 700ms cubic-bezier(0.3, 1.6, 0.5, 1) both;
+  animation-delay: calc(var(--logo-i) * 60ms);
+}
+
+.logo-waving .logo-dot {
+  animation: logo-dot-hop 900ms cubic-bezier(0.3, 1.6, 0.5, 1) both;
+  animation-delay: 360ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-waving .logo-letter,
+  .logo-waving .logo-dot {
+    animation: none;
+  }
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.drawer-in {
+  animation: drawer-in 220ms var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

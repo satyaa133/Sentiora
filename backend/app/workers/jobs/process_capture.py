@@ -2,15 +2,15 @@ import logging
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.memory_chunk import MemoryChunk
-from app.models.memory_item import ItemStatus, MemoryItem
+from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.repositories.chunk_repository import ChunkRepository
-from app.services.chunking import chunk_content
+from app.services.chunking import chunk_content, chunk_transcript
 from app.services.content_normalizer import (
     calculate_reading_time,
     calculate_word_count,
@@ -47,7 +47,8 @@ def _find_existing_ready(db: DBSession, user_id: UUID, url: str, current_id: UUI
             MemoryItem.id != current_id,
         )
     )
-    return db.execute(stmt).scalar_one_or_none()
+    # Several READY rows can share a URL after races; reuse the oldest one.
+    return db.execute(stmt.order_by(MemoryItem.created_at).limit(1)).scalars().first()
 
 
 def _looks_like_stub(text: str) -> bool:
@@ -69,6 +70,34 @@ def _vector_dim() -> int:
     return get_settings().embedding_dimensions
 
 
+def _claim(db: DBSession, item_id: UUID) -> bool:
+    """Atomically take ownership of a pending (or abandoned processing) item.
+
+    The worker, the API's inline fallback and stale recovery can all reach the
+    same item; only the caller whose UPDATE matches may process it, so chunks are
+    never written twice concurrently and READY/FAILED items are not reprocessed.
+    """
+    now = datetime.now(UTC)
+    result = db.execute(
+        update(MemoryItem)
+        .where(
+            MemoryItem.id == item_id,
+            MemoryItem.deleted_at.is_(None),
+            or_(
+                MemoryItem.status == ItemStatus.pending,
+                and_(
+                    MemoryItem.status == ItemStatus.processing,
+                    MemoryItem.updated_at < now - STALE_AFTER,
+                ),
+            ),
+        )
+        .values(status=ItemStatus.processing, processing_error=None, updated_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    db.commit()
+    return getattr(result, "rowcount", 0) == 1
+
+
 def process_capture(memory_item_id_str: str) -> None:
     """Normalize, chunk, optionally embed, then mark READY or FAILED."""
     logger.info("memory_id=%s stage=start", memory_item_id_str)
@@ -79,6 +108,14 @@ def process_capture(memory_item_id_str: str) -> None:
         if not item:
             logger.error("memory_id=%s stage=load reason=not_found", memory_item_id_str)
             return
+        if not _claim(db, item_id):
+            logger.info(
+                "memory_id=%s stage=skip reason=not_claimable status=%s",
+                memory_item_id_str,
+                item.status,
+            )
+            return
+        db.refresh(item)
 
         existing = _find_existing_ready(db, item.user_id, item.url, item.id)
         if existing:
@@ -142,7 +179,12 @@ def process_capture(memory_item_id_str: str) -> None:
             )
 
         logger.info("memory_id=%s stage=chunk words=%d", memory_item_id_str, word_count)
-        drafts = chunk_content(normalized, item.source_type, title=item.title)
+        drafts = []
+        if item.source_type == SourceType.youtube:
+            # Timestamped transcript segments keep their time range per chunk.
+            drafts = chunk_transcript(item.structured_content, title=item.title)
+        if not drafts:
+            drafts = chunk_content(normalized, item.source_type, title=item.title)
         if not drafts:
             raise CaptureProcessingError("Chunking produced no searchable units.")
 

@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import apiClient from "../services/apiClient";
+import apiClient, { refreshAccessToken } from "../services/apiClient";
 import {
   broadcastAuthLogout,
   broadcastAuthSync,
@@ -148,13 +148,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!token && refreshToken) {
         try {
-          const resp = await apiClient.post<{
-            success: boolean;
-            data: { access_token: string; refresh_token: string };
-          }>("/auth/refresh-token", { refresh_token: refreshToken });
-          const { access_token, refresh_token: newRefreshToken } = resp.data.data;
-          setAuthTokens(access_token, newRefreshToken);
-          token = access_token;
+          // Shared with the 401 interceptor so StrictMode's double effect run
+          // (or a concurrent 401) cannot rotate the same refresh token twice.
+          token = await refreshAccessToken();
         } catch {
           clearSession();
           setIsLoading(false);

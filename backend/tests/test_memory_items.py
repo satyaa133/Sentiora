@@ -279,3 +279,30 @@ def test_capture_v2_empty_content_fallback(clean_db: None) -> None:
     assert data["content"] == "Fallback Heading\nFallback paragraph content."
     assert data["raw_content_length"] > 0
 
+
+
+def test_capture_requires_url_and_drops_unsafe_image_urls(clean_db: None) -> None:
+    headers = _auth_headers("test_url_rules@example.com")
+    base = {
+        "source_type": "webpage",
+        "title": "Image URL rules",
+        "content": "An ordinary article body that is long enough to be saved as a memory.",
+    }
+
+    missing = client.post("/api/v1/memory-items", json={**base, "url": "   "}, headers=headers)
+    assert missing.status_code == 422
+
+    resp = client.post(
+        "/api/v1/memory-items",
+        json={
+            **base,
+            "url": "https://docs.example.com/image-rules",
+            "favicon_url": "javascript:alert(1)",
+            "thumbnail_url": "https://img.example.com/thumb.png",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    data = resp.json()["data"]
+    assert data["favicon_url"] is None
+    assert data["thumbnail_url"] == "https://img.example.com/thumb.png"
