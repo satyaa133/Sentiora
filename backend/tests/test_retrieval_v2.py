@@ -265,3 +265,20 @@ def test_standalone_question_with_history_is_not_rewritten() -> None:
 
     question = "How do I avoid overflow when computing the midpoint in binary search?"
     assert rewrite_query(question, HISTORY, explode) == question
+
+
+def test_two_word_keyword_only_hit_needs_both_words_when_vectors_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.workers.jobs.process_capture.get_embedding_adapter", lambda: ConceptAdapter())
+    headers, user_id = _user("retr_two_words@example.com")
+    garden = _save(headers, "garden", "Growing tomatoes", GARDEN_TEXT)
+
+    # Vector leg active: "trellis" alone is not enough for "trellis australia".
+    monkeypatch.setattr("app.services.retrieval_service.get_embedding_adapter", lambda: ConceptAdapter())
+    assert _retrieve(user_id, "trellis australia") == []
+    assert _retrieve(user_id, "tomato trellis")[0].memory_id == garden
+
+    # Keyword-only search (no embeddings) keeps the lenient one-word rule.
+    monkeypatch.setattr("app.services.retrieval_service.get_embedding_adapter", lambda: None)
+    assert _retrieve(user_id, "trellis australia")[0].memory_id == garden

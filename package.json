@@ -50,7 +50,8 @@
     "verify:youtube-extension": "node scripts/verify-youtube-extension.mjs",
     "compose:up": "docker compose up -d postgres redis",
     "compose:down": "docker compose down",
-    "check:secrets": "node scripts/check-client-secrets.mjs"
+    "check:secrets": "node scripts/check-client-secrets.mjs",
+    "eval:rag": "node scripts/run-python.mjs -m scripts.eval_rag"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",

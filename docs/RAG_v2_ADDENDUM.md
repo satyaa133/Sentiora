@@ -269,3 +269,39 @@ inlines it (as for React Router).
 Also in R7 (backend): the follow-up rewrite call only runs when the question
 looks referential ("it", "that one", "another" …) or has five words or fewer;
 standalone questions skip the extra model round trip.
+
+## R8 — Evaluation
+
+`scripts/eval-rag/questions.json` holds the questions: `id`, `question`,
+optional `history` (earlier turns, for vague follow-ups) and `expected`
+(substrings of memory titles that count as a hit; `[]` means memory does not
+cover it and retrieval should return nothing). The 21 shipped questions are
+placeholders written from the dev account's saved titles, including three vague
+follow-ups and two not-covered questions; replace or extend them with real ones.
+
+```bash
+npm run eval:rag -- --user you@example.com
+npm run eval:rag -- --user you@example.com --sweep 0.2,0.25,0.3,0.35 --quiet --json eval.json
+```
+
+`backend/scripts/eval_rag.py` runs the same path Ask uses (follow-up rewrite →
+hybrid search → selection), prints each question's rewritten query and chosen
+chunks (similarity, full-text rank, title, time range or page, text), and
+reports hit@k, MRR, noise (share of returned chunks outside the expected
+memories) and reject (not-covered questions that returned nothing).
+`--sweep` re-runs retrieval at several `RAG_MIN_SIMILARITY` values with cached
+query embeddings; `--no-llm-rewrite` uses the heuristic follow-up rewrite.
+
+**Baseline on the dev data (41 memories, k = 6):** hit@6 1.00, MRR 0.96,
+reject 0.50 → 1.00 after one fix, noise 0.58.
+
+- The only miss was "What is the capital of Australia?", matched by a
+  keyword-only hit on the single word "capital". When the vector leg is active,
+  a keyword-only hit on a two-word question now needs both words.
+- `RAG_MIN_SIMILARITY` stays at **0.25**: the sweep from 0.20 to 0.40 changes
+  noise by at most 0.04 and nothing else, and correct chunks score as low as
+  0.30, so raising it only risks recall.
+- Noise comes from the remaining top-6 slots holding neighbouring material
+  (other DSA videos for a DSA question). The answer prompt ignores unrelated
+  sources, and the metric counts related-but-unlisted memories as noise, so it
+  overstates the problem.

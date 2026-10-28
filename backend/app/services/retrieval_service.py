@@ -191,6 +191,8 @@ class RetrievalService:
     def __init__(self, db: DBSession) -> None:
         self.db = db
         self.settings = get_settings()
+        # True once a query embedding succeeded (the vector leg is active).
+        self._vector_ready = False
 
     def retrieve_relevant_memories(
         self,
@@ -208,6 +210,7 @@ class RetrievalService:
         covered by the user's memory).
         """
         scope = _Scope(source_type, memory_id, date_from, date_to)
+        self._vector_ready = False
         document = needs_document_context(query)
         limit = top_k or int(self._setting("rag_final_k", 6))
         if document:
@@ -375,6 +378,7 @@ class RetrievalService:
         query_vector = vectors[0]
         if not query_vector:
             return []
+        self._vector_ready = True
         # Only compare against vectors from the model that embedded the query.
         model_id = getattr(adapter, "model_id", None)
         try:
@@ -446,6 +450,11 @@ class RetrievalService:
             self.db.rollback()
             return []
         needed = _min_token_matches(len(terms))
+        if self._vector_ready and len(terms) == 2:
+            # Meaning is covered by the vector leg, so a keyword-only hit on a
+            # two-word question needs both words ("capital australia" must not
+            # match a page that only says "capital").
+            needed = 2
         return [
             self._to_retrieved(chunk, item, None, lexical=True, rank=float(score))
             for chunk, item, score, hits in rows
