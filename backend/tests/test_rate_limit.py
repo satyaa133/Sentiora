@@ -54,3 +54,33 @@ def test_failed_login_backoff_is_temporary(monkeypatch) -> None:  # type: ignore
     throttled = client.post("/api/v1/auth/login", json={"email": email, "password": "Password123!"})
     assert throttled.status_code == 429
     assert throttled.json()["error"]["code"] == "AUTH_LOGIN_THROTTLED"
+
+
+def test_refresh_rate_limit_returns_429(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    settings = get_settings()
+    monkeypatch.setattr(settings, "rate_limit_refresh_per_minute", 2)
+    for _ in range(2):
+        client.post("/api/v1/auth/refresh-token", json={"refresh_token": "not-a-token"})
+    blocked = client.post("/api/v1/auth/refresh-token", json={"refresh_token": "not-a-token"})
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "RATE_LIMITED"
+
+
+def test_search_rate_limit_returns_429(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    settings = get_settings()
+    monkeypatch.setattr(settings, "rate_limit_search_per_user_per_minute", 2)
+    email = "search_limit@example.com"
+    password = "MemoryPassword123!"
+    client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": password, "full_name": "Search"},
+    )
+    token = client.post("/api/v1/auth/login", json={"email": email, "password": password}).json()[
+        "data"
+    ]["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    for _ in range(2):
+        assert client.get("/api/v1/search?q=binary", headers=headers).status_code == 200
+    blocked = client.get("/api/v1/search?q=binary", headers=headers)
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["code"] == "RATE_LIMITED"

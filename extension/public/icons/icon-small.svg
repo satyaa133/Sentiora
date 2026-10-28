@@ -1,0 +1,5 @@
+<!-- Sentiora icon, small sizes (16 and 32 px): the coral dot alone, so it stays crisp. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <rect width="128" height="128" rx="26" fill="#111111"/>
+  <circle cx="64" cy="64" r="34" fill="#FF5A3C"/>
+</svg>

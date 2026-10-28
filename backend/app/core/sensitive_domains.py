@@ -72,19 +72,19 @@ def is_sensitive_url(url: str, source_type: SourceType | str | None = None) -> b
     parsed = urlparse(raw)
     host = (parsed.hostname or "").lower()
     path = parsed.path or "/"
-    port = parsed.port
-
-    if _is_synthetic_manual_url(path):
-        return False
-
-    if "sentiora" in host:
-        return True
-
-    if host in {"localhost", "127.0.0.1"} and port in {5173, 8000, 5050}:
+    try:
+        port = parsed.port
+    except ValueError:
+        # Malformed port: refuse rather than fail the request.
         return True
 
     for domain in DEFAULT_BLOCKED_DOMAINS:
         if host == domain or host.endswith("." + domain):
             return True
 
-    return False
+    if "sentiora" in host:
+        # Only Sentiora's own synthetic note URLs may be saved from its hosts.
+        return not _is_synthetic_manual_url(path)
+
+    # The local Sentiora app/API/pgAdmin ports are never captured.
+    return host in {"localhost", "127.0.0.1"} and port in {5173, 8000, 5050}

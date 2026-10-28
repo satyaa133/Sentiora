@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -5,6 +6,7 @@ from fastapi.testclient import TestClient
 from app.core.db import SessionLocal
 from app.main import app
 from app.models.memory_chunk import MemoryChunk
+from app.models.memory_item import ItemStatus, MemoryItem
 from app.workers.jobs.process_capture import process_capture
 
 client = TestClient(app)
@@ -156,7 +158,7 @@ def test_process_capture_fails_when_extraction_is_empty() -> None:
     assert ready["processing_error"]
 
 
-def test_process_capture_fails_when_embeddings_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_process_capture_stays_ready_when_embeddings_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class BoomAdapter:
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             raise RuntimeError("quota exceeded")
@@ -179,8 +181,12 @@ def test_process_capture_fails_when_embeddings_fail(monkeypatch) -> None:  # typ
     item_id = create_resp.json()["data"]["id"]
     process_capture(item_id)
     ready = client.get(f"/api/v1/memory-items/{item_id}", headers=headers).json()["data"]
-    assert ready["status"] == "failed"
-    assert "Embedding" in (ready["processing_error"] or "")
+    # Full-text search still works; the backfill embeds it later.
+    assert ready["status"] == "ready"
+    assert not ready["processing_error"]
+    with SessionLocal() as db:
+        chunks = db.query(MemoryChunk).filter(MemoryChunk.memory_id == UUID(item_id)).all()
+    assert chunks and all(c.embedding is None and c.embedding_model is None for c in chunks)
 
 
 def test_youtube_transcript_becomes_ready_chunks() -> None:
@@ -234,3 +240,108 @@ def test_pdf_text_becomes_ready_chunks() -> None:
         assert len(chunks) >= 1
     finally:
         db.close()
+
+
+def _set_state(item_id: str, status: str, age: timedelta) -> None:
+
+    db = SessionLocal()
+    try:
+        item = db.query(MemoryItem).filter(MemoryItem.id == UUID(item_id)).one()
+        item.status = ItemStatus(status)
+        db.commit()
+        # Set after the status commit so an onupdate hook cannot overwrite it.
+        db.query(MemoryItem).filter(MemoryItem.id == item.id).update(
+            {MemoryItem.updated_at: datetime.now(UTC) - age}, synchronize_session=False
+        )
+        db.commit()
+    finally:
+        db.close()
+
+def _status_and_chunks(item_id: str) -> tuple[str, int]:
+
+    db = SessionLocal()
+    try:
+        item = db.query(MemoryItem).filter(MemoryItem.id == UUID(item_id)).one()
+        count = db.query(MemoryChunk).filter(MemoryChunk.memory_id == item.id).count()
+        return str(item.status), count
+    finally:
+        db.close()
+
+def _new_capture(email: str, url: str) -> str:
+    headers = _auth_headers(email)
+    resp = client.post(
+        "/api/v1/memory-items",
+        json={"source_type": "webpage", "url": url, "title": "Binary Search", "content": ARTICLE},
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    return resp.json()["data"]["id"]
+
+def test_process_capture_skips_item_another_process_is_working_on() -> None:
+
+    item_id = _new_capture("claim_busy@example.com", "https://docs.example.com/claim-busy")
+    _set_state(item_id, "processing", timedelta(seconds=5))
+
+    process_capture(item_id)
+
+    # A live worker owns it: no second concurrent run, no chunks written here.
+    status, _ = _status_and_chunks(item_id)
+    assert status.endswith("processing")
+
+def test_process_capture_reclaims_abandoned_processing_item() -> None:
+
+    item_id = _new_capture("claim_stale@example.com", "https://docs.example.com/claim-stale")
+    _set_state(item_id, "processing", timedelta(minutes=10))
+
+    process_capture(item_id)
+
+    status, chunks = _status_and_chunks(item_id)
+    assert status.endswith("ready")
+    assert chunks > 0
+
+def test_process_capture_does_not_reprocess_ready_item() -> None:
+
+    item_id = _new_capture("claim_ready@example.com", "https://docs.example.com/claim-ready")
+    process_capture(item_id)
+    status, chunks = _status_and_chunks(item_id)
+    assert status.endswith("ready")
+    _set_state(item_id, "ready", timedelta(minutes=10))
+
+    process_capture(item_id)
+
+    assert _status_and_chunks(item_id) == (status, chunks)
+
+
+def test_process_capture_tolerates_multiple_ready_duplicates() -> None:
+    # Regression: two READY rows with the same URL used to crash the dedup lookup.
+    url = "https://docs.example.com/many-ready"
+    first_id = _new_capture("dup_ready@example.com", url)
+    process_capture(first_id)
+
+    db = SessionLocal()
+    try:
+        first = db.query(MemoryItem).filter(MemoryItem.id == UUID(first_id)).one()
+
+        def _clone(status: ItemStatus) -> MemoryItem:
+            return MemoryItem(
+                user_id=first.user_id,
+                source_type=first.source_type,
+                url=first.url,
+                title=first.title,
+                content=first.content,
+                status=status,
+            )
+
+        db.add(_clone(ItemStatus.ready))
+        pending = _clone(ItemStatus.pending)
+        db.add(pending)
+        db.commit()
+        pending_id = str(pending.id)
+    finally:
+        db.close()
+
+    process_capture(pending_id)
+
+    status, chunks = _status_and_chunks(pending_id)
+    assert status.endswith("ready")
+    assert chunks > 0

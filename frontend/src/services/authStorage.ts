@@ -1,3 +1,4 @@
+import { clearAskHistory } from "./askHistory";
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
 const AUTH_SESSION_KEY = "sentiora_auth_session";
@@ -31,6 +32,16 @@ export function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
+/** Session mirrored to localStorage (for the extension and other tabs), if any. */
+export function getStoredSession(): AuthSession | null {
+  try {
+    const raw = localStorage.getItem(AUTH_SESSION_KEY);
+    return raw ? (JSON.parse(raw) as AuthSession) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function setAuthTokens(accessToken: string, refreshToken: string, user?: AuthSessionUser): void {
   sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
@@ -41,22 +52,12 @@ export function setAuthTokens(accessToken: string, refreshToken: string, user?: 
   });
 }
 
-export function updateAccessToken(accessToken: string): void {
-  const refreshToken = getRefreshToken();
-  sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  if (refreshToken) {
-    persistExtensionBridge({
-      accessToken,
-      refreshToken,
-    });
-  }
-}
-
 export function clearAuthStorage(): void {
   sessionStorage.removeItem(ACCESS_TOKEN_KEY);
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   persistExtensionBridge(null);
+  clearAskHistory();
 }
 
 export function broadcastAuthSync(session: AuthSession): void {

@@ -5,6 +5,7 @@ import {
   sanitizeCapturePayload,
   buildPlainTextFromNodes,
   scoreExtractionQuality,
+  MAX_CONTENT_LENGTH,
 } from "./captureUtils";
 import type { StructuredNode } from "./types";
 
@@ -37,11 +38,23 @@ describe("capture content limits", () => {
       source_type: "webpage",
       url: "https://example.com/article",
       title: "Example Article",
-      content: "paragraph ".repeat(20_000),
+      content: "paragraph ".repeat(60_000),
     });
-    expect(payload.content.length).toBeLessThanOrEqual(80_000);
+    expect(payload.content.length).toBeLessThanOrEqual(MAX_CONTENT_LENGTH);
     expect(payload.title).toBe("Example Article");
     expect(payload.url).toBe("https://example.com/article");
+  });
+
+  it("keeps long transcripts within the backend limit untruncated", () => {
+    const transcript = "the keeper trimmed the wick again ".repeat(6_000); // ~200k chars
+    const payload = sanitizeCapturePayload({
+      source_type: "youtube",
+      url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      title: "Long lecture",
+      content: transcript,
+    });
+    expect(payload.content.length).toBeGreaterThan(150_000);
+    expect(MAX_CONTENT_LENGTH).toBe(500_000);
   });
 });
 

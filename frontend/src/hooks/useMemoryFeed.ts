@@ -4,7 +4,6 @@ import type { MemoryItem } from "../types/memory";
 
 export function useMemoryFeed() {
   const [items, setItems] = useState<MemoryItem[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -15,16 +14,17 @@ export function useMemoryFeed() {
     window.setTimeout(() => setToast(null), 2500);
   }, []);
 
-  const loadMemoryFeed = useCallback(async (silent = false) => {
+  const loadMemoryFeed = useCallback(async (silent = false): Promise<boolean> => {
     if (!silent) setIsLoading(true);
     try {
       const data = await fetchMemoryItems(1, 100);
       setItems(data.items);
-      setTotalCount(data.total);
       setLoadError(null);
+      return true;
     } catch (err) {
       console.error("Error loading memory feed:", err);
       setLoadError("Could not load your memories. Check that the Sentiora API is running.");
+      return false;
     } finally {
       setIsLoading(false);
     }
@@ -32,16 +32,15 @@ export function useMemoryFeed() {
 
   const handleManualSync = useCallback(async () => {
     setIsSyncing(true);
-    await loadMemoryFeed(true);
+    const synced = await loadMemoryFeed(true);
     setIsSyncing(false);
-    showToast("Vault synced successfully!");
+    showToast(synced ? "Memories are up to date." : "Could not sync. Please try again.");
   }, [loadMemoryFeed, showToast]);
 
   const handleDeleteItem = useCallback(async (id: string) => {
     try {
       await deleteMemoryItem(id);
       setItems((prev) => prev.filter((item) => item.id !== id));
-      setTotalCount((prev) => Math.max(0, prev - 1));
       showToast("Memory deleted.");
       return true;
     } catch (err) {
@@ -53,12 +52,13 @@ export function useMemoryFeed() {
 
   useEffect(() => {
     void loadMemoryFeed();
+    // Poll so new captures appear, but not while the tab is in the background.
     const interval = window.setInterval(() => {
-      void loadMemoryFeed(true);
+      if (document.visibilityState === "visible") void loadMemoryFeed(true);
     }, 5000);
 
     const handleFocus = () => {
-      void loadMemoryFeed(true);
+      if (document.visibilityState === "visible") void loadMemoryFeed(true);
     };
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleFocus);
@@ -75,32 +75,23 @@ export function useMemoryFeed() {
         };
       }
     ).chrome;
-    if (winChrome?.runtime?.onMessage) {
-      const listener = (msg: { type?: string }) => {
-        if (msg?.type === "REFRESH_MEMORY_FEED") {
-          void loadMemoryFeed(true);
-        }
-      };
-      winChrome.runtime.onMessage.addListener(listener);
-      return () => {
-        window.clearInterval(interval);
-        window.removeEventListener("focus", handleFocus);
-        document.removeEventListener("visibilitychange", handleFocus);
-        winChrome.runtime?.onMessage?.removeListener(listener);
-      };
-    }
+    const listener = (msg: { type?: string }) => {
+      if (msg?.type === "REFRESH_MEMORY_FEED") {
+        void loadMemoryFeed(true);
+      }
+    };
+    winChrome?.runtime?.onMessage?.addListener(listener);
 
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleFocus);
+      winChrome?.runtime?.onMessage?.removeListener(listener);
     };
   }, [loadMemoryFeed]);
 
   return {
     items,
-    setItems,
-    totalCount,
     isLoading,
     isSyncing,
     loadError,

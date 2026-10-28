@@ -1,13 +1,15 @@
-import { isCurrentPageSensitive } from "./sensitiveGuard";
-import { isYoutubeWatchPage, captureYoutube } from "./youtubeCapture";
+import { getPageSensitivityReason, isCurrentPageSensitive } from "./sensitiveGuard";
+import { isYoutubeHost, isYoutubeVideoPage, captureYoutube, parseYoutubeVideoUrl } from "./youtubeCapture";
 import { isPdfDocument, capturePdf } from "./pdfCapture";
 import { captureWebpageTimed } from "./webpageCapture";
 import { sendCaptureMessage } from "../shared/captureUtils";
+import { isTrustedAppUrl } from "../shared/appUrl";
+import { getUserBlockedDomains } from "../services/storage";
 import type { CapturePayload, ExtensionMessage, CaptureErrorCode } from "../shared/types";
 
 export type CapturePipelineResult =
   | { status: "saved"; deduplicated?: boolean }
-  | { status: "skipped"; reason: "sensitive" | "insufficient_content" | "no_payload" }
+  | { status: "skipped"; reason: "sensitive" | "insufficient_content" | "no_payload" | "signed_out" }
   | { status: "failed"; error: string; errorCode?: CaptureErrorCode };
 
 export type ExtractCaptureResult =
@@ -21,15 +23,29 @@ declare global {
   }
 }
 
+/** Asks the background whether a session exists; any failure counts as signed out. */
+function isSignedIn(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "GET_SESSION_STATE" } satisfies ExtensionMessage, (response) => {
+        resolve(!chrome.runtime.lastError && response?.signedIn === true);
+      });
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 export async function extractCapturePayload(manualCapture = false): Promise<ExtractCaptureResult> {
   const started = performance.now();
+  const userDomains = await getUserBlockedDomains();
 
-  if (isCurrentPageSensitive(manualCapture)) {
+  if (isCurrentPageSensitive(userDomains)) {
     console.info("[Sentiora] Page capture skipped: page flagged as sensitive or blocked.");
     return { status: "skipped", reason: "sensitive" };
   }
 
-  if (isYoutubeWatchPage()) {
+  if (isYoutubeVideoPage()) {
     try {
       const payload = await captureYoutube(manualCapture);
       if (!payload) {
@@ -83,6 +99,14 @@ async function submitExtractedPayload(payload: CapturePayload): Promise<CaptureP
 }
 
 async function runAutoCapturePipeline(): Promise<CapturePipelineResult> {
+  // On YouTube only video pages are memories; never auto-save home/search/channel pages.
+  if (isYoutubeHost() && !isYoutubeVideoPage()) {
+    return { status: "skipped", reason: "no_payload" };
+  }
+  // Signed out: do not even read the page.
+  if (!(await isSignedIn())) {
+    return { status: "skipped", reason: "signed_out" };
+  }
   const extracted = await extractCapturePayload(false);
   if (extracted.status === "skipped") {
     return { status: "skipped", reason: extracted.reason };
@@ -149,6 +173,7 @@ function initContentScript(): void {
           sendResponse({
             success: false,
             error: result.error,
+            errorCode: result.errorCode,
           });
         })
         .catch((err) => {
@@ -167,36 +192,39 @@ function initContentScript(): void {
       sendResponse({ success: true });
       return true;
     }
+
+    // Read-only check for the popup's page status; nothing is extracted or sent.
+    if (message?.type === "GET_SENSITIVITY") {
+      getUserBlockedDomains()
+        .then((userDomains) => sendResponse({ reason: getPageSensitivityReason(userDomains) }))
+        .catch(() => sendResponse({ reason: null }));
+      return true;
+    }
   });
 
-  let lastCapturedUrl = window.location.href;
-  function checkYoutubeUrlChange(): void {
-    if (window.location.href !== lastCapturedUrl) {
-      lastCapturedUrl = window.location.href;
-      if (isYoutubeWatchPage()) {
-        setTimeout(() => {
-          void runAutoCapturePipeline();
-        }, 1500);
-      }
-    }
-  }
-
-  if (window.location.hostname.includes("youtube.com")) {
-    window.addEventListener("yt-navigate-finish", () => {
+  // YouTube is a SPA: watch for in-app navigation between videos. Both the
+  // yt-navigate-finish event and the URL poll can fire for one navigation, so
+  // auto-capture at most once per video ID.
+  if (isYoutubeHost()) {
+    let lastVideoId = parseYoutubeVideoUrl(window.location.href)?.videoId ?? null;
+    const onYoutubeNavigation = () => {
+      const videoId = parseYoutubeVideoUrl(window.location.href)?.videoId ?? null;
+      if (!videoId || videoId === lastVideoId) return;
+      lastVideoId = videoId;
       setTimeout(() => {
-        void runAutoCapturePipeline();
+        if (parseYoutubeVideoUrl(window.location.href)?.videoId === videoId) {
+          void runAutoCapturePipeline();
+        }
       }, 1500);
-    });
-    window.addEventListener("popstate", checkYoutubeUrlChange);
-    setInterval(checkYoutubeUrlChange, 2500);
+    };
+    window.addEventListener("yt-navigate-finish", onYoutubeNavigation);
+    window.addEventListener("popstate", onYoutubeNavigation);
+    setInterval(onYoutubeNavigation, 2500);
   }
 
-  const isDashboardHost =
-    window.location.hostname === "localhost" ||
-    window.location.hostname === "127.0.0.1" ||
-    window.location.hostname.includes("sentiora");
-
-  if (!isDashboardHost) {
+  // Exact origin match: any other page could otherwise plant its own tokens and
+  // redirect this user's captures into a foreign account.
+  if (!isTrustedAppUrl(window.location.href)) {
     return;
   }
 
@@ -236,6 +264,23 @@ function initContentScript(): void {
     }
   };
 
+  // The Privacy Center keeps the user's blocked sites in this origin's
+  // localStorage; mirror them into the extension so every capture honours them.
+  const syncBlocklist = () => {
+    try {
+      if (typeof chrome === "undefined" || !chrome.runtime?.id) return;
+      const raw = localStorage.getItem("sentiora_blocked_domains");
+      const domains: unknown = raw ? JSON.parse(raw) : [];
+      chrome.runtime.sendMessage({ type: "SYNC_BLOCKLIST", domains } satisfies ExtensionMessage, () => {
+        if (chrome.runtime.lastError) {
+          /* ignore */
+        }
+      });
+    } catch {
+      // Ignore storage parse errors and invalidated contexts
+    }
+  };
+
   // 1. Listen for real-time postMessage & custom DOM auth events from Dashboard
   window.addEventListener("message", (event) => {
     if (event.origin !== window.location.origin) {
@@ -243,6 +288,8 @@ function initContentScript(): void {
     }
     if (event.data?.type === "SENTIORA_AUTH_SYNC") {
       syncAuth(event.data);
+    } else if (event.data?.type === "SENTIORA_BLOCKLIST_SYNC") {
+      syncBlocklist();
     } else if (event.data?.type === "SENTIORA_AUTH_LOGOUT") {
       try {
         if (typeof chrome !== "undefined" && chrome.runtime?.id) {
@@ -266,10 +313,15 @@ function initContentScript(): void {
   });
 
   syncFromStorage();
-  window.addEventListener("focus", syncFromStorage);
+  syncBlocklist();
+  window.addEventListener("focus", () => {
+    syncFromStorage();
+    syncBlocklist();
+  });
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       syncFromStorage();
+      syncBlocklist();
     }
   });
 }

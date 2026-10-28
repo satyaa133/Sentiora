@@ -37,15 +37,22 @@ AI agents must:
 
 ## Repository Structure
 
-- docs/ - canonical engineering documentation and documentation index
-- Design/ - Figma exports, screenshots, tokens, and design references
-- frontend/ - reserved for the future frontend application
-- backend/ - reserved for the future backend service
-- extension/ - reserved for the future extension workstream
-- shared/ - reserved for shared code and assets
-- scripts/ - reserved for automation and repository scripts
-- tests/ - reserved for validation and cross-cutting test assets
-- infrastructure/ - reserved for deployment and infrastructure assets
+- docs/ - canonical engineering documentation and documentation index; design references and screenshots are in docs/design/, the design system in docs/DESIGN.md
+- frontend/ - React + Vite web app (pages, views, auth context, API services)
+- backend/ - FastAPI API, RQ capture worker, Alembic migrations, pytest suite
+- extension/ - Chrome MV3 extension (content-script capture, background worker, popup)
+- shared/ - shared UI kit and design tokens (`shared/src/ui`, imported as `@shared/ui`)
+- scripts/ - repository scripts (Python runner, extension packaging and icons)
+- tests/ - cross-cutting Playwright end-to-end specs (`tests/e2e`)
+- infrastructure/ - Postgres image, nginx and pgAdmin config used by the Compose files
+
+### Where code lives
+
+- HTTP routes stay thin: `backend/app/api/v1/*_routes.py` call `backend/app/services/`, which use `backend/app/repositories/` for database access. Embeddings, retrieval and RAG are services too (`embedding_service.py`, `retrieval_service.py`, `rag_service.py`).
+- Every API response uses the envelope in `backend/app/schemas/envelope.py` (`APIResponse`, `response_meta`); errors are shaped by the handlers in `backend/app/main.py`.
+- Background capture processing is `backend/app/workers/jobs/process_capture.py`.
+- The frontend calls the API only through `frontend/src/services/` (`apiClient.ts` owns the token refresh); views live in `frontend/src/components/views/`.
+- Content extraction (webpage, PDF, YouTube) happens in the extension (`extension/src/content/`); the backend never fetches pages.
 
 ## Coding Standards
 

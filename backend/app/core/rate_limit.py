@@ -40,15 +40,26 @@ class SlidingWindowLimiter:
 limiter = SlidingWindowLimiter()
 
 
-def client_ip(request: Request) -> str:
+def client_ip(request: Request, settings: Settings | None = None) -> str:
+    """Client address for rate limiting.
+
+    X-Forwarded-For is honoured only when the direct peer is a configured
+    trusted proxy; otherwise any client could spoof a fresh IP per request and
+    bypass login/register limits. With trusted proxies, the right-most address
+    that is not itself a trusted proxy is the real client.
+    """
+    cfg = settings or get_settings()
+    peer = request.client.host if request.client else None
+    if peer == "testclient":
+        peer = "127.0.0.1"
+    trusted = set(cfg.trusted_proxy_ips)
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client and request.client.host:
-        if request.client.host == "testclient":
-            return "127.0.0.1"
-        return request.client.host
-    return "unknown"
+    if forwarded and peer in trusted:
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        for hop in reversed(hops):
+            if hop not in trusted:
+                return hop
+    return peer or "unknown"
 
 
 def enforce_rate_limit(key: str, limit: int, window_seconds: int) -> None:
@@ -89,5 +100,24 @@ def limit_chat(request: Request, user_id: str, settings: Settings | None = None)
     enforce_rate_limit(
         f"chat:user:{user_id}",
         cfg.rate_limit_chat_per_user_per_minute,
+        60,
+    )
+
+
+def limit_refresh(request: Request, settings: Settings | None = None) -> None:
+    cfg = settings or get_settings()
+    enforce_rate_limit(
+        f"refresh:ip:{client_ip(request)}",
+        cfg.rate_limit_refresh_per_minute,
+        60,
+    )
+
+
+def limit_search(request: Request, user_id: str, settings: Settings | None = None) -> None:
+    # Each search embeds the query, which is a paid provider call.
+    cfg = settings or get_settings()
+    enforce_rate_limit(
+        f"search:user:{user_id}",
+        cfg.rate_limit_search_per_user_per_minute,
         60,
     )

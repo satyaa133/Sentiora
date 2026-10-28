@@ -1,0 +1,195 @@
+/* Landing hero and live demo (DESIGN.md §9.1). */
+
+/* Faint dot grid behind the right column, fading out at the edges. No blobs. */
+.hero-dots {
+  background-image: radial-gradient(var(--border) 1.2px, transparent 1.6px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(ellipse 70% 65% at 55% 45%, #000 35%, transparent 78%);
+  mask-image: radial-gradient(ellipse 70% 65% at 55% 45%, #000 35%, transparent 78%);
+}
+
+.hero-swap {
+  white-space: nowrap;
+}
+
+.hero-swap-word {
+  position: relative;
+  display: inline-block;
+  animation: hero-word-in 260ms var(--ease) both;
+}
+
+.hero-underline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -0.02em;
+  height: 0.09em;
+  border-radius: 999px;
+  background-color: var(--accent);
+  transform-origin: left center;
+  animation: hero-underline-in 520ms var(--ease) 120ms both;
+}
+
+@keyframes hero-word-in {
+  from {
+    transform: translateY(0.18em);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes hero-underline-in {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Live demo: library items light up, source cards slide in. */
+.demo-source {
+  animation: demo-slide-in 240ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+@keyframes demo-slide-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+.demo-caret::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background-color: var(--accent);
+  animation: demo-caret 900ms steps(1) infinite;
+}
+
+@keyframes demo-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Floating saved-item cards around the demo; one flies into the library after an answer. */
+.demo-float {
+  transition: transform 300ms var(--ease);
+}
+
+.demo-float-fly {
+  animation: demo-fly 900ms cubic-bezier(0.5, 0, 0.3, 1) both;
+}
+
+@keyframes demo-fly {
+  0% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 0.9;
+    translate: var(--fly-x, 0) var(--fly-y, 0);
+    scale: 0.4;
+  }
+  100% {
+    opacity: 0;
+    translate: var(--fly-x, 0) var(--fly-y, 0);
+    scale: 0.2;
+  }
+}
+
+@keyframes demo-float-return {
+  from {
+    opacity: 0;
+    scale: 0.9;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+.demo-float-return {
+  animation: demo-float-return 400ms var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-swap-word,
+  .hero-underline,
+  .demo-source {
+    animation: none;
+  }
+  .demo-caret::after {
+    animation: none;
+  }
+}
+
+/* Before / after (§9.2): the "without" tabs jiggle. */
+@keyframes before-tab-jiggle {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  25% {
+    transform: translateY(-1px) rotate(-1.5deg);
+  }
+  75% {
+    transform: translateY(1px) rotate(1.5deg);
+  }
+}
+
+.before-tab {
+  animation: before-tab-jiggle 1.6s ease-in-out infinite;
+}
+
+/* Scroll story (§9.3) and extension clip (§9.4). */
+/* Transform only, so the looping pulse stays on the compositor (§11). */
+@keyframes landing-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.14);
+  }
+}
+
+.story-pulse {
+  animation: landing-pulse 2s ease-in-out infinite;
+}
+
+.clip-icon-pulse {
+  animation: landing-pulse 600ms var(--ease) 1;
+}
+
+.clip-cursor {
+  transition: left 700ms cubic-bezier(0.45, 0, 0.2, 1);
+}
+
+.clip-toast {
+  animation: demo-slide-in 260ms var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .before-tab,
+  .story-pulse,
+  .clip-icon-pulse,
+  .clip-toast {
+    animation: none;
+  }
+  .clip-cursor {
+    transition: none;
+  }
+}
+

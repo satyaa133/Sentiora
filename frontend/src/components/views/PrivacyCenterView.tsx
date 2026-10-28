@@ -1,27 +1,45 @@
 import { useState, useEffect } from "react";
+import {
+  Button,
+  Card,
+  Echo,
+  IconButton,
+  IconClose,
+  IconDownload,
+  IconShield,
+  Input,
+  Tag,
+} from "@shared/ui";
 import type { MemoryItem } from "../../types/memory";
+import { fetchMemoryItems } from "../../services/memoryService";
+import { normalizeBlockedDomain } from "../../utils/blockedDomain";
 
-interface PrivacyCenterViewProps {
-  items?: MemoryItem[];
-}
-
-export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps) {
+export default function PrivacyCenterView() {
   const [blockedDomains, setBlockedDomains] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem("sentiora_blocked_domains");
-      return saved ? JSON.parse(saved) : [];
+      const saved: unknown = JSON.parse(localStorage.getItem("sentiora_blocked_domains") ?? "[]");
+      if (!Array.isArray(saved)) return [];
+      // Lists saved before normalization may hold paths or non-domains.
+      const domains = saved
+        .map((entry) => (typeof entry === "string" ? normalizeBlockedDomain(entry) : null))
+        .filter((domain): domain is string => domain !== null);
+      return [...new Set(domains)];
     } catch {
       return [];
     }
   });
 
   const [newDomain, setNewDomain] = useState("");
+  const [domainError, setDomainError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
       localStorage.setItem("sentiora_blocked_domains", JSON.stringify(blockedDomains));
+      // The extension's content script on this page reads the list from storage.
+      window.postMessage({ type: "SENTIORA_BLOCKLIST_SYNC" }, window.location.origin);
     } catch (e) {
       console.error("Failed to save blocked domains:", e);
     }
@@ -29,7 +47,14 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
 
   function handleAddDomain() {
     if (!newDomain.trim()) return;
-    const cleanDomain = newDomain.trim().toLowerCase().replace(/^https?:\/\//, "");
+    // Store exactly what the extension enforces, so the list never shows a
+    // rule (a path, or a word that is not a site) that blocks nothing.
+    const cleanDomain = normalizeBlockedDomain(newDomain);
+    if (!cleanDomain) {
+      setDomainError("Enter a site like example.com.");
+      return;
+    }
+    setDomainError(null);
     if (!blockedDomains.includes(cleanDomain)) {
       setBlockedDomains((prev) => [...prev, cleanDomain]);
     }
@@ -40,116 +65,177 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
     setBlockedDomains((prev) => prev.filter((d) => d !== domain));
   }
 
-  function handleExportVault() {
+  async function handleExportVault() {
     setExporting(true);
     setExportSuccess(false);
+    setExportError(null);
 
-    setTimeout(() => {
+    // The loaded feed holds only the newest 100 memories; page through the API
+    // so the export really is everything.
+    const allItems: MemoryItem[] = [];
+    try {
+      for (let page = 1; ; page++) {
+        const batch = await fetchMemoryItems(page, 100);
+        allItems.push(...batch.items);
+        if (!batch.has_more || batch.items.length === 0) break;
+      }
+    } catch {
+      setExportError("Could not download your memory. Please try again.");
+      return;
+    } finally {
       setExporting(false);
-      setExportSuccess(true);
+    }
 
-      const exportPayload = {
-        app: "Sentiora Memory Vault",
-        export_date: new Date().toISOString(),
-        total_items: items.length,
-        items: items,
-      };
+    const exportPayload = {
+      app: "Sentiora Memory Vault",
+      export_date: new Date().toISOString(),
+      total_items: allItems.length,
+      items: allItems,
+    };
+    // A Blob URL, not a data: URL, so a large vault still downloads whole.
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.href = url;
+    const dateString = new Date().toISOString().slice(0, 10);
+    downloadAnchor.download = `sentiora-vault-export-${dateString}.json`;
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    URL.revokeObjectURL(url);
 
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportPayload, null, 2));
-      const downloadAnchor = document.createElement("a");
-      downloadAnchor.setAttribute("href", dataStr);
-      const dateString = new Date().toISOString().slice(0, 10);
-      downloadAnchor.setAttribute("download", `sentiora-vault-export-${dateString}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-
-      setTimeout(() => setExportSuccess(false), 4000);
-    }, 600);
+    setExportSuccess(true);
+    setTimeout(() => setExportSuccess(false), 4000);
   }
 
   return (
-    <div className="space-y-6 max-w-4xl font-sans">
-      {/* Blocklist Manager */}
-      <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-6 shadow-card space-y-4">
+    <div className="space-y-6">
+      <Card
+        as="section"
+        aria-labelledby="privacy-builtin-heading"
+        tone="raised"
+        padding="lg"
+        className="flex flex-col gap-5 sm:flex-row sm:items-center"
+      >
+        <Echo state="guarding" size={80} className="shrink-0" />
         <div>
-          <h2 className="font-serif text-xl font-bold text-ink-900">Custom Sensitive Domain Blocklist</h2>
-          <p className="text-xs text-ink-500 mt-1">
-            Add custom domains you want Sentiora to ignore. Only domains you add below will be blocked from automatic capture.
+          <h2
+            id="privacy-builtin-heading"
+            className="text-[20px] font-semibold text-fg"
+          >
+            Sensitive pages are always skipped
+          </h2>
+          <p className="mt-1 text-[16px] leading-relaxed text-muted">
+            The extension skips banking, payment, health, insurance, tax and ID sites it
+            recognises, sign-in pages, pages with a visible password field, and pages
+            marked noindex. The check runs in your browser before anything is sent.
           </p>
         </div>
+      </Card>
 
-        <div className="flex gap-2">
-          <input
-            type="text"
+      <Card as="section" aria-labelledby="privacy-blocklist-heading" padding="lg">
+        <h2
+          id="privacy-blocklist-heading"
+          className="text-[20px] font-semibold text-fg"
+        >
+          Your blocked sites
+        </h2>
+        <p className="mt-1 text-[15px] text-muted">
+          The extension in this browser skips these sites and their subdomains. Changes
+          apply as soon as you add or remove a site.
+        </p>
+
+        <form
+          className="mt-5 flex flex-col gap-2 sm:flex-row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleAddDomain();
+          }}
+        >
+          <label htmlFor="block-domain" className="sr-only">
+            Site to block
+          </label>
+          <Input
+            id="block-domain"
             value={newDomain}
-            onChange={(e) => setNewDomain(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleAddDomain();
+            onChange={(e) => {
+              setNewDomain(e.target.value);
+              setDomainError(null);
             }}
-            placeholder="e.g. internal.company.com or mysite.com"
-            className="flex-1 bg-parchment-50/80 backdrop-blur-xs border border-parchment-200/80 rounded-xl px-3 py-2 text-xs text-ink-900 focus:outline-none focus:border-moss-600 focus:bg-white font-medium transition-colors"
+            placeholder="example.com"
+            className="font-mono"
+            invalid={Boolean(domainError)}
+            aria-describedby={domainError ? "block-domain-error" : undefined}
           />
-          <button
-            onClick={handleAddDomain}
-            className="px-4 py-2 bg-moss-600 hover:bg-moss-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm"
-          >
-            Add Domain
-          </button>
-        </div>
+          <Button type="submit" variant="inverse" className="shrink-0">
+            Add site
+          </Button>
+        </form>
+        {domainError ? (
+          <p id="block-domain-error" role="alert" className="mt-2 text-[15px] text-link">
+            {domainError}
+          </p>
+        ) : null}
 
-        <div className="space-y-2 pt-2">
-          {blockedDomains.length === 0 ? (
-            <div className="p-6 bg-parchment-50/60 rounded-xl border border-dashed border-parchment-200 text-center space-y-1">
-              <p className="text-xs font-bold text-ink-700">No custom blocked domains added yet</p>
-              <p className="text-[11px] text-ink-500">Domains you add above will appear here and will be skipped by the extension.</p>
-            </div>
-          ) : (
-            blockedDomains.map((domain) => (
-              <div
+        {blockedDomains.length === 0 ? (
+          <p className="mt-5 rounded-btn border border-dashed border-line px-4 py-6 text-center text-[15px] text-muted">
+            No sites added yet.
+          </p>
+        ) : (
+          <ul className="mt-5 divide-y divide-line-soft rounded-card border border-line">
+            {blockedDomains.map((domain) => (
+              <li
                 key={domain}
-                className="p-3 bg-parchment-50/80 backdrop-blur-xs border border-parchment-200/80 rounded-xl flex items-center justify-between text-xs transition-colors hover:bg-white"
+                className="flex items-center justify-between gap-3 px-4 py-2"
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-moss-600">🛡️</span>
-                  <span className="font-mono text-ink-900 font-semibold">{domain}</span>
-                </div>
-                <button
+                <span className="flex min-w-0 items-center gap-2">
+                  <IconShield size={18} className="shrink-0 text-muted" />
+                  <span className="truncate font-mono text-[15px] text-fg">
+                    {domain}
+                  </span>
+                  <Tag className="shrink-0">Your rule</Tag>
+                </span>
+                <IconButton
+                  label={`Remove ${domain}`}
+                  icon={<IconClose size={18} />}
+                  size="sm"
                   onClick={() => handleRemoveDomain(domain)}
-                  className="text-rose-600 hover:underline font-semibold text-[11px]"
-                >
-                  Remove
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
 
-      {/* Data Ownership & Export */}
-      <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-6 shadow-card space-y-4">
-        <h2 className="font-serif text-xl font-bold text-ink-900">Data Ownership & Control</h2>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-parchment-50/80 backdrop-blur-xs border border-parchment-200/80 rounded-xl">
+      <Card as="section" aria-labelledby="privacy-export-heading" padding="lg">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-xs font-bold text-ink-900">Export Complete Vault (JSON File)</p>
-            <p className="text-[11px] text-ink-500">
-              Download a complete JSON export of all your captured memory items ({items.length} items in vault).
+            <h2
+              id="privacy-export-heading"
+              className="text-[20px] font-semibold text-fg"
+            >
+              Export your memory
+            </h2>
+            <p className="mt-1 text-[15px] text-muted">
+              Download everything you&apos;ve saved as a JSON file.
             </p>
-            {exportSuccess && (
-              <p className="text-xs font-bold text-moss-600 mt-1 animate-fade-in">
-                ✓ JSON Vault Export downloaded successfully!
-              </p>
-            )}
+            <p role="status" className="mt-1 min-h-[22px] text-[15px] text-fg">
+              {exportError ?? (exportSuccess ? "Your export has downloaded." : "")}
+            </p>
           </div>
-          <button
+          <Button
+            variant="secondary"
+            leadingIcon={<IconDownload size={18} />}
             onClick={handleExportVault}
-            disabled={exporting}
-            className="px-4 py-2 bg-moss-600 hover:bg-moss-700 text-white text-xs font-semibold rounded-xl transition-colors shadow-sm shrink-0"
+            loading={exporting}
+            className="shrink-0"
           >
-            {exporting ? "Generating JSON..." : "Export Vault Data (.json)"}
-          </button>
+            Download JSON
+          </Button>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

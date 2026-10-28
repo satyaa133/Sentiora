@@ -1,4 +1,14 @@
 export type SourceType = "webpage" | "pdf" | "youtube";
+
+export type SourceFilter = "all" | SourceType;
+
+/** Type-filter chips shared by Home and Timeline. */
+export const SOURCE_FILTERS: Array<{ id: SourceFilter; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "webpage", label: "Web" },
+  { id: "pdf", label: "PDF" },
+  { id: "youtube", label: "Video" },
+];
 export type ItemStatus = "pending" | "processing" | "ready" | "failed";
 
 export type NodeType =
@@ -67,6 +77,28 @@ export interface MemoryItem {
   processing_error?: string | null;
   captured_at: string;
   created_at: string;
+  /** Capture v2 structure; YouTube transcript nodes carry real start/end seconds. */
+  structured_content?: StructuredContentNode[] | null;
+}
+
+export interface StructuredContentNode {
+  id: string;
+  type: string;
+  text: string;
+  order: number;
+  metadata?: { start_seconds?: number | null; end_seconds?: number | null; page_number?: number | null } | null;
+}
+
+/** Server-side filters for GET /memory-items (all optional, user-scoped). */
+export interface MemoryListFilters {
+  source_type?: SourceType;
+  status?: ItemStatus;
+  /** ISO timestamp, inclusive. */
+  date_from?: string;
+  /** ISO timestamp, exclusive. */
+  date_to?: string;
+  /** Metadata match on title, domain and URL. */
+  q?: string;
 }
 
 export interface MemoryItemListResponse {

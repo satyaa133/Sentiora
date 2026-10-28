@@ -107,6 +107,7 @@ export type CaptureErrorCode =
   | "YOUTUBE_CAPTIONS_UNAVAILABLE"
   | "YOUTUBE_TRANSCRIPT_FETCH_FAILED"
   | "YOUTUBE_TRANSCRIPT_PARSE_FAILED"
+  | "YOUTUBE_VIDEO_UNAVAILABLE"
   | "FILE_TYPE_UNSUPPORTED"
   | "FILE_PARSE_FAILED"
   | "UPLOAD_FAILED"
@@ -130,7 +131,39 @@ export type ExtensionMessage =
   | { type: "SYNC_AUTH_TOKENS"; payload: AuthSyncPayload }
   | { type: "CLEAR_AUTH_TOKENS" }
   | { type: "FETCH_PDF_BYTES"; url: string }
-  | { type: "CHECK_FILE_ACCESS" };
+  | { type: "CHECK_FILE_ACCESS" }
+  | { type: "GET_YOUTUBE_PLAYER_RESPONSE"; videoId: string }
+  /** Content script → background: is there a session to save under? */
+  | { type: "GET_SESSION_STATE" }
+  /** App-origin content script → background: the Privacy Center blocklist. */
+  | { type: "SYNC_BLOCKLIST"; domains: unknown }
+  /** Popup → background: has this URL been saved or is it saving now? */
+  | { type: "GET_PAGE_STATUS"; url: string };
+
+/** Capture status of one URL in this browser session, as the popup shows it. */
+export type PageCaptureStatus = "saved" | "saving" | "not_saved";
+
+/**
+ * Trimmed, JSON-safe subset of YouTube's player response, read from the page's
+ * main world by the background worker (content scripts cannot see page globals).
+ */
+export interface YoutubePlayerResponse {
+  videoDetails?: {
+    videoId?: string;
+    title?: string;
+    author?: string;
+    channelId?: string;
+    lengthSeconds?: string | number;
+    isLive?: boolean;
+    thumbnail?: { thumbnails?: { url?: string; width?: number; height?: number }[] };
+  };
+  playabilityStatus?: { status?: string; reason?: string };
+  captions?: {
+    playerCaptionsTracklistRenderer?: {
+      captionTracks?: { baseUrl?: string; languageCode?: string; kind?: string }[];
+    };
+  };
+}
 
 export interface ExtensionState {
   readonly isReady: boolean;

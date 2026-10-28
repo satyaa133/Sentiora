@@ -1,8 +1,10 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Button, IconAlert, TextField } from "@shared/ui";
+import AuthLayout from "../components/AuthLayout";
+import PasswordField from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
 import { getApiErrorMessage } from "../services/apiClient";
-import "./Auth.css";
 
 export default function Login() {
   const { login } = useAuth();
@@ -10,9 +12,12 @@ export default function Login() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string; general?: string }>({});
+  const [errors, setErrors] = useState<{
+    email?: string;
+    password?: string;
+    general?: string;
+  }>({});
 
   function validate(): boolean {
     const errs: typeof errors = {};
@@ -48,99 +53,78 @@ export default function Login() {
   }
 
   return (
-    <div className="auth-page">
-      <div className="auth-header">
-        <h1 className="auth-logo">Sentiora</h1>
-        <p className="auth-tagline">PERSONAL DIGITAL VAULT</p>
-      </div>
+    <AuthLayout
+      title="Welcome back"
+      subtitle="Sign in to your Sentiora memory."
+      footer={
+        <>
+          Don&apos;t have an account?{" "}
+          <Link to="/signup" className="font-semibold text-link hover:underline">
+            Sign up
+          </Link>
+        </>
+      }
+    >
+      {errors.general && (
+        <p
+          role="alert"
+          className="mb-5 flex items-start gap-2 rounded-btn bg-accent-soft px-4 py-3 text-[15px] text-accent-soft-fg"
+        >
+          <IconAlert size={18} className="mt-0.5 shrink-0" />
+          {errors.general}
+        </p>
+      )}
 
-      <div className="auth-card">
-        <div className="auth-card-inner">
-          <h2 className="auth-title">Welcome back</h2>
-          <p className="auth-subtitle">Sign in to your personal knowledge memory archive.</p>
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        <TextField
+          id="login-email"
+          label="Email"
+          type="email"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          error={errors.email}
+        />
 
-          {errors.general && (
-            <div className="auth-error-banner" role="alert">
-              {errors.general}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} noValidate>
-            <div className="auth-field">
-              <label htmlFor="login-email" className="auth-label">
-                Email Address
-              </label>
-              <input
-                id="login-email"
-                type="email"
-                autoComplete="email"
-                className={`auth-input${errors.email ? " auth-input--error" : ""}`}
-                placeholder="e.g., jordan@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              {errors.email && <p className="auth-field-error">{errors.email}</p>}
-            </div>
-
-            <div className="auth-field">
-              <label htmlFor="login-password" className="auth-label">
-                Password
-              </label>
-              <div className="auth-input-wrapper">
-                <input
-                  id="login-password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  className={`auth-input auth-input--with-action${errors.password ? " auth-input--error" : ""}`}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="auth-input-action"
-                  onClick={() => setShowPassword((v) => !v)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  {showPassword ? "Hide" : "Show"}
-                </button>
-              </div>
-              {errors.password && <p className="auth-field-error">{errors.password}</p>}
-            </div>
-
-            <div className="auth-forgot-row">
-              <Link to="/forgot-password" className="auth-forgot-link">
-                Forgot your password?
-              </Link>
-            </div>
-
-            <button
-              id="login-submit-btn"
-              type="submit"
-              className="auth-btn-primary"
-              disabled={isLoading}
+        <div>
+          <PasswordField
+            id="login-password"
+            label="Password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            error={errors.password}
+          />
+          <div className="mt-1 flex justify-end">
+            <Link
+              to="/forgot-password"
+              className="inline-flex min-h-touch items-center text-[15px] text-link hover:underline"
             >
-              {isLoading ? "Signing in…" : "Sign In"}
-            </button>
-          </form>
-
-          <div className="auth-divider">
-            <span>or</span>
-          </div>
-
-          <button type="button" className="auth-btn-social" disabled>
-            <span className="auth-btn-social-icon">⊗</span>
-            Continue with Google
-          </button>
-
-          <p className="auth-switch">
-            Don&apos;t have an account?{" "}
-            <Link to="/onboarding" className="auth-switch-link">
-              Sign up
+              Forgot your password?
             </Link>
-          </p>
+          </div>
         </div>
+
+        <Button
+          id="login-submit-btn"
+          type="submit"
+          size="lg"
+          fullWidth
+          loading={isLoading}
+        >
+          {isLoading ? "Signing in" : "Sign in"}
+        </Button>
+      </form>
+
+      <div className="my-5 flex items-center gap-3 text-sm text-muted">
+        <span className="h-px flex-1 bg-line" />
+        or
+        <span className="h-px flex-1 bg-line" />
       </div>
-    </div>
+
+      <Button variant="secondary" fullWidth disabled>
+        Continue with Google (coming soon)
+      </Button>
+    </AuthLayout>
   );
 }
