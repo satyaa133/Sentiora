@@ -226,3 +226,46 @@ builds, and the Vite configs only bundle `VITE_*` variables.
 runs in CI after the build. Keep AI keys in `backend/.env`; the repo-root `.env`
 is also read by Vite (only `VITE_*` names are exposed), so a mistaken `VITE_`
 prefix there would leak a key.
+
+## R7 — Ask Sentiora page
+
+`frontend/src/components/views/AskSentioraView.tsx` with parts in
+`frontend/src/components/views/ask/` (design notes in DESIGN.md §5.5).
+
+- **Streaming.** `services/askStream.ts` reads `POST /chat/stream` with
+  `fetch` + `ReadableStream` (EventSource cannot send the Bearer token),
+  refreshes the token once on 401 like `apiClient`, and supports Stop through an
+  `AbortController`. A typing skeleton shows until the first text arrives
+  ("Reading N saved sources…"), then a caret while text streams.
+- **Markdown** via `react-markdown` + `remark-gfm` (no raw HTML, no images).
+  `[S#]` markers outside code become coral `CitationChip`s: hover/focus shows
+  type, date, video time and the excerpt; click opens the source, YouTube at
+  `&t=Ns`. Markers for sources that were not supplied render nothing.
+- **Sources.** A collapsible "Sources used" panel under each answer lists the
+  cited chunks with type badge, date, page/time, excerpt, Open memory,
+  Jump to mm:ss and Original. Open by default on the latest answer.
+- **Mode badge** (From your memory / General knowledge / Mixed; "AI model
+  unavailable" for the offline fallback) replaces the old split sections.
+- **Follow-up chips** from `final.followUps`; **Copy answer** (markers become
+  `[n]` plus a numbered source list), **Regenerate**, **Save as note**.
+- **Scope picker** ("Search in"): all memories, a source type, or one memory
+  (searchable); launches from other views still set it.
+- **History** in `localStorage` (`services/askHistory.ts`, key
+  `sentiora.ask.history.<userId>`, 30 conversations × 40 messages), cleared on
+  sign-out by `clearAuthStorage`. Left sidebar on large screens, a drawer on
+  phones.
+- **States:** empty state with Echo and starters, "Nothing relevant saved yet",
+  error with Try again, Stopped.
+- **Keyboard:** Enter sends, Shift+Enter new line, Ctrl/Cmd+K focuses the
+  composer on this page (the command palette elsewhere), Esc stops.
+- **Accessibility:** labelled controls, visible focus rings, `aria-busy` while
+  answering, polite live region, 44 px targets, reduced-motion respected,
+  works at 375 px without horizontal scroll.
+
+`react-markdown` is hoisted next to the repo's React 19 test dependency; the
+frontend's Vite `dedupe` keeps one React 18 in builds and the Vitest config
+inlines it (as for React Router).
+
+Also in R7 (backend): the follow-up rewrite call only runs when the question
+looks referential ("it", "that one", "another" …) or has five words or fewer;
+standalone questions skip the extra model round trip.

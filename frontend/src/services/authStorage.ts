@@ -1,3 +1,4 @@
+import { clearAskHistory } from "./askHistory";
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
 const AUTH_SESSION_KEY = "sentiora_auth_session";
@@ -56,6 +57,7 @@ export function clearAuthStorage(): void {
   localStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem(ACCESS_TOKEN_KEY);
   persistExtensionBridge(null);
+  clearAskHistory();
 }
 
 export function broadcastAuthSync(session: AuthSession): void {

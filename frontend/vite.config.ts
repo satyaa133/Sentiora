@@ -13,9 +13,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: [resolve(rootDirectory, "src/test/setup.ts")],
-    // Testing Library and React Router are hoisted next to React 19. Load them through Vite
+    // Testing Library, React Router and react-markdown are hoisted next to React 19. Load them through Vite
     // and pin React so tests (and components from shared/) render with React 18.
-    server: { deps: { inline: [/@testing-library/, /react-router/] } },
+    server: { deps: { inline: [/@testing-library/, /react-router/, /react-markdown/] } },
     alias: [
       {
         find: /^@testing-library\/react$/,

@@ -257,3 +257,11 @@ def test_min_similarity_setting_is_respected(
     _save(headers, "car", "How cars work", CAR_TEXT)
     monkeypatch.setattr(get_settings(), "rag_min_similarity", 0.99)
     assert _retrieve(user_id, "automobile motor ignite combustion") == []
+
+
+def test_standalone_question_with_history_is_not_rewritten() -> None:
+    def explode(prompt: str, system: str) -> str:
+        raise AssertionError("standalone questions must not cost a model call")
+
+    question = "How do I avoid overflow when computing the midpoint in binary search?"
+    assert rewrite_query(question, HISTORY, explode) == question
