@@ -28,7 +28,6 @@ from app.schemas.ask import AnswerMode, AskCitation, AskResponse, AskTurn
 from app.services.ask_intent import (
     AskIntent,
     classify,
-    is_followup,
     resolve_timezone,
     scoped_intent,
     topic_of,
@@ -44,6 +43,7 @@ from app.services.rag_sanitize import (
     sanitize_untrusted_text,
     strip_instruction_like_lines,
 )
+from app.services.retrieval.query_rewriter import rewrite_query
 from app.services.retrieval_service import (
     RetrievalService,
     RetrievedChunk,
@@ -563,10 +563,9 @@ class RagService:
             configured = int(getattr(self.settings, "rag_top_k", 8) or 8)
             effective_top_k = max(top_k or configured, min(8, configured))
 
-        query = intent.mention_topic or question
-        if history and is_followup(question):
-            previous = next((t.content for t in reversed(history) if t.role == "user"), "")
-            query = f"{previous} {question}".strip()
+        query = intent.mention_topic or rewrite_query(
+            question, history, self._complete_raw if self._llm_configured() else None
+        )
 
         # Date filters only apply to questions about the user's own saves.
         window = intent.date_window if intent.kind != "open" else None
@@ -828,7 +827,10 @@ class RagService:
                 f"{context}\n"
                 f"END_UNTRUSTED_MEMORY_DATA"
             )
+        return self._complete_raw(prompt, system_prompt)
 
+    def _complete_raw(self, prompt: str, system_prompt: str) -> str:
+        """Send one prompt through the rotating key pool; raises when every key fails."""
         backends = build_backends(self.settings)
         if not backends:
             raise LLMProviderError("No chat model key is configured.")

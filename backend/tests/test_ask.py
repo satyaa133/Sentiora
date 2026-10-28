@@ -373,7 +373,7 @@ def test_search_lexical_without_embeddings(monkeypatch) -> None:  # type: ignore
     assert any("halves the search interval" in hit["content"] for hit in hits)
 
 
-def test_search_drops_weak_meaning_only_matches(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_search_returns_retrieval_hits_in_order(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     from dataclasses import replace
     from datetime import UTC, datetime
     from uuid import uuid4
@@ -402,7 +402,9 @@ def test_search_drops_weak_meaning_only_matches(monkeypatch) -> None:  # type: i
         headers=_auth_headers("ask_search_weak@example.com"),
     )
     assert resp.status_code == 200
-    assert [hit["title"] for hit in resp.json()["data"]] == ["strong", "keyword", "both"]
+    # Relevance thresholds live in retrieval (RAG_MIN_SIMILARITY); the route
+    # returns what retrieval chose, in order.
+    assert [hit["title"] for hit in resp.json()["data"]] == ["strong", "keyword", "both", "weak"]
 
 
 REACT_ARTICLE = """

@@ -18,7 +18,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.deps import get_current_user, get_db
-from app.core.config import get_settings
 from app.models.memory_item import SourceType
 from app.models.user import User
 from app.schemas.ask import AskRequest, AskResponse, SearchHit
@@ -133,14 +132,8 @@ def search_memories(
         top_k=top_k,
         source_type=source_type,
     )
-    # Ask lets the model ignore loose vector neighbours; a results list cannot,
-    # so keep keyword matches and only strong meaning-only matches.
-    strong = get_settings().rag_strong_distance
-    chunks = [
-        chunk
-        for chunk in chunks
-        if chunk.distance is None or chunk.rank > 0 or chunk.distance <= strong
-    ]
+    # Retrieval already drops vector hits below RAG_MIN_SIMILARITY and
+    # full-text hits that match too few query terms.
     hits = [
         SearchHit(
             memory_id=chunk.memory_id,

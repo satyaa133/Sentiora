@@ -8,19 +8,23 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from typing import cast
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from uuid import UUID
 
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, case, func, literal, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.services.embedding_service import get_embedding_adapter
+from app.services.retrieval import selection
+
+_TSQUERY_SAFE = re.compile(r"[^a-z0-9]")
 
 _DOCUMENT_CONTEXT_HINTS = (
     "summarize",
@@ -129,9 +133,9 @@ class RetrievedChunk:
     rank: float = 0.0
     start_sec: float | None = None
     end_sec: float | None = None
+    # Stored embedding, used for MMR diversity; never compared or printed.
+    vector: tuple[float, ...] | None = field(default=None, compare=False, repr=False)
 
-
-_RRF_K = 60
 
 
 @dataclass(frozen=True)
@@ -198,55 +202,109 @@ class RetrievalService:
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> list[RetrievedChunk]:
-        limit = top_k or self.settings.rag_top_k
-        scope = _Scope(source_type, memory_id, date_from, date_to)
-        tokens = _query_tokens(query)
-        semantic = self._semantic_search(user_id, query, limit, scope)
-        lexical = self._lexical_search(user_id, query, limit, scope)
+        """Hybrid retrieval: vector + full-text, fused with RRF, then MMR.
 
-        if tokens:
-            if not lexical and not semantic:
-                return []
-            merged = self._fuse(semantic, lexical)
-        else:
-            merged = self._deduplicate_chunks(self._recent_chunks(user_id, limit, scope))
-
-        if needs_document_context(query) and merged:
-            merged = self._expand_primary_memory(user_id, merged, limit=max(limit, 8), scope=scope)
-        return merged[: max(limit, 8) if needs_document_context(query) else limit]
-
-    def _fuse(
-        self, semantic: list[RetrievedChunk], lexical: list[RetrievedChunk]
-    ) -> list[RetrievedChunk]:
-        """Reciprocal-rank fusion of semantic and keyword hits.
-
-        A semantic-only hit survives next to keyword hits only when it is a
-        strong match, so a loosely related vector neighbour cannot outrank the
-        memory that actually contains the words.
+        Returns [] when nothing clears the relevance bar (the question is not
+        covered by the user's memory).
         """
-        if lexical:
-            lexical_ids = {chunk.memory_id for chunk in lexical}
-            strong = float(getattr(self.settings, "rag_strong_distance", 0.4))
-            semantic = [
-                chunk
-                for chunk in semantic
-                if chunk.memory_id in lexical_ids
-                or (chunk.distance is not None and chunk.distance <= strong)
-            ]
-        scores: dict[UUID, float] = {}
-        for ranked, weight in ((semantic, 1.0), (lexical, 1.2)):
-            for position, chunk in enumerate(ranked):
-                scores[chunk.chunk_id] = scores.get(chunk.chunk_id, 0.0) + weight / (
-                    _RRF_K + position + 1
-                )
-        # One entry per chunk: the semantic copy carries the distance, so give it
-        # the keyword rank too when both searches found the same chunk.
-        by_id = {chunk.chunk_id: chunk for chunk in lexical}
+        scope = _Scope(source_type, memory_id, date_from, date_to)
+        document = needs_document_context(query)
+        limit = top_k or int(self._setting("rag_final_k", 6))
+        if document:
+            limit = max(limit, 8)
+        tokens = _query_tokens(query)
+
+        if not tokens:
+            # "What did I save?" has no keywords: most recent saves instead.
+            recent = self._deduplicate_chunks(self._recent_chunks(user_id, limit, scope))
+            return recent[:limit]
+
+        pool = int(self._setting("rag_candidates", 30))
+        semantic = self._semantic_search(user_id, query, pool, scope)
+        fulltext = self._fulltext_search(user_id, tokens, pool, scope)
+        per_memory = (
+            limit
+            if memory_id is not None or document
+            else int(self._setting("rag_max_chunks_per_memory", 2))
+        )
+        chosen = self._select(semantic, fulltext, limit=limit, per_memory=per_memory)
+        if document and chosen:
+            chosen = self._expand_primary_memory(user_id, chosen, limit=limit, scope=scope)[:limit]
+        self._log_retrieval(query, semantic, fulltext, chosen)
+        return chosen
+
+    def _setting(self, name: str, default: float | int | str) -> float | int | str:
+        value = getattr(self.settings, name, None)
+        return default if value is None else value
+
+    def _select(
+        self,
+        semantic: list[RetrievedChunk],
+        fulltext: list[RetrievedChunk],
+        *,
+        limit: int,
+        per_memory: int,
+    ) -> list[RetrievedChunk]:
+        """RRF-fuse both legs, drop near-duplicates, then pick with MMR."""
+        if not semantic and not fulltext:
+            return []
+        scores = selection.rrf([[c.chunk_id for c in semantic], [c.chunk_id for c in fulltext]])
+        # One entry per chunk: keep the vector distance and the full-text rank.
+        by_id: dict[UUID, RetrievedChunk] = {c.chunk_id: c for c in fulltext}
         for chunk in semantic:
-            keyword = by_id.get(chunk.chunk_id)
-            by_id[chunk.chunk_id] = replace(chunk, rank=keyword.rank) if keyword else chunk
-        fused = self._deduplicate_chunks(list(by_id.values()))
-        return sorted(fused, key=lambda chunk: -scores.get(chunk.chunk_id, 0.0))
+            text_hit = by_id.get(chunk.chunk_id)
+            by_id[chunk.chunk_id] = (
+                replace(chunk, rank=text_hit.rank, lexical=True) if text_hit else chunk
+            )
+        ranked = sorted(by_id.values(), key=lambda c: -scores[c.chunk_id])
+        ranked = selection.drop_near_duplicates(ranked, lambda c: c.content)
+        top = max(scores.values())
+        shingle_cache: dict[UUID, frozenset[str]] = {}
+
+        def shingles(chunk: RetrievedChunk) -> frozenset[str]:
+            if chunk.chunk_id not in shingle_cache:
+                shingle_cache[chunk.chunk_id] = selection.shingles(chunk.content)
+            return shingle_cache[chunk.chunk_id]
+
+        def similarity(a: RetrievedChunk, b: RetrievedChunk) -> float:
+            cos = selection.cosine(a.vector, b.vector)
+            return cos if cos is not None else selection.jaccard(shingles(a), shingles(b))
+
+        return selection.mmr(
+            ranked,
+            relevance=lambda c: scores[c.chunk_id] / top,
+            similarity=similarity,
+            limit=limit,
+            lambda_=float(self._setting("rag_mmr_lambda", 0.7)),
+            group=lambda c: c.memory_id,
+            per_group=per_memory,
+        )
+
+    def _log_retrieval(
+        self,
+        query: str,
+        semantic: list[RetrievedChunk],
+        fulltext: list[RetrievedChunk],
+        chosen: list[RetrievedChunk],
+    ) -> None:
+        """Development-only trace of what retrieval saw and picked."""
+        if str(self._setting("app_environment", "")).lower() != "development":
+            return
+        logger.info(
+            "retrieval query=%r semantic=%s fulltext=%s chosen=%s",
+            query[:200],
+            [(c.title[:40], round(1 - (c.distance or 0), 3)) for c in semantic[:8]],
+            [(c.title[:40], round(c.rank, 3)) for c in fulltext[:8]],
+            [
+                (
+                    c.title[:40],
+                    c.chunk_id.hex[:8],
+                    None if c.distance is None else round(1 - c.distance, 3),
+                    round(c.rank, 3),
+                )
+                for c in chosen
+            ],
+        )
 
     def _base_query(self, user_id: UUID, scope: _Scope) -> Select[tuple[MemoryChunk, MemoryItem]]:
         stmt = (
@@ -293,6 +351,7 @@ class RetrievalService:
             rank=rank,
             start_sec=chunk.start_sec,
             end_sec=chunk.end_sec,
+            vector=tuple(chunk.embedding) if chunk.embedding is not None else None,
         )
 
     def _semantic_search(
@@ -332,46 +391,66 @@ class RetrievalService:
         except Exception:
             logger.exception("Semantic retrieval failed; continuing with lexical search")
             return []
+        # Below this cosine similarity a vector neighbour is not relevant.
+        max_distance = 1.0 - float(self._setting("rag_min_similarity", 0.25))
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
-            if dist is None or float(dist) > self.settings.rag_max_distance:
+            if dist is None or float(dist) > max_distance:
                 continue
             results.append(self._to_retrieved(chunk, item, float(dist), lexical=False))
         return results
 
-    def _lexical_search(
+    def _fulltext_search(
         self,
         user_id: UUID,
-        query: str,
+        tokens: list[str],
         top_k: int,
         scope: _Scope,
     ) -> list[RetrievedChunk]:
-        tokens = _query_tokens(query)
-        if not tokens:
-            return []
+        """Postgres full-text search over chunk text and memory titles.
 
-        filters = [
-            or_(
-                MemoryChunk.content.ilike(f"%{token}%"),
-                MemoryItem.title.ilike(f"%{token}%"),
-            )
-            for token in tokens[:6]
-        ]
-        candidate_limit = max(top_k * 4, 16)
+        Terms are OR-ed (natural-language questions rarely contain every word
+        of the answer) and ranked with ``ts_rank_cd``. A hit must match enough
+        distinct query terms (``_min_token_matches``), so one stray shared word
+        is not a match.
+        """
+        cleaned = (_TSQUERY_SAFE.sub("", token) for token in tokens)
+        terms = list(dict.fromkeys(term for term in cleaned if term))[:12]
+        if not terms:
+            return []
+        query = func.to_tsquery("english", " | ".join(terms))
+        document = MemoryChunk.content_tsv.op("||")(MemoryItem.title_tsv)
+        rank = func.ts_rank_cd(MemoryChunk.content_tsv, query) + func.ts_rank_cd(
+            MemoryItem.title_tsv, query
+        )
+        matched = sum(
+            (
+                case((document.op("@@")(func.to_tsquery("english", term)), 1), else_=0)
+                for term in terms
+            ),
+            start=literal(0),
+        )
         stmt = (
             self._base_query(user_id, scope)
-            .where(or_(*filters))
-            .limit(candidate_limit)
+            .add_columns(rank.label("rank"), matched.label("matched"))
+            .where(document.op("@@")(query))
+            .order_by(rank.desc(), MemoryItem.captured_at.desc())
+            .limit(top_k)
         )
-        rows = cast(list[tuple[MemoryChunk, MemoryItem]], self.db.execute(stmt).all())
-        scored: list[RetrievedChunk] = []
-        for chunk, item in rows:
-            rank = _lexical_rank(item.title, chunk.content, tokens)
-            if rank <= 0:
-                continue
-            scored.append(self._to_retrieved(chunk, item, None, lexical=True, rank=rank))
-        scored.sort(key=lambda item: (-item.rank, -item.captured_at.timestamp()))
-        return scored[:top_k]
+        try:
+            rows = cast(
+                list[tuple[MemoryChunk, MemoryItem, float, int]], self.db.execute(stmt).all()
+            )
+        except Exception:
+            logger.exception("Full-text retrieval failed")
+            self.db.rollback()
+            return []
+        needed = _min_token_matches(len(terms))
+        return [
+            self._to_retrieved(chunk, item, None, lexical=True, rank=float(score))
+            for chunk, item, score, hits in rows
+            if int(hits) >= needed and float(score) > 0
+        ]
 
     def _recent_chunks(
         self,

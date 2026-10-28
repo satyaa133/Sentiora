@@ -104,3 +104,36 @@ node scripts/run-python.mjs -m scripts.reprocess_memories --reclean --embed   # 
 Embeds chunks of READY memories whose vector is missing or from another model,
 committing per batch. It only selects chunks that still need work, so it is
 idempotent and resumable; it stops at the first provider failure.
+
+## R4 — Retrieval
+
+`RetrievalService.retrieve_relevant_memories` (same signature) now runs:
+
+1. **Query rewrite** (`app/services/retrieval/query_rewriter.py`). With chat
+   history, a short LLM call turns the question into a standalone query
+   ("what about the optimal one?" → "optimal approach to rotate an array by K
+   places"). No history: the question as-is. Provider failure or unusable
+   output: the previous user question + the follow-up.
+2. **Two legs, 30 candidates each.**
+   - Vector: pgvector cosine distance over chunks with the current
+     `embedding_model`; hits below `RAG_MIN_SIMILARITY` (cosine, default 0.25)
+     are dropped.
+   - Full-text: `to_tsquery('english', t1 | t2 | …)` over `content_tsv ||
+     title_tsv`, ranked by `ts_rank_cd(content) + ts_rank_cd(title)`. A hit
+     must match enough distinct query terms (1 for ≤2 terms, else ⌈n/3⌉, min 2).
+3. **Not covered.** If both legs are empty, retrieval returns `[]` and Ask
+   treats the question as not covered by memory.
+4. **Fusion and selection** (`app/services/retrieval/selection.py`):
+   Reciprocal Rank Fusion (k = 60) → near-duplicate removal (3-word shingle
+   Jaccard > 0.8) → MMR (λ = `RAG_MMR_LAMBDA`, 0.7; cosine on stored vectors,
+   shingle Jaccard when a vector is missing) with at most
+   `RAG_MAX_CHUNKS_PER_MEMORY` (2) chunks per memory → top `RAG_FINAL_K` (6).
+   Questions scoped to one memory, and summary questions (up to 8 chunks), are
+   not capped per memory.
+5. **Isolation.** Every query filters `memory_chunks.user_id` and
+   `memory_items.user_id` (plus READY, not deleted).
+6. **Dev logging.** With `APP_ENVIRONMENT=development` each retrieval logs the
+   query, the top scores of each leg and the chosen chunks.
+
+`RAG_MAX_DISTANCE` is replaced by `RAG_MIN_SIMILARITY`. `GET /search` returns
+retrieval's choice without the extra "strong match only" filter.

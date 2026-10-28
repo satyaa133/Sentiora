@@ -169,14 +169,14 @@ def test_fusion_keeps_a_strong_semantic_hit_without_keyword_overlap() -> None:
         )
 
     service = RetrievalService.__new__(RetrievalService)
-    service.settings = type("S", (), {"rag_strong_distance": 0.4})()
+    service.settings = type("S", (), {})()
     keyword = chunk(None, 3.0)
     strong = chunk(0.2, 0.0)
-    loose = chunk(0.6, 0.0)
-    fused = service._fuse([strong, loose], [keyword])
+    fused = service._select([strong], [keyword], limit=6, per_memory=2)
     ids = [c.chunk_id for c in fused]
+    # Meaning-only hits (already past the similarity threshold) are kept next
+    # to keyword hits: natural-language questions rarely share the words.
     assert keyword.chunk_id in ids and strong.chunk_id in ids
-    assert loose.chunk_id not in ids
 
 
 # -- answer modes -------------------------------------------------------------

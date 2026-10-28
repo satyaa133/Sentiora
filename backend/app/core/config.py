@@ -62,8 +62,20 @@ class Settings(BaseSettings):
     llm_key_cooldown_seconds: int = 300
     # RAG retrieval tuning
     rag_top_k: int = 15
-    rag_max_distance: float = 0.65
-    # A semantic-only hit is kept next to keyword hits only below this distance.
+    # Chunks handed to the model per question (summary questions take up to 8).
+    rag_final_k: int = 6
+    # Candidates fetched from each retrieval leg (vector, full-text) before fusion.
+    rag_candidates: int = 30
+    # Cosine similarity a vector hit needs to count as relevant. When no hit
+    # clears it and no full-text hit matches, the question is "not covered".
+    rag_min_similarity: float = 0.25
+    # MMR trade-off between relevance (1.0) and diversity (0.0).
+    rag_mmr_lambda: float = 0.7
+    # At most this many chunks from one memory, unless the question is scoped
+    # to that memory or asks for a summary.
+    rag_max_chunks_per_memory: int = 2
+    # "Which sources mention X" answers: a meaning-only hit must be at least
+    # this close (cosine distance) to be listed as mentioning X.
     rag_strong_distance: float = 0.4
     # Maximum total characters of retrieved chunk content sent to the LLM.
     # Keeps prompt size predictable and within token budget.

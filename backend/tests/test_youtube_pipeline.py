@@ -295,7 +295,7 @@ def test_transcript_is_retrievable_semantically(monkeypatch: pytest.MonkeyPatch)
 
     # Bag-of-words test vectors are far sparser than real embeddings, so a short
     # query sits further away; widen the cutoff for this fixture only.
-    monkeypatch.setattr(get_settings(), "rag_max_distance", 0.95)
+    monkeypatch.setattr(get_settings(), "rag_min_similarity", 0.05)
 
     db = SessionLocal()
     try:
