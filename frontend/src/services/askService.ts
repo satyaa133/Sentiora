@@ -63,6 +63,29 @@ export interface AskLaunch {
   autoSend?: boolean;
 }
 
+/** One matching chunk from GET /search, best match first. */
+export interface SearchHit {
+  memory_id: string;
+  chunk_id: string;
+  title: string;
+  url: string;
+  source_type: SourceType;
+  content: string;
+  heading: string | null;
+  page_number: number | null;
+  captured_at: string;
+  distance: number | null;
+}
+
+/** Hybrid semantic search over the user's memory chunks. */
+export async function searchMemories(q: string, signal?: AbortSignal): Promise<SearchHit[]> {
+  const resp = await apiClient.get<APIEnvelope<SearchHit[]>>("/search", {
+    params: { q, top_k: 12 },
+    signal,
+  });
+  return resp.data.data;
+}
+
 /** Error thrown when the API returns a non-2xx status. Carries the HTTP status code. */
 export class AskApiError extends Error {
   constructor(

@@ -373,6 +373,38 @@ def test_search_lexical_without_embeddings(monkeypatch) -> None:  # type: ignore
     assert any("halves the search interval" in hit["content"] for hit in hits)
 
 
+def test_search_drops_weak_meaning_only_matches(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from dataclasses import replace
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from app.models.memory_item import SourceType
+    from app.services.retrieval_service import RetrievedChunk
+
+    base = RetrievedChunk(
+        memory_id=uuid4(), chunk_id=uuid4(), title="t", url="https://example.com",
+        source_type=SourceType.webpage, content="c", domain="example.com", heading=None,
+        page_number=None, captured_at=datetime.now(UTC), distance=None,
+    )
+    found = [
+        replace(base, chunk_id=uuid4(), title="strong", distance=0.25),
+        replace(base, chunk_id=uuid4(), title="keyword", distance=None, lexical=True, rank=1.0),
+        replace(base, chunk_id=uuid4(), title="both", distance=0.55, rank=0.8),
+        replace(base, chunk_id=uuid4(), title="weak", distance=0.5),
+    ]
+    monkeypatch.setattr(
+        "app.api.v1.ask_routes.RetrievalService.retrieve_relevant_memories",
+        lambda self, **kwargs: found,
+    )
+    resp = client.get(
+        "/api/v1/search",
+        params={"q": "anything"},
+        headers=_auth_headers("ask_search_weak@example.com"),
+    )
+    assert resp.status_code == 200
+    assert [hit["title"] for hit in resp.json()["data"]] == ["strong", "keyword", "both"]
+
+
 REACT_ARTICLE = """
 React Server Components allow components to render on the server.
 This reduces the amount of JavaScript shipped to the browser and can improve load time.

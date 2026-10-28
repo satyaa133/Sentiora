@@ -1,11 +1,21 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useEchoSearchEvents } from "../echo/useEchoSearchEvents";
 import { Button, Chip, IconSearch, Input, MemoryList, MemoryRow } from "@shared/ui";
 import EmptyState from "../EmptyState";
 import MemoryFeedSkeleton from "../MemoryFeedSkeleton";
+import { searchMemories, type SearchHit } from "../../services/askService";
 import type { MemoryItem } from "../../types/memory";
 import { formatExtractedContent } from "../../utils/contentFormatter";
 import { dayLabel } from "../../utils/dates";
+
+const SEMANTIC_MIN_CHARS = 2;
+const SEMANTIC_DEBOUNCE_MS = 300;
+
+/** A search result row: the memory, and the passage that matched when we know it. */
+interface SearchResult {
+  item: MemoryItem;
+  matched: string | null;
+}
 
 interface SearchViewProps {
   items: MemoryItem[];
@@ -24,7 +34,13 @@ export default function SearchView({
 }: SearchViewProps) {
   const [query, setQuery] = useState("");
 
-  const searchResults = useMemo(() => {
+  const [hits, setHits] = useState<{ query: string; hits: SearchHit[] } | null>(null);
+  // Waiting for semantic matches (debounce + request) for the current query, so
+  // "No results" is not shown before they arrive.
+  const trimmed = query.trim();
+  const searching = trimmed.length >= SEMANTIC_MIN_CHARS && hits?.query !== trimmed;
+
+  const localResults = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
     return items.filter(
@@ -35,6 +51,48 @@ export default function SearchView({
         (item.author?.toLowerCase().includes(q) ?? false),
     );
   }, [items, query]);
+
+  // Semantic matches once typing settles; a newer query cancels the older request.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < SEMANTIC_MIN_CHARS) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      searchMemories(q, controller.signal)
+        .then((found) => setHits({ query: q, hits: found }))
+        .catch(() => {
+          // Failed (not cancelled): settle with no semantic matches, so the
+          // local matches or "No results" show instead of waiting forever.
+          if (!controller.signal.aborted) setHits({ query: q, hits: [] });
+        });
+    }, SEMANTIC_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
+
+  const searchResults = useMemo<SearchResult[]>(() => {
+    if (!query.trim()) return [];
+    const byId = new Map(items.map((item) => [item.id, item]));
+    const seen = new Set<string>();
+    const merged: SearchResult[] = [];
+    if (hits && hits.query === query.trim()) {
+      for (const hit of hits.hits) {
+        const item = byId.get(hit.memory_id);
+        if (!item || seen.has(item.id)) continue;
+        seen.add(item.id);
+        const matched = hit.content.replace(/\s+/g, " ").trim();
+        merged.push({ item, matched: matched || null });
+      }
+    }
+    for (const item of localResults) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      merged.push({ item, matched: null });
+    }
+    return merged;
+  }, [hits, items, localResults, query]);
 
   useEchoSearchEvents(query, searchResults.length);
 
@@ -95,7 +153,12 @@ export default function SearchView({
           }
         />
       ) : (
-        <SearchResults query={query} results={searchResults} onSelectItem={onSelectItem} />
+        <SearchResults
+          query={query}
+          results={searchResults}
+          searching={searching}
+          onSelectItem={onSelectItem}
+        />
       )}
     </div>
   );
@@ -104,10 +167,12 @@ export default function SearchView({
 function SearchResults({
   query,
   results: searchResults,
+  searching,
   onSelectItem,
 }: {
   query: string;
-  results: MemoryItem[];
+  results: SearchResult[];
+  searching: boolean;
   onSelectItem: (item: MemoryItem) => void;
 }) {
   return (
@@ -116,16 +181,17 @@ function SearchResults({
         <p role="status" className="text-[15px] text-muted">
           {searchResults.length} {searchResults.length === 1 ? "result" : "results"} for
           &ldquo;{query}&rdquo;
+          {searching ? <span> · Searching…</span> : null}
         </p>
       ) : null}
 
       {searchResults.length > 0 ? (
         <MemoryList>
-          {searchResults.map((item) => (
+          {searchResults.map(({ item, matched }) => (
             <MemoryRow
               key={item.id}
               title={item.title}
-              snippet={formatExtractedContent(item).cleanText.slice(0, 240)}
+              snippet={(matched ?? formatExtractedContent(item).cleanText).slice(0, 240)}
               sourceType={item.source_type}
               dateLabel={dayLabel(item.captured_at)}
               dateTime={item.captured_at}
@@ -133,7 +199,7 @@ function SearchResults({
             />
           ))}
         </MemoryList>
-      ) : query.trim() ? (
+      ) : query.trim() && searching ? null : query.trim() ? (
         <EmptyState
           title="No results"
           body={
