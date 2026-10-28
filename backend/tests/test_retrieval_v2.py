@@ -282,3 +282,15 @@ def test_two_word_keyword_only_hit_needs_both_words_when_vectors_work(
     # Keyword-only search (no embeddings) keeps the lenient one-word rule.
     monkeypatch.setattr("app.services.retrieval_service.get_embedding_adapter", lambda: None)
     assert _retrieve(user_id, "trellis australia")[0].memory_id == garden
+
+
+def test_long_referential_follow_up_is_rewritten() -> None:
+    calls: list[str] = []
+
+    def complete(prompt: str, system: str) -> str:
+        calls.append(prompt)
+        return "another sliding window example"
+
+    query = rewrite_query("give me another example of that pattern please", HISTORY, complete)
+    assert query == "another sliding window example"
+    assert len(calls) == 1

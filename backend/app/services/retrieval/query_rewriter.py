@@ -34,8 +34,8 @@ _MAX_QUERY_CHARS = 300
 # questions with one of these, or very short ones, need an LLM rewrite; a
 # standalone question is searched as asked, which saves a model round trip.
 _REFERENTIAL_RE = re.compile(
-    r"(it|its|this|that|these|those|they|them|their|there|above|previous|earlier|"
-    r"same|former|latter|another|else|again|one|ones|more)",
+    r"\b(it|its|this|that|these|those|they|them|their|there|above|previous|earlier|"
+    r"same|former|latter|another|else|again|one|ones|more)\b",
     re.IGNORECASE,
 )
 _SHORT_QUESTION_WORDS = 5
