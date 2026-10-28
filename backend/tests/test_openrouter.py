@@ -24,7 +24,7 @@ def test_openrouter_routing(monkeypatch: pytest.MonkeyPatch) -> None:
         )(),
     )
 
-    def mock_complete(self: Any, question: str, context: str) -> str:
+    def mock_complete(self: Any, prompt: str, system_prompt: str, backend: Any) -> str:
         return "OpenRouter mock response"
 
     monkeypatch.setattr("app.services.rag_service.RagService._complete_openrouter", mock_complete)
@@ -112,7 +112,7 @@ def test_openrouter_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
         )(),
     )
 
-    def mock_complete(self: Any, question: str, context: str) -> str:
+    def mock_complete(self: Any, prompt: str, system_prompt: str, backend: Any) -> str:
         raise LLMProviderError("Provider is down")
 
     monkeypatch.setattr("app.services.rag_service.RagService._complete_openrouter", mock_complete)

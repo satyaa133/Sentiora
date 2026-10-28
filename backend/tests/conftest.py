@@ -28,12 +28,13 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # Never call live embedding providers from tests (index or query time), even if
 # real keys exist in the local .env files.
 os.environ["EMBEDDING_PROVIDER"] = "none"
-for _key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY"):
+for _key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"):
     os.environ[_key] = ""
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.login_backoff import login_backoff  # noqa: E402
 from app.core.rate_limit import limiter  # noqa: E402
+from app.services.llm_pool import key_pool  # noqa: E402
 
 
 def pytest_report_header() -> str:
@@ -74,6 +75,7 @@ def disable_live_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
 def reset_security_limiters(monkeypatch: pytest.MonkeyPatch) -> None:
     limiter.reset()
     login_backoff.reset()
+    key_pool.reset()
     settings = get_settings()
     monkeypatch.setattr(settings, "rate_limit_login_per_minute", 1000)
     monkeypatch.setattr(settings, "rate_limit_register_per_minute", 1000)

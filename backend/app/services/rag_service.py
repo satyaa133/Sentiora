@@ -33,14 +33,20 @@ from app.services.ask_intent import (
     scoped_intent,
     topic_of,
 )
+from app.services.llm_pool import (
+    DEFAULT_COOLDOWN_SECONDS,
+    LLMBackend,
+    build_backends,
+    key_pool,
+)
 from app.services.rag_sanitize import (
     UNTRUSTED_CONTEXT_INSTRUCTIONS,
     sanitize_untrusted_text,
     strip_instruction_like_lines,
 )
 from app.services.retrieval_service import (
-    RetrievedChunk,
     RetrievalService,
+    RetrievedChunk,
     keyword_coverage,
     needs_document_context,
 )
@@ -62,6 +68,11 @@ LISTING_LIMIT = 20
 
 class LLMNotConfiguredError(RuntimeError):
     """Raised when the LLM API key is not set and no retrieved memory is available."""
+
+
+# Per-key limit for one answer. Answers take a few seconds; a key that hangs
+# this long is treated as down so the next key (or the memory answer) is used.
+CHAT_TIMEOUT_SECONDS = 25
 
 
 class LLMProviderError(RuntimeError):
@@ -524,11 +535,7 @@ class RagService:
         self.settings = get_settings()
 
     def _llm_configured(self) -> bool:
-        if self.settings.llm_provider == "gemini":
-            return bool(self.settings.gemini_api_key)
-        if self.settings.llm_provider == "openrouter":
-            return bool(self.settings.openrouter_api_key)
-        return bool(self.settings.openai_api_key)
+        return bool(build_backends(self.settings))
 
     def ask(
         self,
@@ -819,19 +826,58 @@ class RagService:
                 f"END_UNTRUSTED_MEMORY_DATA"
             )
 
-        if self.settings.llm_provider == "gemini":
-            return self._complete_gemini(prompt, system_prompt)
-        if self.settings.llm_provider == "openrouter":
-            return self._complete_openrouter(prompt, system_prompt)
-        return self._complete_openai(prompt, system_prompt)
+        backends = build_backends(self.settings)
+        if not backends:
+            raise LLMProviderError("No chat model key is configured.")
+        cooldown = int(
+            getattr(self.settings, "llm_key_cooldown_seconds", DEFAULT_COOLDOWN_SECONDS)
+            or DEFAULT_COOLDOWN_SECONDS
+        )
+        last_error: Exception | None = None
+        # Rotate across keys; a key that fails is skipped for a while and the
+        # next one answers. Only when every key fails does the error surface.
+        for backend in key_pool.order(backends):
+            try:
+                answer = self._call_backend(backend, prompt, system_prompt)
+            except Exception as exc:
+                status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+                status = status if isinstance(status, int) else None
+                if status == 400 and "api key" in str(exc).lower():
+                    # Gemini answers a bad or revoked key with 400, not 401.
+                    status = 401
+                timed_out = "timeout" in type(exc).__name__.lower()
+                cooled = key_pool.mark_failed(
+                    backend, status, timed_out=timed_out, cooldown_seconds=cooldown
+                )
+                logger.warning(
+                    "Chat backend %s failed (status=%s, cooled=%s); trying the next key",
+                    backend.name,
+                    status,
+                    cooled,
+                )
+                last_error = exc
+                continue
+            key_pool.mark_ok(backend)
+            return answer
+        assert last_error is not None
+        raise last_error
+
+    def _call_backend(self, backend: LLMBackend, prompt: str, system_prompt: str) -> str:
+        if backend.provider == "gemini":
+            return self._complete_gemini(prompt, system_prompt, backend)
+        if backend.provider == "openrouter":
+            return self._complete_openrouter(prompt, system_prompt, backend)
+        return self._complete_openai(prompt, system_prompt, backend)
 
     def _max_output_tokens(self) -> int:
         return int(getattr(self.settings, "rag_max_output_tokens", 900) or 900)
 
-    def _complete_openai(self, prompt: str, system_prompt: str) -> str:
-        client = OpenAI(api_key=self.settings.openai_api_key, timeout=45.0)
+    def _complete_openai(self, prompt: str, system_prompt: str, backend: LLMBackend) -> str:
+        # max_retries=0: the key pool fails over to the next key instead of
+        # the SDK backing off and retrying a rate-limited one.
+        client = OpenAI(api_key=backend.api_key, timeout=CHAT_TIMEOUT_SECONDS, max_retries=0)
         completion = client.chat.completions.create(
-            model=self.settings.openai_chat_model,
+            model=backend.model,
             temperature=0.2,
             max_tokens=self._max_output_tokens(),
             messages=[
@@ -841,14 +887,15 @@ class RagService:
         )
         return completion.choices[0].message.content or ""
 
-    def _complete_openrouter(self, prompt: str, system_prompt: str) -> str:
+    def _complete_openrouter(self, prompt: str, system_prompt: str, backend: LLMBackend) -> str:
         client = OpenAI(
-            api_key=self.settings.openrouter_api_key,
+            api_key=backend.api_key,
             base_url="https://openrouter.ai/api/v1",
-            timeout=45.0,
+            timeout=CHAT_TIMEOUT_SECONDS,
+            max_retries=0,  # see _complete_openai
         )
         completion = client.chat.completions.create(
-            model=self.settings.openrouter_chat_model,
+            model=backend.model,
             temperature=0.2,
             max_tokens=self._max_output_tokens(),
             messages=[
@@ -862,23 +909,37 @@ class RagService:
         )
         return completion.choices[0].message.content or ""
 
-    def _complete_gemini(self, prompt: str, system_prompt: str) -> str:
+    def _complete_gemini(self, prompt: str, system_prompt: str, backend: LLMBackend) -> str:
         from google import genai
         from google.genai import types
 
         client = genai.Client(
-            api_key=self.settings.gemini_api_key,
-            http_options=types.HttpOptions(timeout=45_000),  # ms; matches OpenAI
+            api_key=backend.api_key,
+            http_options=types.HttpOptions(timeout=CHAT_TIMEOUT_SECONDS * 1000),  # ms
         )
-        response = client.models.generate_content(
-            model=self.settings.gemini_chat_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.2,
-                max_output_tokens=self._max_output_tokens(),
-            ),
-        )
+        def generate(thinking: types.ThinkingConfig | None) -> object:
+            return client.models.generate_content(
+                model=backend.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.2,
+                    max_output_tokens=self._max_output_tokens(),
+                    thinking_config=thinking,
+                ),
+            )
+
+        # Thinking tokens count against max_output_tokens on Gemini 2.5+/3.x and
+        # cut answers off before the cited memory part; grounded answers don't
+        # need them, and skipping them roughly halves latency.
+        try:
+            response = generate(types.ThinkingConfig(thinking_budget=0))
+        except Exception as exc:
+            # Some models (e.g. 2.5 Pro) refuse to switch thinking off; any other
+            # 400 (a bad key, a bad request) would only fail again.
+            if getattr(exc, "code", None) != 400 or "thinking" not in str(exc).lower():
+                raise
+            response = generate(None)
         return _gemini_response_text(response)
 
 

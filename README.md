@@ -168,6 +168,8 @@ cd backend && .venv\Scripts\alembic upgrade head
 
 Set `LLM_PROVIDER` (`openai`, `gemini`, or `openrouter`) plus its key in `backend/.env` (see `.env.example`). Docker backend and worker read that file.
 
+**More than one chat key.** Ask rotates across every chat key that is set (`OPENROUTER_API_KEY`, the optional `OPENROUTER_API_KEY_2`, `GEMINI_API_KEY`, `OPENAI_API_KEY`), starting with the `LLM_PROVIDER` one. A key that is out of credits, revoked or rate-limited is skipped for `LLM_KEY_COOLDOWN_SECONDS` (default 300), an overloaded one for 30 seconds, so answers never wait on a dead key. `backend/.env` is git-ignored; never put keys in `.env.example`.
+
 **Semantic search needs an embedding key.** OpenRouter provides chat only, so with `LLM_PROVIDER=openrouter` set `OPENAI_API_KEY` or `GEMINI_API_KEY` as well. `EMBEDDING_PROVIDER=auto` (default) picks the provider; `GEMINI_EMBEDDING_MODEL` must output 1536 dimensions (`gemini-embedding-001`). Restart the API and worker after changing keys. Vectors are model-specific, so re-capture after switching embedding models.
 
 Without a provider key:

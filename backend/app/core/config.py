@@ -50,6 +50,11 @@ class Settings(BaseSettings):
     gemini_chat_model: str = "gemini-2.5-flash"
     openrouter_api_key: str | None = None
     openrouter_chat_model: str = "anthropic/claude-haiku-4.5"
+    # Optional second OpenRouter key. Ask rotates across every configured chat
+    # key and skips one that is out of credits or rate-limited (llm_pool.py).
+    openrouter_api_key_2: str | None = None
+    # How long a failing chat key is skipped before it is tried again.
+    llm_key_cooldown_seconds: int = 300
     # RAG retrieval tuning
     rag_top_k: int = 15
     rag_max_distance: float = 0.65
