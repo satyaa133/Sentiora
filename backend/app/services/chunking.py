@@ -44,8 +44,10 @@ def chunk_content(
     if not text or not text.strip():
         return []
 
-    blocks = _split_into_blocks(text.strip(), source_type, title)
-    packed = _pack_blocks(blocks, fallback_heading=title if source_type != SourceType.webpage else None)
+    # The title is stored on the memory, never inside chunk text: prefixing it
+    # pollutes embeddings, dedup keys, excerpts and extractive answers.
+    blocks = _split_into_blocks(text.strip(), source_type)
+    packed = _pack_blocks(blocks, fallback_heading=None)
     return [
         ChunkDraft(
             chunk_index=index,
@@ -96,8 +98,9 @@ def chunk_transcript(
 ) -> list[ChunkDraft]:
     """Pack timestamped transcript segments into chunks that keep their time range.
 
-    The range is recorded in the chunk heading (e.g. ``Title [02:15–04:30]``) so
+    The range is recorded in the chunk heading (e.g. ``[02:15–04:30]``) so
     citations and the RAG prompt can point back to the moment in the video.
+    ``title`` is accepted for compatibility and not used.
     Returns [] when the content has no timed segments, so callers can fall back
     to plain-text chunking.
     """
@@ -105,7 +108,6 @@ def chunk_transcript(
     if not segments:
         return []
 
-    base = (title or "Transcript").strip()
     drafts: list[ChunkDraft] = []
     parts: list[str] = []
     span_start = span_end = 0.0
@@ -114,7 +116,7 @@ def chunk_transcript(
         nonlocal parts
         body = " ".join(parts).strip()
         if body:
-            heading = f"{base} [{format_timestamp(span_start)}–{format_timestamp(span_end)}]"
+            heading = f"[{format_timestamp(span_start)}–{format_timestamp(span_end)}]"
             drafts.append(
                 ChunkDraft(
                     chunk_index=len(drafts),
@@ -136,11 +138,11 @@ def chunk_transcript(
     return drafts
 
 
-def _split_into_blocks(text: str, source_type: SourceType, title: str | None) -> list[_Block]:
+def _split_into_blocks(text: str, source_type: SourceType) -> list[_Block]:
     if source_type == SourceType.pdf:
         return _split_pdf_blocks(text)
     if source_type == SourceType.youtube:
-        return _split_transcript_blocks(text, title)
+        return _split_transcript_blocks(text)
     return _split_article_blocks(text)
 
 
@@ -166,8 +168,8 @@ def _split_pdf_blocks(text: str) -> list[_Block]:
     return blocks
 
 
-def _split_transcript_blocks(text: str, title: str | None) -> list[_Block]:
-    heading = title or "Transcript"
+def _split_transcript_blocks(text: str) -> list[_Block]:
+    heading = None
     sentences = [part.strip() for part in _SENTENCE_RE.split(text) if part.strip()]
     if not sentences:
         return [_Block(text=text, heading=heading, page_number=None)]
@@ -238,11 +240,9 @@ def _split_oversize(text: str) -> list[str]:
     return pieces
 
 
-def _format_chunk(parts: list[str], heading: str | None) -> str:
-    body = "\n\n".join(part.strip() for part in parts if part.strip())
-    if heading and heading not in body[: len(heading) + 8]:
-        return f"{heading}\n\n{body}".strip()
-    return body.strip()
+def _format_chunk(parts: list[str], heading: str | None = None) -> str:
+    """Chunk body text only; the heading is stored in its own column."""
+    return "\n\n".join(part.strip() for part in parts if part.strip())
 
 
 def _pack_blocks(blocks: list[_Block], fallback_heading: str | None) -> list[ChunkDraft]:

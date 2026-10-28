@@ -195,13 +195,14 @@ def _build_context(chunks: list[RetrievedChunk], max_chars: int) -> str:
         for chunk in group:
             if remaining < 120:
                 break
-            heading = sanitize_untrusted_text(chunk.heading or "General") or "General"
-            page = f" (page {chunk.page_number})" if chunk.page_number is not None else ""
+            heading = sanitize_untrusted_text(chunk.heading or "")
+            page = f"Page: {chunk.page_number}\n" if chunk.page_number is not None else ""
+            section = f"Section: {heading}\n" if heading else ""
             content = sanitize_untrusted_text(chunk.content)
             allowance = min(per_chunk_cap, remaining)
             if len(content) > allowance:
                 content = content[:allowance]
-            sections.append(f"Section: {heading}{page}\nUntrusted content:\n{content}")
+            sections.append(f"{section}{page}Untrusted content:\n{content}")
             remaining -= len(content)
         first = group[0]
         parts.append(

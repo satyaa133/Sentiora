@@ -10,7 +10,7 @@ from app.core.db import SessionLocal
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.repositories.chunk_repository import ChunkRepository
-from app.services.chunking import chunk_content, chunk_transcript
+from app.services.chunking import ChunkDraft, chunk_content, chunk_transcript
 from app.services.content_normalizer import (
     calculate_reading_time,
     calculate_word_count,
@@ -19,6 +19,10 @@ from app.services.content_normalizer import (
     normalize_content,
 )
 from app.services.embedding_service import get_embedding_adapter
+from app.services.ingest.transcript_normalizer import (
+    clean_transcript_nodes,
+    clean_transcript_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +102,98 @@ def _claim(db: DBSession, item_id: UUID) -> bool:
     return getattr(result, "rowcount", 0) == 1
 
 
+def prepare_chunks(item: MemoryItem) -> list[ChunkDraft]:
+    """Normalize the item's text in place and return its chunk drafts.
+
+    YouTube transcripts have rolling-caption overlap removed from both the
+    timed nodes and the plain text first. Raises CaptureProcessingError when
+    nothing searchable is left.
+    """
+    nodes = None
+    if item.source_type == SourceType.youtube:
+        nodes = clean_transcript_nodes(item.structured_content)
+        if nodes:
+            item.structured_content = nodes
+
+    if nodes:
+        normalized = normalize_content(
+            "\n\n".join(node["text"] for node in nodes), item.source_type
+        )
+    else:
+        normalized = normalize_content(item.content, item.source_type)
+        if not normalized and item.content:
+            normalized = item.content.strip()
+        if item.source_type == SourceType.youtube and normalized:
+            normalized = clean_transcript_text(normalized)
+
+    if not normalized or _looks_like_stub(normalized):
+        raise CaptureProcessingError(
+            "Extraction produced no searchable content (metadata/stub only)."
+        )
+
+    word_count = calculate_word_count(normalized)
+    if word_count < MIN_SEARCHABLE_WORDS:
+        raise CaptureProcessingError(
+            f"Extracted text is too short to index ({word_count} words)."
+        )
+
+    drafts: list[ChunkDraft] = []
+    if nodes:
+        # Timestamped transcript segments keep their time range per chunk.
+        drafts = chunk_transcript(nodes)
+    if not drafts:
+        drafts = chunk_content(normalized, item.source_type)
+    if not drafts:
+        raise CaptureProcessingError("Chunking produced no searchable units.")
+
+    item.content = normalized
+    item.domain = extract_domain(item.url) or item.domain
+    item.language = detect_language(normalized)
+    item.content_length = len(normalized)
+    item.word_count = word_count
+    item.reading_time_seconds = calculate_reading_time(word_count)
+    return drafts
+
+
+def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
+    """Fill ``chunk.embedding`` for every chunk; returns the adapter used, or None."""
+    try:
+        adapter = get_embedding_adapter()
+    except Exception as adapter_exc:
+        logger.exception("memory_id=%s stage=embed adapter_init_failed", memory_label)
+        raise CaptureProcessingError(
+            f"Embedding adapter failed to initialize: {adapter_exc}"
+        ) from adapter_exc
+
+    if not adapter:
+        logger.warning(
+            "memory_id=%s stage=embed skipped=no_api_key lexical_only=true", memory_label
+        )
+        return None
+
+    logger.info("memory_id=%s stage=embed chunks=%d", memory_label, len(chunks))
+    try:
+        vectors = adapter.embed_texts([chunk.content for chunk in chunks])
+        expected = _vector_dim()
+        if len(vectors) != len(chunks):
+            raise CaptureProcessingError(
+                f"Embedding count mismatch: got {len(vectors)} for {len(chunks)} chunks."
+            )
+        for chunk, vector in zip(chunks, vectors, strict=True):
+            if not vector or len(vector) != expected:
+                raise CaptureProcessingError(
+                    f"Embedding dimension mismatch: expected {expected}, got {len(vector) if vector else 0}."
+                )
+            chunk.embedding = vector
+    except CaptureProcessingError:
+        raise
+    except Exception as emb_exc:
+        logger.exception("memory_id=%s stage=embed failed", memory_label)
+        raise CaptureProcessingError(f"Embedding generation failed: {emb_exc}") from emb_exc
+    logger.info("memory_id=%s stage=store embeddings=%d", memory_label, len(vectors))
+    return adapter
+
+
 def process_capture(memory_item_id_str: str) -> None:
     """Normalize, chunk, optionally embed, then mark READY or FAILED."""
     logger.info("memory_id=%s stage=start", memory_item_id_str)
@@ -163,38 +259,7 @@ def process_capture(memory_item_id_str: str) -> None:
         db.commit()
 
         logger.info("memory_id=%s stage=normalize source_type=%s", memory_item_id_str, item.source_type)
-        normalized = normalize_content(item.content, item.source_type)
-        if not normalized and item.content:
-            normalized = item.content.strip()
-
-        if not normalized or _looks_like_stub(normalized):
-            raise CaptureProcessingError(
-                "Extraction produced no searchable content (metadata/stub only)."
-            )
-
-        word_count = calculate_word_count(normalized)
-        if word_count < MIN_SEARCHABLE_WORDS:
-            raise CaptureProcessingError(
-                f"Extracted text is too short to index ({word_count} words)."
-            )
-
-        logger.info("memory_id=%s stage=chunk words=%d", memory_item_id_str, word_count)
-        drafts = []
-        if item.source_type == SourceType.youtube:
-            # Timestamped transcript segments keep their time range per chunk.
-            drafts = chunk_transcript(item.structured_content, title=item.title)
-        if not drafts:
-            drafts = chunk_content(normalized, item.source_type, title=item.title)
-        if not drafts:
-            raise CaptureProcessingError("Chunking produced no searchable units.")
-
-        item.content = normalized
-        item.domain = extract_domain(item.url) or item.domain
-        item.language = detect_language(normalized)
-        item.content_length = len(normalized)
-        item.word_count = word_count
-        item.reading_time_seconds = calculate_reading_time(item.word_count)
-
+        drafts = prepare_chunks(item)
         chunks = [
             MemoryChunk(
                 memory_id=item.id,
@@ -208,45 +273,7 @@ def process_capture(memory_item_id_str: str) -> None:
             for draft in drafts
         ]
         ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
-
-        adapter = None
-        try:
-            adapter = get_embedding_adapter()
-        except Exception as adapter_exc:
-            logger.exception(
-                "memory_id=%s stage=embed adapter_init_failed",
-                memory_item_id_str,
-            )
-            raise CaptureProcessingError(
-                f"Embedding adapter failed to initialize: {adapter_exc}"
-            ) from adapter_exc
-
-        if adapter:
-            logger.info("memory_id=%s stage=embed chunks=%d", memory_item_id_str, len(chunks))
-            try:
-                vectors = adapter.embed_texts([chunk.content for chunk in chunks])
-                expected = _vector_dim()
-                if len(vectors) != len(chunks):
-                    raise CaptureProcessingError(
-                        f"Embedding count mismatch: got {len(vectors)} for {len(chunks)} chunks."
-                    )
-                for chunk, vector in zip(chunks, vectors, strict=True):
-                    if not vector or len(vector) != expected:
-                        raise CaptureProcessingError(
-                            f"Embedding dimension mismatch: expected {expected}, got {len(vector) if vector else 0}."
-                        )
-                    chunk.embedding = vector
-                logger.info("memory_id=%s stage=store embeddings=%d", memory_item_id_str, len(vectors))
-            except CaptureProcessingError:
-                raise
-            except Exception as emb_exc:
-                logger.exception("memory_id=%s stage=embed failed", memory_item_id_str)
-                raise CaptureProcessingError(f"Embedding generation failed: {emb_exc}") from emb_exc
-        else:
-            logger.warning(
-                "memory_id=%s stage=embed skipped=no_api_key lexical_only=true",
-                memory_item_id_str,
-            )
+        adapter = embed_chunks(chunks, memory_item_id_str)
 
         item.status = ItemStatus.ready
         item.processing_error = None

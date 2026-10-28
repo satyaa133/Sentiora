@@ -1,6 +1,7 @@
 /**
  * Video citations carry their transcript range in the chunk heading, written by
- * the backend chunker as "Title [02:15–04:30]" (or "[1:02:15–…]" past an hour).
+ * the backend chunker as "[02:15–04:30]" (older captures: "Title [02:15–04:30]";
+ * "[1:02:15–…]" past an hour).
  * These helpers turn that into a "Jump to 02:15" link (DESIGN.md §5.5).
  */
 const RANGE = /\[(\d{1,2}(?::\d{2}){1,2})\s*[–-]/;

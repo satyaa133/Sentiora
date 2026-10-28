@@ -35,6 +35,19 @@
 | 13: Landing sections, final order | ✅ Completed | c20a41c | Before/after, scroll story, extension clip, privacy flow |
 | 14: Performance and docs | ✅ Completed | this commit | App pages code-split; landing LCP 1.75s on throttled mobile (`npm run perf:landing`) |
 
+### Ask Sentiora RAG v2 (docs/RAG_v2_ADDENDUM.md, branch `feat/ask-rag-v2`)
+
+| Phase | Status | Notes |
+| ----- | ------ | ----- |
+| R1: Ingestion cleanup | ✅ Completed | Rolling-caption normalizer, title kept out of chunk text, `scripts.reprocess_memories --reclean` |
+| R2: Chunking | ⏳ Pending | Recursive 400–600 token chunks, 60–90s transcript windows, `start_sec`/`end_sec` |
+| R3: Embeddings | ⏳ Pending | OpenRouter embeddings, per-chunk `embedding_model`, backfill |
+| R4: Retrieval | ⏳ Pending | Query rewrite, pgvector + full-text RRF, threshold, MMR |
+| R5: Generation | ⏳ Pending | `[S#]` citations, SSE `/chat/stream`, structured follow-ups |
+| R6: Env and keys | ⏳ Pending | `OPENROUTER_API_KEY_1..N`, exponential cooldown, startup validation |
+| R7: Ask page UX | ⏳ Pending | Streaming UI, citation chips, sources panel, history |
+| R8: Evaluation | ⏳ Pending | `scripts/eval-rag` hit rate |
+
 
 ---
 

@@ -148,7 +148,7 @@ def test_chunk_transcript_preserves_order_and_time_ranges() -> None:
     drafts = chunk_transcript(nodes, title="Lighthouse Keepers")
     assert drafts, "expected transcript chunks"
     assert [d.chunk_index for d in drafts] == list(range(len(drafts)))
-    assert drafts[0].heading is not None and drafts[0].heading.startswith("Lighthouse Keepers [00:00–")
+    assert drafts[0].heading is not None and drafts[0].heading.startswith("[00:00–")
     assert drafts[-1].heading is not None and drafts[-1].heading.endswith("01:38]")
     joined = " ".join(d.content for d in drafts)
     assert joined.index("welcome back") < joined.index("great gale")
