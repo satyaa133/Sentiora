@@ -127,6 +127,10 @@ def _article_sections(text: str, page_number: int | None) -> list[_Section]:
         body.append(paragraph)
     if body:
         sections.append(_Section(heading, page_number, "\n\n".join(body)))
+    if not sections:
+        # Every line looked like a heading (e.g. a page that is only a tagline):
+        # keep the text as body rather than dropping the capture.
+        sections.append(_Section(None, page_number, "\n\n".join(paragraphs)))
     return sections
 
 

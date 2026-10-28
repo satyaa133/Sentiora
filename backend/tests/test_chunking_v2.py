@@ -90,3 +90,9 @@ def test_transcript_segment_longer_than_a_window_is_split() -> None:
     assert len(drafts) >= 3
     assert all(d.end_sec - d.start_sec <= 90.0 for d in drafts)
     assert drafts[-1].end_sec == 300.0
+
+
+def test_heading_only_text_is_kept_as_body() -> None:
+    text = "JioHotstar - Watch TV Shows, Movies, Specials, Live Cricket & Football"
+    chunks = chunk_content(text, SourceType.webpage)
+    assert [c.content for c in chunks] == [text]
