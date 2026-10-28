@@ -72,3 +72,35 @@ Title and URL are not copied onto chunks; retrieval joins `memory_items`.
 **API.** `AskCitation` and `SearchHit` gain optional `start_sec` / `end_sec`.
 The Ask page's "Jump to" link uses `start_sec`, falling back to the heading
 range for chunks saved before this change.
+
+## R3 — Embeddings
+
+**Providers** (`app/services/embedding_service.py`). `EMBEDDING_PROVIDER` is
+`auto | openrouter | openai | gemini | none`; `auto` picks OpenRouter whenever an
+OpenRouter key is set. `EMBEDDING_MODEL` overrides the provider default
+(OpenRouter: `openai/text-embedding-3-small`, 1536 dimensions, verified live
+against `POST https://openrouter.ai/api/v1/embeddings`). The OpenRouter adapter
+batches 64 inputs per request and rotates across the OpenRouter keys, sharing
+cooldowns with chat (`llm_pool.key_pool`).
+
+**One embedding space.** Every adapter has a `model_id` (`provider:model`),
+stored on each chunk as `memory_chunks.embedding_model`. Query embeddings come
+from the same active adapter and only match chunks with the same
+`embedding_model`. There is no cross-provider fallback for queries: if the
+active provider fails, retrieval uses full-text search only.
+
+**Capture.** Embedding still runs in the RQ capture job. If it fails, the memory
+becomes READY with un-embedded chunks (full-text searchable) instead of FAILED;
+the backfill embeds it later.
+
+**Backfill.**
+
+```bash
+node scripts/run-python.mjs -m scripts.reprocess_memories --embed --dry-run
+node scripts/run-python.mjs -m scripts.reprocess_memories --embed [--user EMAIL] [--batch 64]
+node scripts/run-python.mjs -m scripts.reprocess_memories --reclean --embed   # both, in order
+```
+
+Embeds chunks of READY memories whose vector is missing or from another model,
+committing per batch. It only selects chunks that still need work, so it is
+idempotent and resumable; it stops at the first provider failure.

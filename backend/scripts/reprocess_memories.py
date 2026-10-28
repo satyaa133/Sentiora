@@ -4,6 +4,12 @@ Usage (from the repo root):
 
     node scripts/run-python.mjs -m scripts.reprocess_memories --reclean --dry-run
     node scripts/run-python.mjs -m scripts.reprocess_memories --reclean [--user EMAIL] [--batch 25]
+    node scripts/run-python.mjs -m scripts.reprocess_memories --embed [--user EMAIL] [--dry-run]
+
+``--embed`` embeds every chunk that has no vector, or a vector from a model
+other than the current ``EMBEDDING_MODEL``. It commits after every batch and
+only ever selects chunks that still need work, so it is idempotent and can be
+stopped and re-run at any time. It stops at the first provider failure.
 
 ``--reclean`` re-runs normalization (rolling-caption removal, no title in chunk
 text) and chunking for every READY memory, then tries to embed the new chunks.
@@ -24,12 +30,15 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
+from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem
 from app.models.user import User
 from app.repositories.chunk_repository import ChunkRepository
+from app.services.embedding_service import get_embedding_adapter
 from app.workers.jobs.process_capture import (
     CaptureProcessingError,
     build_chunk_rows,
@@ -138,6 +147,7 @@ def reclean(args: argparse.Namespace) -> int:
                 except CaptureProcessingError as exc:
                     for chunk in chunks:
                         chunk.embedding = None
+                        chunk.embedding_model = None
                     embedded = False
                     logger.warning("memory_id=%s embed_pending reason=%s", item_id, exc)
                 db.commit()
@@ -156,6 +166,76 @@ def reclean(args: argparse.Namespace) -> int:
     return 0
 
 
+def embed(args: argparse.Namespace) -> int:
+    adapter = get_embedding_adapter()
+    model_id = getattr(adapter, "model_id", None)
+    if adapter is None or model_id is None:
+        logger.error(
+            "No embedding provider is configured (EMBEDDING_PROVIDER / API keys)."
+        )
+        return 1
+    expected = get_settings().embedding_dimensions
+    batch_size = max(1, min(args.batch, 256))
+    embedded = 0
+
+    with SessionLocal() as db:
+        user_id = _user_id(db, args.user)
+        needs_work = (
+            select(MemoryChunk)
+            .join(MemoryItem, MemoryItem.id == MemoryChunk.memory_id)
+            .where(
+                MemoryItem.status == ItemStatus.ready,
+                MemoryItem.deleted_at.is_(None),
+                MemoryItem.user_id == MemoryChunk.user_id,
+                or_(
+                    MemoryChunk.embedding.is_(None),
+                    MemoryChunk.embedding_model.is_distinct_from(model_id),
+                ),
+            )
+            .order_by(MemoryChunk.id)
+        )
+        if user_id:
+            needs_work = needs_work.where(MemoryChunk.user_id == user_id)
+
+        total = db.execute(
+            select(func.count()).select_from(needs_work.subquery())
+        ).scalar_one()
+        logger.info("model=%s chunks_to_embed=%d", model_id, total)
+        if args.dry_run:
+            return 0
+
+        while True:
+            chunks = list(db.execute(needs_work.limit(batch_size)).scalars())
+            if not chunks:
+                break
+            try:
+                vectors = adapter.embed_texts([chunk.content for chunk in chunks])
+                if len(vectors) != len(chunks) or any(
+                    len(v) != expected for v in vectors
+                ):
+                    raise RuntimeError(
+                        "provider returned the wrong number or size of vectors"
+                    )
+            except Exception as exc:
+                db.rollback()
+                logger.error(
+                    "stopped after %d/%d chunks: %s. Re-run to continue.",
+                    embedded,
+                    total,
+                    exc,
+                )
+                return 1
+            for chunk, vector in zip(chunks, vectors, strict=True):
+                chunk.embedding = vector
+                chunk.embedding_model = model_id
+            db.commit()
+            embedded += len(chunks)
+            logger.info("embedded %d/%d", embedded, total)
+
+    logger.info("done model=%s embedded=%d", model_id, embedded)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -164,6 +244,11 @@ def main(argv: list[str] | None = None) -> int:
         "--reclean",
         action="store_true",
         help="re-normalize and re-chunk READY memories",
+    )
+    parser.add_argument(
+        "--embed",
+        action="store_true",
+        help="embed chunks missing a current-model vector",
     )
     parser.add_argument("--user", help="limit to one user (email or id)")
     parser.add_argument("--batch", type=int, default=25)
@@ -176,7 +261,11 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     if args.reclean:
-        return reclean(args)
+        status = reclean(args)
+        if status or not args.embed:
+            return status
+    if args.embed:
+        return embed(args)
     parser.print_help()
     return 2
 

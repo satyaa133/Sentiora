@@ -316,12 +316,15 @@ class RetrievalService:
         query_vector = vectors[0]
         if not query_vector:
             return []
+        # Only compare against vectors from the model that embedded the query.
+        model_id = getattr(adapter, "model_id", None)
         try:
             distance = MemoryChunk.embedding.cosine_distance(query_vector)
             stmt = (
                 self._base_query(user_id, scope)
                 .add_columns(distance.label("distance"))
                 .where(MemoryChunk.embedding.is_not(None))
+                .where(MemoryChunk.embedding_model.is_not_distinct_from(model_id))
                 .order_by(distance)
                 .limit(top_k)
             )

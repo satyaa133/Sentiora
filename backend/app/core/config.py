@@ -36,11 +36,16 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
     llm_provider: str = "openai"
-    # Embedding provider for semantic search: "auto" | "openai" | "gemini" | "none".
-    # "auto" follows LLM_PROVIDER when it supports embeddings (openai/gemini);
-    # for chat-only providers such as openrouter it uses the first configured
-    # embedding key (OPENAI_API_KEY, then GEMINI_API_KEY).
+    # Embedding provider for semantic search:
+    # "auto" | "openrouter" | "openai" | "gemini" | "none".
+    # "auto" uses OpenRouter when an OpenRouter key is set; otherwise it follows
+    # LLM_PROVIDER (openai/gemini), then the first configured embedding key.
     embedding_provider: str = "auto"
+    # Embedding model for the chosen provider. Empty = the provider default
+    # (openrouter: openai/text-embedding-3-small). Changing it requires the
+    # embedding backfill: queries only match chunks embedded with this model.
+    embedding_model: str | None = None
+    openrouter_embedding_model: str = "openai/text-embedding-3-small"
     openai_api_key: str | None = None
     openai_embedding_model: str = "text-embedding-3-small"
     openai_chat_model: str = "gpt-4o-mini"

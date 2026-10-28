@@ -173,7 +173,12 @@ def build_chunk_rows(item: MemoryItem, drafts: list[ChunkDraft]) -> list[MemoryC
 
 
 def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
-    """Fill ``chunk.embedding`` for every chunk; returns the adapter used, or None."""
+    """Fill ``embedding`` and ``embedding_model`` on every chunk.
+
+    Returns the adapter used, or None when no provider is configured. Raises
+    CaptureProcessingError when the provider fails; callers decide whether
+    that is fatal.
+    """
     try:
         adapter = get_embedding_adapter()
     except Exception as adapter_exc:
@@ -196,12 +201,15 @@ def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
             raise CaptureProcessingError(
                 f"Embedding count mismatch: got {len(vectors)} for {len(chunks)} chunks."
             )
-        for chunk, vector in zip(chunks, vectors, strict=True):
+        for vector in vectors:
             if not vector or len(vector) != expected:
                 raise CaptureProcessingError(
                     f"Embedding dimension mismatch: expected {expected}, got {len(vector) if vector else 0}."
                 )
+        model_id = getattr(adapter, "model_id", None)
+        for chunk, vector in zip(chunks, vectors, strict=True):
             chunk.embedding = vector
+            chunk.embedding_model = model_id
     except CaptureProcessingError:
         raise
     except Exception as emb_exc:
@@ -282,7 +290,18 @@ def process_capture(memory_item_id_str: str) -> None:
         drafts = prepare_chunks(item)
         chunks = build_chunk_rows(item, drafts)
         ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
-        adapter = embed_chunks(chunks, memory_item_id_str)
+        try:
+            adapter = embed_chunks(chunks, memory_item_id_str)
+        except CaptureProcessingError as embed_exc:
+            # The memory is still searchable by full text; the embedding
+            # backfill (scripts.reprocess_memories --embed) fills it in later.
+            for chunk in chunks:
+                chunk.embedding = None
+                chunk.embedding_model = None
+            adapter = None
+            logger.warning(
+                "memory_id=%s stage=embed pending reason=%s", memory_item_id_str, embed_exc
+            )
 
         item.status = ItemStatus.ready
         item.processing_error = None
