@@ -22,7 +22,11 @@ import {
 import { SOURCE_BADGE, SOURCE_ICONS } from "../components/sourceIcons";
 import { useAuth } from "../context/AuthContext";
 import { createMemoryItem } from "../services/memoryService";
-import { SOURCE_CATALOG, type SourceId } from "../types/sourcePreferences";
+import {
+  SOURCE_CATALOG,
+  isSourceAvailable,
+  type SourceId,
+} from "../types/sourcePreferences";
 
 type Step = 1 | 2 | 3 | 4;
 
@@ -75,6 +79,7 @@ export default function Onboarding() {
   }, [isAuthenticated]);
 
   function toggleSource(sourceId: SourceId) {
+    if (!isSourceAvailable(sourceId)) return;
     setSelectedSources((prev) =>
       prev.includes(sourceId)
         ? prev.filter((id) => id !== sourceId)
@@ -92,7 +97,7 @@ export default function Onboarding() {
     setError(null);
 
     try {
-      await completeOnboarding(selectedSources);
+      await completeOnboarding(selectedSources.filter(isSourceAvailable));
 
       try {
         await createMemoryItem({
@@ -100,7 +105,7 @@ export default function Onboarding() {
           title: "Getting Started with Your Sentiora Memory Vault",
           url: "https://sentiora.app/welcome",
           content:
-            "Welcome to Sentiora! Every piece of knowledge you capture using the browser extension or uploader is securely parsed, indexed, and preserved here in your private vault. Sentiora extracts primary core ideas, stores high-fidelity text copies, and connects historical concepts automatically so you can search using natural phrases and ask questions anytime.",
+            "Welcome to Sentiora. While you're signed in to the extension, the pages you read are saved here as clean text with their title and link. Banking, health and sign-in pages are skipped, and you can block any site in Privacy. Search for a page by what it said, or ask a question and get an answer with its sources. You can export or delete your memories anytime.",
         });
       } catch {
         // Ignore if welcome memory already exists
@@ -277,16 +282,20 @@ export default function Onboarding() {
                 <legend className="sr-only">Sources</legend>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   {SOURCE_CATALOG.map((source) => {
-                    const isSelected = selectedSources.includes(source.id);
+                    const isAvailable = source.available;
+                    const isSelected =
+                      isAvailable && selectedSources.includes(source.id);
                     const badge = SOURCE_BADGE[source.id];
                     return (
                       <label
                         key={source.id}
                         className={cx(
-                          "flex cursor-pointer flex-col rounded-card border-2 bg-surface p-5 transition-colors",
-                          isSelected
-                            ? "border-accent"
-                            : "border-line hover:border-muted",
+                          "flex flex-col rounded-card border-2 bg-surface p-5 transition-colors",
+                          !isAvailable
+                            ? "cursor-not-allowed border-line-soft opacity-60"
+                            : isSelected
+                              ? "cursor-pointer border-accent"
+                              : "cursor-pointer border-line hover:border-muted",
                         )}
                       >
                         <span className="flex items-start justify-between gap-3">
@@ -297,12 +306,19 @@ export default function Onboarding() {
                               {SOURCE_ICONS[source.id]}
                             </span>
                           )}
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleSource(source.id)}
-                            className="h-5 w-5 shrink-0 cursor-pointer accent-accent"
-                          />
+                          <span className="flex items-center gap-3">
+                            {!isAvailable && <Tag>Coming soon</Tag>}
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              disabled={!isAvailable}
+                              onChange={() => toggleSource(source.id)}
+                              className={cx(
+                                "h-5 w-5 shrink-0 accent-accent",
+                                isAvailable ? "cursor-pointer" : "cursor-not-allowed",
+                              )}
+                            />
+                          </span>
                         </span>
                         <span className="mt-3 text-[17px] font-semibold text-fg">
                           {source.name}

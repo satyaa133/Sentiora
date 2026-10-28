@@ -23,6 +23,8 @@ export interface SourceCatalogItem {
   description: string;
   type: "Automatic" | "Manual" | "Sync Integration";
   category: "browser" | "docs" | "social" | "developer" | "ai";
+  /** False for integrations that are planned but capture nothing yet. */
+  available: boolean;
 }
 
 export const SOURCE_CATALOG: SourceCatalogItem[] = [
@@ -32,6 +34,7 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Capture articles, documentation, and browser pages.",
     type: "Automatic",
     category: "browser",
+    available: true,
   },
   {
     id: "youtube",
@@ -39,6 +42,7 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Extract transcripts from educational videos and webinars.",
     type: "Automatic",
     category: "browser",
+    available: true,
   },
   {
     id: "pdf",
@@ -46,6 +50,7 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Upload research PDFs, eBooks, and text notes.",
     type: "Manual",
     category: "docs",
+    available: true,
   },
   {
     id: "chatgpt",
@@ -53,6 +58,7 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Archive ChatGPT, Claude, and other AI chat histories.",
     type: "Automatic",
     category: "ai",
+    available: false,
   },
   {
     id: "notion",
@@ -60,6 +66,7 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Sync pages and databases from your Notion workspace.",
     type: "Sync Integration",
     category: "docs",
+    available: false,
   },
   {
     id: "github",
@@ -67,6 +74,7 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Index READMEs, code snippets, and starred repositories.",
     type: "Sync Integration",
     category: "developer",
+    available: false,
   },
   {
     id: "twitter",
@@ -74,6 +82,7 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Save bookmarked threads and industry posts.",
     type: "Sync Integration",
     category: "social",
+    available: false,
   },
   {
     id: "substack",
@@ -81,8 +90,17 @@ export const SOURCE_CATALOG: SourceCatalogItem[] = [
     description: "Ingest newsletters and long-form articles.",
     type: "Automatic",
     category: "docs",
+    available: false,
   },
 ];
+
+export const AVAILABLE_SOURCE_IDS: ReadonlySet<SourceId> = new Set(
+  SOURCE_CATALOG.filter((source) => source.available).map((source) => source.id),
+);
+
+export function isSourceAvailable(id: SourceId): boolean {
+  return AVAILABLE_SOURCE_IDS.has(id);
+}
 
 export function statusToUiLabel(
   status: SourceStatus,

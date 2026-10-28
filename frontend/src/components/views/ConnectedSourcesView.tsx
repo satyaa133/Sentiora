@@ -18,6 +18,7 @@ import {
   IconUpload,
   Input,
   Modal,
+  Tag,
   cx,
 } from "@shared/ui";
 import type { MemoryItem, SourceType } from "../../types/memory";
@@ -26,6 +27,7 @@ import { useAuth } from "../../context/AuthContext";
 import { createMemoryItem } from "../../services/memoryService";
 import {
   SOURCE_CATALOG,
+  isSourceAvailable,
   statusToUiLabel,
   type SourceId,
   type SourceStatus,
@@ -44,6 +46,7 @@ interface IntegrationChannel {
   description: string;
   type: "Automatic" | "Manual" | "Sync Integration";
   category: "browser" | "docs" | "social" | "developer" | "ai";
+  available: boolean;
   status: "Active" | "Paused" | "Ready to Connect";
   count?: number;
   lastSync?: string;
@@ -150,7 +153,11 @@ export default function ConnectedSourcesView({
         description: source.description,
         type: source.type,
         category: source.category,
-        status: statusToUiLabel(persistedStatus),
+        available: source.available,
+        // A saved preference for a source that captures nothing yet is ignored.
+        status: source.available
+          ? statusToUiLabel(persistedStatus)
+          : "Ready to Connect",
         count,
         lastSync: memoryType ? getLatestSyncTime(memoryType) : "Ready to sync",
       };
@@ -177,6 +184,7 @@ export default function ConnectedSourcesView({
   }, [allAvailableSources, modalSearch]);
 
   async function toggleSourceStatus(id: SourceId) {
+    if (!isSourceAvailable(id)) return;
     const current = user?.source_preferences?.[id] ?? "not_connected";
     let nextStatus: SourceStatus;
 
@@ -232,10 +240,18 @@ export default function ConnectedSourcesView({
 
         textContent = textContent.slice(0, 500_000);
 
+        const isPdf = file.name.toLowerCase().endsWith(".pdf");
+        // The API returns the existing memory for a URL it has seen, so each
+        // upload gets its own (as notes do): an edited file is saved again.
+        const fileName = `${Date.now()}-${encodeURIComponent(file.name)}`;
         await createMemoryItem({
           title: file.name.replace(/\.[^/.]+$/, ""),
-          url: `file://uploads/${encodeURIComponent(file.name)}`,
-          source_type: file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "webpage",
+          // The API accepts file:// only for PDFs; text and Markdown uploads use
+          // Sentiora's own manual-vault URL, as notes do.
+          url: isPdf
+            ? `file://uploads/${fileName}`
+            : `https://sentiora.app/manual/uploads/${fileName}`,
+          source_type: isPdf ? "pdf" : "webpage",
           content: textContent || `Uploaded file ${file.name}`,
           author: "Local Upload",
           structured_content: structuredNodes,
@@ -483,7 +499,9 @@ export default function ConnectedSourcesView({
                   <p className="text-[15px] text-muted">{channel.description}</p>
                 </div>
               </div>
-              {channel.status === "Active" ? (
+              {!channel.available ? (
+                <Tag className="shrink-0">Coming soon</Tag>
+              ) : channel.status === "Active" ? (
                 <span className="inline-flex shrink-0 items-center gap-1 text-[15px] text-muted">
                   <IconCheck size={16} />
                   Added
