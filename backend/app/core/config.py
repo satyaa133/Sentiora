@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     gemini_chat_model: str = "gemini-2.5-flash"
     openrouter_api_key: str | None = None
     openrouter_chat_model: str = "anthropic/claude-haiku-4.5"
+    # Comma-separated OpenRouter models tried in order when the chat model is
+    # unavailable (sent as OpenRouter's `models` fallback list).
+    openrouter_fallback_models: str = ""
     # Optional second OpenRouter key. Ask rotates across every configured chat
     # key and skips one that is out of credits or rate-limited (llm_pool.py).
     openrouter_api_key_2: str | None = None

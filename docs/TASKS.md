@@ -43,7 +43,7 @@
 | R2: Chunking | ✅ Completed | Recursive 400–600 token chunks with 15% overlap, 60–90s transcript windows, migration 006 (`start_sec`, `end_sec`, `embedding_model`, tsvector GIN indexes) |
 | R3: Embeddings | ✅ Completed | OpenRouter embeddings (pluggable), per-chunk `embedding_model`, same-model queries only, non-fatal capture embedding, `--embed` backfill |
 | R4: Retrieval | ✅ Completed | LLM query rewrite, pgvector + Postgres full-text fused with RRF, `RAG_MIN_SIMILARITY` 0.25, near-dup removal, MMR, 2 chunks per memory, top 6 |
-| R5: Generation | ⏳ Pending | `[S#]` citations, SSE `/chat/stream`, structured follow-ups |
+| R5: Generation | ✅ Completed | Unified `[S#]` prompt, SSE `POST /chat/stream`, strict json_schema metadata (mode, usedSources, followUps), `OPENROUTER_FALLBACK_MODELS`, `/chat` shape kept |
 | R6: Env and keys | ⏳ Pending | `OPENROUTER_API_KEY_1..N`, exponential cooldown, startup validation |
 | R7: Ask page UX | ⏳ Pending | Streaming UI, citation chips, sources panel, history |
 | R8: Evaluation | ⏳ Pending | `scripts/eval-rag` hit rate |

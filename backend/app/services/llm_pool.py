@@ -35,19 +35,31 @@ def _setting(settings: Any, name: str, default: Any = None) -> Any:
 
 def build_backends(settings: Any) -> list[LLMBackend]:
     """Ordered, de-duplicated list of every chat backend with a key."""
-    openrouter_model = _setting(settings, "openrouter_chat_model", "anthropic/claude-haiku-4.5")
+    openrouter_model = _setting(
+        settings, "openrouter_chat_model", "anthropic/claude-haiku-4.5"
+    )
     candidates = {
         "openrouter": [
             ("openrouter", _setting(settings, "openrouter_api_key"), openrouter_model),
-            ("openrouter-2", _setting(settings, "openrouter_api_key_2"), openrouter_model),
+            (
+                "openrouter-2",
+                _setting(settings, "openrouter_api_key_2"),
+                openrouter_model,
+            ),
         ],
         "gemini": [
-            ("gemini", _setting(settings, "gemini_api_key"),
-             _setting(settings, "gemini_chat_model", "gemini-2.5-flash")),
+            (
+                "gemini",
+                _setting(settings, "gemini_api_key"),
+                _setting(settings, "gemini_chat_model", "gemini-2.5-flash"),
+            ),
         ],
         "openai": [
-            ("openai", _setting(settings, "openai_api_key"),
-             _setting(settings, "openai_chat_model", "gpt-4o-mini")),
+            (
+                "openai",
+                _setting(settings, "openai_api_key"),
+                _setting(settings, "openai_chat_model", "gpt-4o-mini"),
+            ),
         ],
     }
     primary = (_setting(settings, "llm_provider") or "openai").strip().lower()
@@ -60,7 +72,9 @@ def build_backends(settings: Any) -> list[LLMBackend]:
             if not key or key in seen_keys:
                 continue
             seen_keys.add(key)
-            backends.append(LLMBackend(name=name, provider=provider, api_key=key, model=model))
+            backends.append(
+                LLMBackend(name=name, provider=provider, api_key=key, model=model)
+            )
     return backends
 
 
@@ -69,31 +83,48 @@ class KeyPool:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._turn = 0
+        # One round-robin turn per backend list, so embedding calls rotating
+        # their keys do not shift which chat backend answers first.
+        self._turns: dict[tuple[str, ...], int] = {}
         self._cooling_until: dict[str, float] = {}
 
-    def order(self, backends: list[LLMBackend]) -> list[LLMBackend]:
+    def order(
+        self, backends: list[LLMBackend], *, rotate: bool = True
+    ) -> list[LLMBackend]:
         """Backends to try, healthy ones first in rotated order.
 
         Cooling backends go last (soonest to recover first) rather than being
         dropped, so a request still has a chance when every key is cooling.
+        ``rotate=False`` keeps the current turn, for secondary calls (such as
+        answer metadata) that must not skew the round-robin between answers.
         """
         if not backends:
             return []
         now = time.monotonic()
         with self._lock:
-            start = self._turn % len(backends)
-            self._turn += 1
+            group = tuple(b.name for b in backends)
+            turn = self._turns.get(group, 0)
+            start = turn % len(backends)
+            if rotate:
+                self._turns[group] = turn + 1
             rotated = backends[start:] + backends[:start]
-            healthy = [b for b in rotated if self._cooling_until.get(b.api_key, 0.0) <= now]
+            healthy = [
+                b for b in rotated if self._cooling_until.get(b.api_key, 0.0) <= now
+            ]
             cooling = sorted(
                 (b for b in rotated if self._cooling_until.get(b.api_key, 0.0) > now),
                 key=lambda b: self._cooling_until[b.api_key],
             )
         return healthy + cooling
 
-    def mark_failed(self, backend: LLMBackend, status: int | None, *, timed_out: bool,
-                    cooldown_seconds: int) -> bool:
+    def mark_failed(
+        self,
+        backend: LLMBackend,
+        status: int | None,
+        *,
+        timed_out: bool,
+        cooldown_seconds: int,
+    ) -> bool:
         """Cool a backend down when its failure is likely to repeat. Returns True if cooled.
 
         Credit, auth and rate-limit failures cool for ``cooldown_seconds``; an
@@ -115,7 +146,7 @@ class KeyPool:
 
     def reset(self) -> None:
         with self._lock:
-            self._turn = 0
+            self._turns.clear()
             self._cooling_until.clear()
 
 

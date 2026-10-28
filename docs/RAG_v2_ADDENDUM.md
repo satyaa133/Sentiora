@@ -137,3 +137,53 @@ idempotent and resumable; it stops at the first provider failure.
 
 `RAG_MAX_DISTANCE` is replaced by `RAG_MIN_SIMILARITY`. `GET /search` returns
 retrieval's choice without the extra "strong match only" filter.
+
+## R5 — Generation
+
+**Pipeline** (`app/services/rag_service.py`). `RagService.prepare()` does every
+database step (intent, query rewrite, retrieval, fixed answers) before any
+model call; `RagService.run()` then emits events without touching the database,
+so the streaming route can run after FastAPI has closed the request's session.
+
+**Prompt** (`app/services/llm/prompts.py`). Each retrieved chunk is a numbered
+block `[S1]..[Sn]` with title, type, URL, capture date, video time range (or
+section) and page, inside the existing untrusted-data guards. One system prompt
+asks for a single unified Markdown answer that cites memory facts inline with
+`[S#]`, never pastes raw chunks, never writes separate "memory" / "general"
+sections or repeats content, and — when memory does not cover the question —
+answers from general knowledge and says so in one opening sentence. Questions
+phrased as "based on what I saved" add a hint to report what the sources say or
+that nothing relevant is saved. Markers like `[Source 2]` or `[S1, S3]` are
+normalized to `[S2]`, `[S1][S3]`; markers for sources that were not supplied are
+removed.
+
+**Streaming endpoint.** `POST /api/v1/chat/stream`, same request body, auth and
+rate limits as `POST /chat`. Validation, auth and retrieval errors are normal
+HTTP errors (same codes as `/chat`). The response is `text/event-stream`:
+
+| Event | Data |
+| ----- | ---- |
+| `sources` | `{"sources": [{"id": "S1", ...AskCitation fields incl. start_sec/end_sec}]}` |
+| `delta` | `{"text": "..."}` — answer text pieces, in order |
+| `final` | `{"answer", "mode": "memory"\|"general"\|"mixed", "usedSources": ["S1", ...], "followUps": [...], "insufficient_context", "used_fallback"}` — `answer` is the cleaned full text and replaces the streamed text |
+| `error` | `{"code", "message", "status"}` — `ASK_STREAM_INTERRUPTED` after partial text, otherwise the `/chat` error codes |
+
+The answer streams from OpenRouter/OpenAI (`stream: true`); Gemini answers in
+one piece. Key failover happens only before the first token.
+
+**Structured metadata.** After the answer, one non-streaming call per answer:
+`response_format: {type: "json_schema", json_schema: {name: "answer_meta",
+strict: true, schema}}` with `provider: {require_parameters: true}`. Schema:
+`{mode: "memory"|"general"|"mixed", usedSources: string[], followUps: string[]
+(maxItems 3)}`, `additionalProperties: false`, all fields required. The reply
+is validated with pydantic (`AnswerMeta`); `usedSources` always comes from the
+answer's valid `[S#]` markers, and the model's mode is corrected when it
+contradicts them. On any failure, mode and sources come from the markers and
+`followUps` is empty. Follow-up templates are gone.
+
+**Fallback models.** `OPENROUTER_FALLBACK_MODELS` (comma-separated) is sent as
+OpenRouter's `models` list after `OPENROUTER_CHAT_MODEL`.
+
+**`POST /chat`** runs the same pipeline without streaming and keeps its response
+shape: `[S#]` becomes `[k]` numbered by first use, `citations` follow that
+order (one per cited chunk), and `mixed` is reported as `combined`.

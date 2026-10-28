@@ -10,9 +10,9 @@ from fastapi.testclient import TestClient
 from app.core.db import SessionLocal
 from app.main import app
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
-from app.schemas.ask import AskCitation
 from app.services.ask_intent import classify, is_followup, parse_date_window, topic_of
-from app.services.rag_service import _apply_citations
+from app.services.llm.structured import normalize_markers, strip_unknown_markers
+from app.services.rag_service import _to_legacy_markers
 from app.services.retrieval_service import RetrievedChunk, RetrievalService
 
 client = TestClient(app)
@@ -136,18 +136,13 @@ def test_followup_and_topic_helpers() -> None:
     assert topic_of("Explain sliding window based on the playlist I saved") == "sliding window"
 
 
-def test_apply_citations_strips_invented_sources_and_renumbers() -> None:
-    citations = [
-        AskCitation(
-            memory_id=uuid4(), title=f"T{i}", url="https://x.example", source_type=SourceType.webpage
-        )
-        for i in range(3)
-    ]
-    text, cited = _apply_citations(
-        "First [Source 3]. Then [Source 9]. Both [Source 1, 3].", citations
-    )
-    assert text == "First [1]. Then. Both [2][1]."
-    assert [c.title for c in cited] == ["T2", "T0"]
+def test_citation_markers_are_normalized_validated_and_renumbered() -> None:
+    text = normalize_markers("First [Source 3]. Then [S9]. Both [S1, S3].")
+    text = strip_unknown_markers(text, source_count=3)
+    assert text == "First [S3]. Then. Both [S1][S3]."
+    legacy, order = _to_legacy_markers(text, ["S3", "S1"])
+    assert legacy == "First [1]. Then. Both [2][1]."
+    assert order == [3, 1]
 
 
 def test_fusion_keeps_a_strong_semantic_hit_without_keyword_overlap() -> None:
@@ -192,7 +187,8 @@ def test_general_question_without_memory_gets_a_general_answer(monkeypatch) -> N
     assert data["insufficient_context"] is False
     assert "complete binary tree" in data["answer"]
     assert calls and calls[0]["chunks"] == []
-    assert any("saved about binary heap" in s for s in data["suggested_followups"])
+    # Follow-ups come from the structured call only (offline in tests): no templates.
+    assert data["suggested_followups"] == []
 
 
 def test_general_question_without_llm_says_the_model_is_missing(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -213,32 +209,46 @@ def test_unrelated_memory_is_not_cited_for_a_general_answer(monkeypatch) -> None
     assert data["citations"] == []
 
 
-def test_combined_answer_separates_memory_and_validates_citations(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_combined_answer_is_one_unified_cited_answer(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     reply = (
-        "Binary search finds a value in a sorted array by halving.\n\n"
-        "### From your saved memory\n"
-        "Your article says it halves the interval [Source 1] and cites [Source 4]."
+        "Binary search finds a value in a sorted array by halving the interval each step "
+        "[Source 1], as your article describes; it also cites [Source 4]. More generally, "
+        "it runs in O(log n) time."
     )
     _with_llm(monkeypatch, reply)
+    monkeypatch.setattr(
+        "app.services.rag_service.RagService._call_structured",
+        lambda self, backend, prompt, system: (
+            '{"mode":"mixed","usedSources":["S1"],"followUps":'
+            '["How is binary search different from linear search?"]}'
+        ),
+    )
     headers = _auth_headers("echo_combined@example.com")
     item_id = _create(headers, "Binary Search Explained", ARTICLE)
     data = _ask(headers, "Explain binary search based on the article I saved")
     assert data["mode"] == "combined"
     assert [c["memory_id"] for c in data["citations"]] == [item_id]
-    assert "[Source" not in data["answer"]
-    assert "[1]" in data["answer"]
-    assert "### From your saved memory" in data["answer"]
+    assert "[Source" not in data["answer"] and "[S" not in data["answer"]
+    assert "[1]" in data["answer"] and "[4]" not in data["answer"]
+    assert "From your saved memory" not in data["answer"]
+    assert data["suggested_followups"] == ["How is binary search different from linear search?"]
     assert data["citations"][0]["excerpt"]
     assert data["citations"][0]["captured_at"]
 
 
-def test_combined_question_with_no_matching_save_says_so(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _with_llm(monkeypatch, "Kubernetes schedules containers.")
+def test_combined_question_with_no_matching_save_tells_the_model(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    calls: list[dict[str, Any]] = []
+    _with_llm(
+        monkeypatch,
+        "Your saved memories don't cover this, so here's a general answer. "
+        "Kubernetes schedules containers.",
+        calls,
+    )
     headers = _auth_headers("echo_combined_empty@example.com")
     data = _ask(headers, "Explain kubernetes based on the video I saved")
     assert data["mode"] == "general"
     assert data["citations"] == []
-    assert data["answer"].startswith("I couldn't find a saved source about this")
+    assert "saved material" in calls[0]["system_prompt"]
 
 
 def test_personal_question_with_no_memory_never_answers_generally(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -404,21 +414,18 @@ def test_dashboard_statistics_counts_real_data_per_user() -> None:
     assert client.get("/api/v1/dashboard/statistics").status_code in (401, 403)
 
 
-def test_general_answer_that_discusses_unrelated_saves_is_not_labelled_memory(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    reply = (
-        "A binary heap is a complete binary tree.\n\n"
-        "Example: [1, 3, 2].\n\n"
-        "Neither of your saved memories covers heaps. [Source 1] is about binary search."
+def test_invalid_structured_metadata_degrades_to_marker_metadata(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _with_llm(monkeypatch, "It halves the interval [S1].")
+    monkeypatch.setattr(
+        "app.services.rag_service.RagService._call_structured",
+        lambda self, backend, prompt, system: '{"mode": "memory", "unexpected": true}',
     )
-    _with_llm(monkeypatch, reply)
-    headers = _auth_headers("echo_leak@example.com")
-    _create(headers, "Binary Search Explained", ARTICLE)
-    data = _ask(headers, "What is a binary heap in a sorted collection?")
-    assert data["mode"] == "general"
-    assert data["citations"] == []
-    assert "saved memories" not in data["answer"]
-    assert "[1]" not in data["answer"]
-    assert "complete binary tree" in data["answer"]
+    headers = _auth_headers("echo_bad_meta@example.com")
+    item_id = _create(headers, "Binary Search Explained", ARTICLE)
+    data = _ask(headers, "How does binary search halve the interval?")
+    assert data["mode"] == "memory"
+    assert [c["memory_id"] for c in data["citations"]] == [item_id]
+    assert data["suggested_followups"] == []
 
 
 def test_scoped_question_is_memory_unless_it_asks_for_an_explanation() -> None:
