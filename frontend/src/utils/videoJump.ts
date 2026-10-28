@@ -12,6 +12,28 @@ export interface VideoStart {
   label: string;
 }
 
+/** Format seconds the way the backend writes headings: "02:15" or "1:02:15". */
+export function formatTimestamp(totalSeconds: number): string {
+  const total = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return hours ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/** The video start of a citation: its `start_sec` when present, else parsed from the heading. */
+export function citationStart(citation: {
+  start_sec?: number | null;
+  heading?: string | null;
+}): VideoStart | null {
+  if (typeof citation.start_sec === "number" && Number.isFinite(citation.start_sec)) {
+    const seconds = Math.max(0, Math.floor(citation.start_sec));
+    return { seconds, label: formatTimestamp(seconds) };
+  }
+  return videoStart(citation.heading);
+}
+
 export function videoStart(heading: string | null | undefined): VideoStart | null {
   const match = heading ? RANGE.exec(heading) : null;
   if (!match?.[1]) return null;

@@ -232,6 +232,8 @@ def _citations_from_chunks(chunks: list[RetrievedChunk]) -> list[AskCitation]:
                 domain=chunk.domain,
                 heading=chunk.heading,
                 page_number=chunk.page_number,
+                start_sec=chunk.start_sec,
+                end_sec=chunk.end_sec,
                 source_available=_source_available(chunk.url),
                 captured_at=chunk.captured_at,
                 excerpt=_excerpt(strip_instruction_like_lines(chunk.content), limit=220) or None,

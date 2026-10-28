@@ -2,8 +2,18 @@ import uuid
 from datetime import datetime, UTC
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import ENUM, UUID
+from sqlalchemy import (
+    Computed,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import ENUM, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
@@ -19,7 +29,7 @@ def _utc_now() -> datetime:
 
 
 class MemoryChunk(Base):
-    """Searchable unit derived from a captured memory. Embeddings are Phase 5."""
+    """Searchable unit derived from a captured memory."""
 
     __tablename__ = "memory_chunks"
     __table_args__ = (
@@ -31,6 +41,7 @@ class MemoryChunk(Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        Index("ix_memory_chunks_content_tsv", "content_tsv", postgresql_using="gin"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -57,6 +68,20 @@ class MemoryChunk(Base):
         nullable=False,
     )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+    # Transcript time range in seconds; null for non-video chunks.
+    start_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    end_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Which model produced ``embedding``; queries only compare same-model vectors.
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    content_tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english', coalesce(heading, '')), 'B') || "
+            "setweight(to_tsvector('english', content), 'A')",
+            persisted=True,
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utc_now, nullable=False
     )

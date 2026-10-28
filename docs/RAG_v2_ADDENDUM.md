@@ -40,3 +40,35 @@ Re-normalizes and re-chunks every READY memory, then embeds the new chunks. If
 embedding fails, the memory stays READY with un-embedded chunks (keyword search
 only) until the embedding backfill runs. Progress is checkpointed in
 `backend/.reprocess-checkpoint.json`; `--restart` ignores it.
+
+## R2 — Chunking
+
+`app/services/chunking/` (package; `from app.services.chunking import …` is unchanged).
+
+**Articles, PDFs, untimed transcripts** (`recursive.py`). Text is cut into
+sections at detected headings and PDF page markers; a section shorter than 200
+characters merges into the next one on the same page. Each section is split
+recursively — paragraphs, lines, sentences, words — and packed into chunks of
+~400–600 tokens (estimated at 4 characters per token: 1,600–2,400 characters,
+target 2,000) with ~15% overlap carried as whole trailing sentences. Chunks never
+span two sections or two PDF pages.
+
+**Timed transcripts** (`transcript.py`). Segments are packed into 60–90 second
+windows (also capped at 2,400 characters). Each window carries the trailing
+~15% of the previous window's words, timed by interpolation inside their
+segment. A segment longer than one window is split evenly in time.
+
+**Schema (Alembic `006_rag_v2_chunks`).**
+
+| Table | Column | Type | Notes |
+| ----- | ------ | ---- | ----- |
+| `memory_chunks` | `start_sec`, `end_sec` | `float`, nullable | Transcript time range |
+| `memory_chunks` | `embedding_model` | `varchar(128)`, nullable | Filled from R3 |
+| `memory_chunks` | `content_tsv` | `tsvector`, generated | `heading` (weight B) + `content` (weight A), english; GIN index |
+| `memory_items` | `title_tsv` | `tsvector`, generated | `title`, english; GIN index |
+
+Title and URL are not copied onto chunks; retrieval joins `memory_items`.
+
+**API.** `AskCitation` and `SearchHit` gain optional `start_sec` / `end_sec`.
+The Ask page's "Jump to" link uses `start_sec`, falling back to the heading
+range for chunks saved before this change.

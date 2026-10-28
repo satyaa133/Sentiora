@@ -40,7 +40,7 @@
 | Phase | Status | Notes |
 | ----- | ------ | ----- |
 | R1: Ingestion cleanup | ✅ Completed | Rolling-caption normalizer, title kept out of chunk text, `scripts.reprocess_memories --reclean` |
-| R2: Chunking | ⏳ Pending | Recursive 400–600 token chunks, 60–90s transcript windows, `start_sec`/`end_sec` |
+| R2: Chunking | ✅ Completed | Recursive 400–600 token chunks with 15% overlap, 60–90s transcript windows, migration 006 (`start_sec`, `end_sec`, `embedding_model`, tsvector GIN indexes) |
 | R3: Embeddings | ⏳ Pending | OpenRouter embeddings, per-chunk `embedding_model`, backfill |
 | R4: Retrieval | ⏳ Pending | Query rewrite, pgvector + full-text RRF, threshold, MMR |
 | R5: Generation | ⏳ Pending | `[S#]` citations, SSE `/chat/stream`, structured follow-ups |

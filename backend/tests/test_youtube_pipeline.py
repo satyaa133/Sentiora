@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.core.db import SessionLocal
 from app.main import app
 from app.models.memory_chunk import MemoryChunk
-from app.services.chunking import chunk_transcript, format_timestamp
+from app.services.chunking import MAX_CHUNK_CHARS, chunk_transcript, format_timestamp
 from app.services.content_normalizer import canonicalize_url, youtube_video_id
 from app.workers.jobs.process_capture import process_capture
 
@@ -152,7 +152,7 @@ def test_chunk_transcript_preserves_order_and_time_ranges() -> None:
     assert drafts[-1].heading is not None and drafts[-1].heading.endswith("01:38]")
     joined = " ".join(d.content for d in drafts)
     assert joined.index("welcome back") < joined.index("great gale")
-    assert all(len(d.content) <= 1800 for d in drafts)
+    assert all(len(d.content) <= MAX_CHUNK_CHARS for d in drafts)
 
 
 def test_chunk_transcript_splits_long_transcripts_within_limits() -> None:
@@ -168,7 +168,7 @@ def test_chunk_transcript_splits_long_transcripts_within_limits() -> None:
     ]
     drafts = chunk_transcript(long_nodes, title="Long Video")
     assert len(drafts) > 5
-    assert all(len(d.content) <= 1800 for d in drafts)
+    assert all(len(d.content) <= MAX_CHUNK_CHARS for d in drafts)
     starts = [d.heading for d in drafts]
     assert starts == sorted(set(starts), key=starts.index)  # no duplicate ranges
 
@@ -205,6 +205,7 @@ def test_youtube_capture_persists_transcript_and_timestamped_chunks(
     assert chunks
     assert all(c.source_type.value == "youtube" for c in chunks)
     assert all(c.heading and "[" in c.heading for c in chunks)
+    assert all(c.start_sec is not None and c.end_sec is not None for c in chunks)
     assert all(c.embedding is not None and len(c.embedding) == 1536 for c in chunks)
     assert "nine gallons" in " ".join(c.content for c in chunks)
 

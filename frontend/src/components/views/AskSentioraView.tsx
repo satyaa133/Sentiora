@@ -29,7 +29,7 @@ import { browserTimeZone } from "../../services/dashboardService";
 import { sourceHref } from "../../utils/safeHref";
 import { emitEcho } from "../echo/echoEvents";
 import { createMemoryItem } from "../../services/memoryService";
-import { videoJumpUrl, videoStart } from "../../utils/videoJump";
+import { citationStart, videoJumpUrl } from "../../utils/videoJump";
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
@@ -425,7 +425,7 @@ export default function AskSentioraView({
 
   function renderSourceCard(citation: AskCitation, index: number) {
     const href = originalHref(citation);
-    const start = videoStart(citation.heading);
+    const start = citationStart(citation);
     const jumpHref = href && start ? videoJumpUrl(href, start.seconds) : null;
     return (
       <li

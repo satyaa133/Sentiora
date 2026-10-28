@@ -27,12 +27,12 @@ from uuid import UUID
 from sqlalchemy import select
 
 from app.core.db import SessionLocal
-from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem
 from app.models.user import User
 from app.repositories.chunk_repository import ChunkRepository
 from app.workers.jobs.process_capture import (
     CaptureProcessingError,
+    build_chunk_rows,
     embed_chunks,
     prepare_chunks,
 )
@@ -131,18 +131,7 @@ def reclean(args: argparse.Namespace) -> int:
                     db.rollback()
                     continue
 
-                chunks = [
-                    MemoryChunk(
-                        memory_id=item.id,
-                        user_id=item.user_id,
-                        chunk_index=draft.chunk_index,
-                        content=draft.content,
-                        heading=draft.heading,
-                        page_number=draft.page_number,
-                        source_type=item.source_type,
-                    )
-                    for draft in drafts
-                ]
+                chunks = build_chunk_rows(item, drafts)
                 ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
                 try:
                     embedded = embed_chunks(chunks, str(item_id)) is not None

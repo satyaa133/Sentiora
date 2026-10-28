@@ -127,6 +127,8 @@ class RetrievedChunk:
     distance: float | None
     lexical: bool = False
     rank: float = 0.0
+    start_sec: float | None = None
+    end_sec: float | None = None
 
 
 _RRF_K = 60
@@ -289,6 +291,8 @@ class RetrievalService:
             distance=distance,
             lexical=lexical,
             rank=rank,
+            start_sec=chunk.start_sec,
+            end_sec=chunk.end_sec,
         )
 
     def _semantic_search(

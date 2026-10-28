@@ -11,6 +11,9 @@ export interface AskCitation {
   domain: string | null;
   heading: string | null;
   page_number: number | null;
+  /** Transcript time range of the chunk in seconds (video only). */
+  start_sec?: number | null;
+  end_sec?: number | null;
   source_available?: boolean;
   captured_at?: string | null;
   excerpt?: string | null;
@@ -73,6 +76,9 @@ export interface SearchHit {
   content: string;
   heading: string | null;
   page_number: number | null;
+  /** Transcript time range of the chunk in seconds (video only). */
+  start_sec?: number | null;
+  end_sec?: number | null;
   captured_at: string;
   distance: number | null;
 }

@@ -155,6 +155,23 @@ def prepare_chunks(item: MemoryItem) -> list[ChunkDraft]:
     return drafts
 
 
+def build_chunk_rows(item: MemoryItem, drafts: list[ChunkDraft]) -> list[MemoryChunk]:
+    return [
+        MemoryChunk(
+            memory_id=item.id,
+            user_id=item.user_id,
+            chunk_index=draft.chunk_index,
+            content=draft.content,
+            heading=draft.heading,
+            page_number=draft.page_number,
+            start_sec=draft.start_sec,
+            end_sec=draft.end_sec,
+            source_type=item.source_type,
+        )
+        for draft in drafts
+    ]
+
+
 def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
     """Fill ``chunk.embedding`` for every chunk; returns the adapter used, or None."""
     try:
@@ -239,8 +256,11 @@ def process_capture(memory_item_id_str: str) -> None:
                         content=chunk.content,
                         heading=chunk.heading,
                         page_number=chunk.page_number,
+                        start_sec=chunk.start_sec,
+                        end_sec=chunk.end_sec,
                         source_type=chunk.source_type,
                         embedding=chunk.embedding,
+                        embedding_model=chunk.embedding_model,
                     )
                     for chunk in originals
                 ]
@@ -260,18 +280,7 @@ def process_capture(memory_item_id_str: str) -> None:
 
         logger.info("memory_id=%s stage=normalize source_type=%s", memory_item_id_str, item.source_type)
         drafts = prepare_chunks(item)
-        chunks = [
-            MemoryChunk(
-                memory_id=item.id,
-                user_id=item.user_id,
-                chunk_index=draft.chunk_index,
-                content=draft.content,
-                heading=draft.heading,
-                page_number=draft.page_number,
-                source_type=item.source_type,
-            )
-            for draft in drafts
-        ]
+        chunks = build_chunk_rows(item, drafts)
         ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
         adapter = embed_chunks(chunks, memory_item_id_str)
 

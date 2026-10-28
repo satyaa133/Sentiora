@@ -151,6 +151,8 @@ def search_memories(
             content=chunk.content,
             heading=chunk.heading,
             page_number=chunk.page_number,
+            start_sec=chunk.start_sec,
+            end_sec=chunk.end_sec,
             captured_at=chunk.captured_at,
             distance=chunk.distance,
         )

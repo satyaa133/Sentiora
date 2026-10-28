@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import AskSentioraView from "../components/views/AskSentioraView";
 import ThisWeekChart from "../components/views/ThisWeekChart";
-import { videoJumpUrl, videoStart } from "../utils/videoJump";
+import { citationStart, videoJumpUrl, videoStart } from "../utils/videoJump";
 
 vi.mock("../services/askService", async (importOriginal) => {
   const actual = await importOriginal<typeof AskService>();
@@ -50,6 +50,9 @@ describe("video jump links (DESIGN.md §5.5)", () => {
     expect(videoStart("Long lecture [1:02:15–1:05:00]")).toEqual({ seconds: 3735, label: "1:02:15" });
     expect(videoStart("Multi-stage builds")).toBeNull();
     expect(videoStart(null)).toBeNull();
+    expect(citationStart({ start_sec: 75.6, heading: "[00:00–01:30]" })).toEqual({ seconds: 75, label: "01:15" });
+    expect(citationStart({ start_sec: 3735, heading: null })).toEqual({ seconds: 3735, label: "1:02:15" });
+    expect(citationStart({ start_sec: null, heading: "[14:20–16:05]" })).toEqual({ seconds: 860, label: "14:20" });
   });
 
   it("only builds jump links for YouTube", () => {
