@@ -22,7 +22,7 @@ from uuid import UUID
 from openai import OpenAI
 from openai.types.shared_params import ResponseFormatJSONSchema
 
-from app.core.config import get_settings
+from app.core.config import get_settings, openrouter_fallback_list
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.repositories.memory_repository import MemoryFilters, MemoryRepository
 from app.schemas.ask import AnswerMode, AskCitation, AskResponse, AskTurn
@@ -45,9 +45,12 @@ from app.services.llm.structured import (
 )
 from app.services.llm_pool import (
     DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_MAX_COOLDOWN_SECONDS,
     LLMBackend,
     build_backends,
     key_pool,
+    max_attempts,
+    retry_after_seconds,
 )
 from app.services.rag_sanitize import (
     sanitize_untrusted_text,
@@ -235,14 +238,6 @@ class _Extra:
 
     headers: dict[str, str] | None = None
     body: dict[str, Any] | None = None
-
-
-def openrouter_fallback_models(settings: Any) -> list[str]:
-    """``OPENROUTER_FALLBACK_MODELS`` as a list (comma-separated in the env)."""
-    raw = getattr(settings, "openrouter_fallback_models", None) or ""
-    if isinstance(raw, list):
-        return [str(m).strip() for m in raw if str(m).strip()]
-    return [m.strip() for m in str(raw).split(",") if m.strip()]
 
 
 def _source_available(url: str) -> bool:
@@ -817,7 +812,15 @@ class RagService:
         status = _status_of(exc)
         timed_out = "timeout" in type(exc).__name__.lower()
         cooled = key_pool.mark_failed(
-            backend, status, timed_out=timed_out, cooldown_seconds=self._cooldown()
+            backend,
+            status,
+            timed_out=timed_out,
+            cooldown_seconds=self._cooldown(),
+            max_cooldown_seconds=int(
+                getattr(self.settings, "llm_cooldown_max_seconds", None)
+                or DEFAULT_MAX_COOLDOWN_SECONDS
+            ),
+            retry_after=retry_after_seconds(exc),
         )
         logger.warning(
             "Chat backend %s failed (status=%s, cooled=%s); trying the next key",
@@ -834,7 +837,7 @@ class RagService:
         last_error: Exception | None = None
         # Rotate across keys; a key that fails is skipped for a while and the
         # next one answers. Only when every key fails does the error surface.
-        for backend in key_pool.order(backends):
+        for backend in key_pool.order(backends)[: max_attempts(self.settings)]:
             try:
                 answer = self._call_backend(backend, prompt, system_prompt)
             except Exception as exc:
@@ -859,7 +862,7 @@ class RagService:
         )
         system_prompt = self._system_prompt(prepared)
         last_error: Exception | None = None
-        for backend in key_pool.order(backends):
+        for backend in key_pool.order(backends)[: max_attempts(self.settings)]:
             started = False
             try:
                 for piece in self._stream_backend(backend, prompt, system_prompt):
@@ -981,7 +984,7 @@ class RagService:
             ), _Extra()
         body: dict[str, Any] = {}
         fallbacks = [
-            m for m in openrouter_fallback_models(self.settings) if m != backend.model
+            m for m in openrouter_fallback_list(self.settings) if m != backend.model
         ]
         if fallbacks:
             # OpenRouter tries these in order when the primary model is unavailable.

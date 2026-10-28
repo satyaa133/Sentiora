@@ -187,3 +187,42 @@ OpenRouter's `models` list after `OPENROUTER_CHAT_MODEL`.
 **`POST /chat`** runs the same pipeline without streaming and keeps its response
 shape: `[S#]` becomes `[k]` numbered by first use, `citations` follow that
 order (one per cited chunk), and `mixed` is reported as `combined`.
+
+## R6 — Environment and key rotation
+
+**Keys.** `OPENROUTER_API_KEY` and any number of `OPENROUTER_API_KEY_1..N` are
+detected at startup from the process environment and the `.env` files (the
+environment wins). `config.openrouter_keys()` returns them de-duplicated:
+`OPENROUTER_API_KEY` first, then by number. Ask and OpenRouter embeddings both
+rotate across them (`openrouter`, `openrouter-2`, …), then fall back to the
+Gemini/OpenAI keys. `docker-compose.prod.yml` forwards `_1.._5`.
+
+**Failover** (`app/services/llm_pool.py`). Round-robin start per backend list
+(chat and embeddings rotate independently; answer-metadata calls do not
+rotate). A key failing with 401/402/403/429 cools for
+`LLM_KEY_COOLDOWN_SECONDS` (300), a 5xx or timeout for 30 s; each consecutive
+failure of the same key doubles the wait up to `LLM_COOLDOWN_MAX_SECONDS`
+(3600), a longer `Retry-After` is honoured, and a success resets it. Cooling
+keys are tried last, not dropped. At most `LLM_MAX_ATTEMPTS` (4) keys are tried
+per model call.
+
+**Startup validation** (`app/core/config.py`). Invalid `LLM_PROVIDER`,
+`EMBEDDING_PROVIDER`, `EMBEDDING_DIMENSIONS` ≠ 1536, OpenRouter model names
+that are not `vendor/model`, out-of-range `RAG_MIN_SIMILARITY` /
+`RAG_MMR_LAMBDA` / `LLM_MAX_ATTEMPTS`, or a maximum cooldown below the base
+stop the backend with one readable line per problem:
+
+```
+Invalid Sentiora backend configuration:
+  - LLM_PROVIDER='anthropic' must be one of openai, gemini, openrouter; EMBEDDING_DIMENSIONS must be 1536: ...
+```
+
+A missing AI key is not an error: Ask then answers from memory without a model.
+
+**Keys never reach the browser.** Verified: no provider key, secret env name,
+or AI provider URL appears in `frontend/`, `extension/` or `shared/` sources or
+builds, and the Vite configs only bundle `VITE_*` variables.
+`npm run check:secrets` (`scripts/check-client-secrets.mjs`) enforces this and
+runs in CI after the build. Keep AI keys in `backend/.env`; the repo-root `.env`
+is also read by Vite (only `VITE_*` names are exposed), so a mistaken `VITE_`
+prefix there would leak a key.

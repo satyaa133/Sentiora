@@ -14,9 +14,14 @@ import logging
 import openai
 from openai import OpenAI
 
-from app.core.config import get_settings
+from app.core.config import get_settings, openrouter_keys
 from app.services.embedding_port import EmbeddingPort
-from app.services.llm_pool import LLMBackend, key_pool
+from app.services.llm_pool import (
+    LLMBackend,
+    key_pool,
+    max_attempts,
+    retry_after_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,13 +56,7 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
 
     def __init__(self) -> None:
         settings = get_settings()
-        keys = [
-            key
-            for key in dict.fromkeys(
-                [settings.openrouter_api_key, settings.openrouter_api_key_2]
-            )
-            if key
-        ]
+        keys = openrouter_keys(settings)
         if not keys:
             raise EmbeddingNotConfiguredError("No OpenRouter API key is configured.")
         self._model = settings.embedding_model or settings.openrouter_embedding_model
@@ -72,6 +71,8 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
             for i, key in enumerate(keys, start=1)
         ]
         self._cooldown = settings.llm_key_cooldown_seconds
+        self._max_cooldown = settings.llm_cooldown_max_seconds
+        self._attempts = max_attempts(settings)
         self._dimensions = settings.embedding_dimensions
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -88,7 +89,7 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
         if not batch:
             return []
         last_error: Exception | None = None
-        for backend in key_pool.order(self._backends):
+        for backend in key_pool.order(self._backends)[: self._attempts]:
             client = OpenAI(
                 api_key=backend.api_key,
                 base_url=OPENROUTER_BASE_URL,
@@ -104,6 +105,8 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
                     exc.status_code,
                     timed_out=False,
                     cooldown_seconds=self._cooldown,
+                    max_cooldown_seconds=self._max_cooldown,
+                    retry_after=retry_after_seconds(exc),
                 )
                 logger.warning(
                     "embedding key=%s failed status=%s", backend.name, exc.status_code
@@ -112,7 +115,11 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
             except (openai.APITimeoutError, openai.APIConnectionError) as exc:
                 last_error = exc
                 key_pool.mark_failed(
-                    backend, None, timed_out=True, cooldown_seconds=self._cooldown
+                    backend,
+                    None,
+                    timed_out=True,
+                    cooldown_seconds=self._cooldown,
+                    max_cooldown_seconds=self._max_cooldown,
                 )
                 logger.warning(
                     "embedding key=%s failed reason=%s",
@@ -205,7 +212,7 @@ def resolve_embedding_provider() -> str | None:
             ", ".join(EMBEDDING_PROVIDERS),
         )
         return None
-    has_openrouter = bool(settings.openrouter_api_key or settings.openrouter_api_key_2)
+    has_openrouter = bool(openrouter_keys(settings))
     if choice == "none":
         return None
     if choice == "openrouter":

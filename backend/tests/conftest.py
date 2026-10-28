@@ -36,6 +36,9 @@ from app.core.login_backoff import login_backoff  # noqa: E402
 from app.core.rate_limit import limiter  # noqa: E402
 from app.services.llm_pool import key_pool  # noqa: E402
 
+# OPENROUTER_API_KEY_<n> from local .env files must not reach tests either.
+get_settings().openrouter_numbered_keys = {}
+
 
 def pytest_report_header() -> str:
     source = "derived from DATABASE_URL" if _derived else "TEST_DATABASE_URL"

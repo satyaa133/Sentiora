@@ -49,7 +49,8 @@
     "test:db:prepare": "node scripts/run-python.mjs -m tests.testdb prepare",
     "verify:youtube-extension": "node scripts/verify-youtube-extension.mjs",
     "compose:up": "docker compose up -d postgres redis",
-    "compose:down": "docker compose down"
+    "compose:down": "docker compose down",
+    "check:secrets": "node scripts/check-client-secrets.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",

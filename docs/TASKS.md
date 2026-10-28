@@ -44,7 +44,7 @@
 | R3: Embeddings | ✅ Completed | OpenRouter embeddings (pluggable), per-chunk `embedding_model`, same-model queries only, non-fatal capture embedding, `--embed` backfill |
 | R4: Retrieval | ✅ Completed | LLM query rewrite, pgvector + Postgres full-text fused with RRF, `RAG_MIN_SIMILARITY` 0.25, near-dup removal, MMR, 2 chunks per memory, top 6 |
 | R5: Generation | ✅ Completed | Unified `[S#]` prompt, SSE `POST /chat/stream`, strict json_schema metadata (mode, usedSources, followUps), `OPENROUTER_FALLBACK_MODELS`, `/chat` shape kept |
-| R6: Env and keys | ⏳ Pending | `OPENROUTER_API_KEY_1..N`, exponential cooldown, startup validation |
+| R6: Env and keys | ✅ Completed | `OPENROUTER_API_KEY_1..N` auto-detected, exponential cooldown with Retry-After, `LLM_MAX_ATTEMPTS`, readable startup validation, `npm run check:secrets` in CI |
 | R7: Ask page UX | ⏳ Pending | Streaming UI, citation chips, sources panel, history |
 | R8: Evaluation | ⏳ Pending | `scripts/eval-rag` hit rate |
 
