@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { MemoryItem } from "../types/memory";
 import { formatExtractedContent } from "../utils/contentFormatter";
+import { safeHref } from "../utils/safeHref";
 
 interface MemoryDetailDrawerProps {
   item: MemoryItem | null;
@@ -74,7 +75,7 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnyth
             )}
             <h2 className="text-xl font-bold font-serif text-ink-900 leading-snug">{item.title}</h2>
             <a
-              href={item.url}
+              href={safeHref(item.url)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs text-moss-600 hover:underline font-medium truncate max-w-md"
@@ -98,6 +99,18 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnyth
 
         {/* Content Body */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          {item.status === "failed" && (
+            <div
+              role="alert"
+              className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700"
+            >
+              <p className="font-bold uppercase tracking-wider text-[10px]">Processing failed</p>
+              <p className="mt-1">
+                {item.processing_error || "This memory could not be indexed."} It is not searchable;
+                capture it again to retry.
+              </p>
+            </div>
+          )}
           {/* Metadata bar */}
           <div className="grid grid-cols-3 gap-3 p-4 bg-white border border-parchment-200 rounded-xl text-center shadow-card">
             <div>
@@ -156,7 +169,7 @@ export default function MemoryDetailDrawer({ item, onClose, onDelete, onAskAnyth
         <div className="p-4 border-t border-parchment-200/80 bg-parchment-50/90 backdrop-blur-md flex items-center justify-between gap-3">
           <div className="flex gap-2">
             <a
-              href={item.url}
+              href={safeHref(item.url)}
               target="_blank"
               rel="noopener noreferrer"
               className="px-4 py-2.5 rounded-xl bg-white border border-parchment-200 hover:bg-parchment-100 text-ink-900 text-xs font-semibold transition-colors flex items-center gap-2 shadow-card"

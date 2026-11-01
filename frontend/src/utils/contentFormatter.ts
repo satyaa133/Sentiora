@@ -49,21 +49,23 @@ export function formatExtractedContent(item: MemoryItem): FormattedContentResult
   const rawText = item.content || item.summary || "";
   const cleaned = cleanRawExtractedText(rawText);
 
-  // Check if text consists primarily of noise (e.g., if >40% of words are metric tokens)
+  // Metric/gallery noise (view counts, thumbnail grids). Short notes are not noise:
+  // they are shown as written.
   const words = cleaned.split(" ").filter(Boolean);
   const metricWords = words.filter((w) => /^\d+(\.\d+)?[kmKMbB]?$/i.test(w.replace(/,/g, "")));
   const isGalleryOrMetricNoise =
-    words.length < 15 ||
-    (words.length > 0 && metricWords.length / words.length > 0.3) ||
+    (words.length >= 4 && metricWords.length / words.length > 0.3) ||
     /^((\d+[.\d]*[kmKMbB]?\s*)+)(Loading more\.\.\.)?$/i.test(cleaned);
 
   const domain = getDomain(item.url);
 
-  if (isGalleryOrMetricNoise) {
-    const headline = item.title || `Visual Resource from ${domain}`;
-    const cleanText = `Captured page resource from ${domain} (${item.title || "Design Gallery & Visual Assets"}). Contains page layout references, media assets, and design components.`;
+  if (!cleaned || isGalleryOrMetricNoise) {
+    // Never invent a description of the page: say plainly that little text exists.
+    const cleanText = cleaned && !isGalleryOrMetricNoise
+      ? cleaned
+      : `Little readable text was captured from ${domain}.`;
     return {
-      headline,
+      headline: item.title || domain,
       cleanText,
       paragraphs: [cleanText],
       isGalleryOrMetricNoise: true,
@@ -73,7 +75,7 @@ export function formatExtractedContent(item: MemoryItem): FormattedContentResult
 
   // Source-specific formatting
   if (item.source_type === "youtube") {
-    const paragraphs = formatYoutubeTranscript(cleaned);
+    const paragraphs = formatYoutubeTranscript(cleaned, item.structured_content);
     return {
       headline: item.title,
       cleanText: cleaned,
@@ -119,26 +121,38 @@ function getDomain(urlStr: string): string {
   }
 }
 
-function formatYoutubeTranscript(text: string): string[] {
+function formatTimestamp(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = (total % 60).toString().padStart(2, "0");
+  return h > 0 ? `${h}:${m.toString().padStart(2, "0")}:${s}` : `${m.toString().padStart(2, "0")}:${s}`;
+}
+
+/**
+ * Transcript paragraphs. Timestamps come only from the captured transcript
+ * segments; when none exist the text is shown without invented times.
+ */
+export function formatYoutubeTranscript(
+  text: string,
+  nodes?: MemoryItem["structured_content"],
+): string[] {
+  const timed = (nodes ?? [])
+    .filter((n) => n?.text?.trim() && typeof n.metadata?.start_seconds === "number")
+    .sort((a, b) => a.order - b.order);
+  if (timed.length > 0) {
+    return timed.map((n) => `[${formatTimestamp(n.metadata?.start_seconds as number)}] ${n.text.trim()}`);
+  }
+
   if (/\[\d{1,2}:\d{2}\]/.test(text)) {
     return text.split(/(?=\[\d{1,2}:\d{2}\])/).map((s) => s.trim()).filter(Boolean);
   }
 
   const sentences = text.split(/(?<=[.!?])\s+/);
   const chunks: string[] = [];
-  let currentChunk = "";
-
-  for (let i = 0; i < sentences.length; i++) {
-    currentChunk += (currentChunk ? " " : "") + sentences[i];
-    if ((i + 1) % 3 === 0 || i === sentences.length - 1) {
-      const approxSec = i * 20;
-      const min = Math.floor(approxSec / 60).toString().padStart(2, "0");
-      const sec = (approxSec % 60).toString().padStart(2, "0");
-      chunks.push(`[${min}:${sec}] ${currentChunk}`);
-      currentChunk = "";
-    }
+  for (let i = 0; i < sentences.length; i += 3) {
+    chunks.push(sentences.slice(i, i + 3).join(" "));
   }
-
   return chunks.length > 0 ? chunks : [text];
 }
 

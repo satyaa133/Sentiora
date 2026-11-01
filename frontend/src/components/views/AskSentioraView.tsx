@@ -1,6 +1,7 @@
 import { useState, useEffect, type FormEvent } from "react";
 import type { MemoryItem } from "../../types/memory";
 import { askSentiora, AskApiError, type AskCitation, type AskRequest } from "../../services/askService";
+import { safeHref } from "../../utils/safeHref";
 
 
 interface AskSentioraViewProps {
@@ -349,7 +350,7 @@ export default function AskSentioraView({
                   {msg.citations.map((c, i) => (
                     <a
                       key={i}
-                      href={c.source_available === false || c.url.startsWith("file:") ? undefined : c.url}
+                      href={c.source_available === false ? undefined : safeHref(c.url)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center justify-between p-2 rounded-lg bg-parchment-50/90 backdrop-blur-xs border border-parchment-200/80 text-[11px] text-moss-600 hover:underline font-medium transition-colors"

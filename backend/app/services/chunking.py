@@ -57,6 +57,85 @@ def chunk_content(
     ]
 
 
+def format_timestamp(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _transcript_segments(structured_content: object) -> list[tuple[str, float, float]]:
+    """Ordered (text, start, end) transcript segments; empty if untimed or malformed."""
+    if not isinstance(structured_content, list):
+        return []
+    segments: list[tuple[int, str, float, float]] = []
+    for node in structured_content:
+        if not isinstance(node, dict):
+            continue
+        text = str(node.get("text") or "").strip()
+        meta = node.get("metadata") or {}
+        start = meta.get("start_seconds") if isinstance(meta, dict) else None
+        if not text or not isinstance(start, int | float):
+            continue
+        end = meta.get("end_seconds")
+        end_value = float(end) if isinstance(end, int | float) else float(start)
+        order = node.get("order")
+        segments.append(
+            (order if isinstance(order, int) else len(segments), text, float(start), end_value)
+        )
+    segments.sort(key=lambda seg: (seg[0], seg[2]))
+    return [(text, start, end) for _, text, start, end in segments]
+
+
+def chunk_transcript(
+    structured_content: object,
+    *,
+    title: str | None = None,
+) -> list[ChunkDraft]:
+    """Pack timestamped transcript segments into chunks that keep their time range.
+
+    The range is recorded in the chunk heading (e.g. ``Title [02:15–04:30]``) so
+    citations and the RAG prompt can point back to the moment in the video.
+    Returns [] when the content has no timed segments, so callers can fall back
+    to plain-text chunking.
+    """
+    segments = _transcript_segments(structured_content)
+    if not segments:
+        return []
+
+    base = (title or "Transcript").strip()
+    drafts: list[ChunkDraft] = []
+    parts: list[str] = []
+    span_start = span_end = 0.0
+
+    def flush() -> None:
+        nonlocal parts
+        body = " ".join(parts).strip()
+        if body:
+            heading = f"{base} [{format_timestamp(span_start)}–{format_timestamp(span_end)}]"
+            drafts.append(
+                ChunkDraft(
+                    chunk_index=len(drafts),
+                    content=_format_chunk([body], heading),
+                    heading=heading,
+                )
+            )
+        parts = []
+
+    for text, start, end in segments:
+        for piece in _split_oversize(text):
+            if parts and len(" ".join([*parts, piece])) > TARGET_CHUNK_CHARS:
+                flush()
+            if not parts:
+                span_start = start
+            parts.append(piece)
+            span_end = max(end, start)
+    flush()
+    return drafts
+
+
 def _split_into_blocks(text: str, source_type: SourceType, title: str | None) -> list[_Block]:
     if source_type == SourceType.pdf:
         return _split_pdf_blocks(text)

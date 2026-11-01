@@ -28,19 +28,55 @@ app = FastAPI(
 )
 
 
+_DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
 @app.middleware("http")
 async def attach_request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
     request.state.request_id = f"req_{uuid.uuid4().hex[:8]}"
+
+    # Refuse oversized bodies before they are read and parsed.
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > settings.max_request_body_bytes:
+        return JSONResponse(
+            status_code=413,
+            content={
+                "success": False,
+                "error": {
+                    "code": "PAYLOAD_TOO_LARGE",
+                    "message": "Request body is too large.",
+                    "details": None,
+                },
+                "meta": _meta(request),
+            },
+            headers={"X-Request-ID": request.state.request_id},
+        )
+
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    if not request.url.path.startswith(_DOCS_PATHS):
+        # JSON API: nothing should ever be rendered or framed. Swagger/ReDoc
+        # (development only) load their own assets, so they are excluded.
+        response.headers.setdefault(
+            "Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'"
+        )
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
     return response
 
 
 if settings.cors_origins:
+    # Only explicitly configured origins. The Sentiora extension does not need a
+    # CORS grant (extension pages with host permissions bypass CORS); a wildcard
+    # chrome-extension:// rule would let any installed extension call the API.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_origin_regex=r"chrome-extension://.*",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

@@ -39,7 +39,10 @@ const JUNK_SELECTOR = [
 ].join(",");
 
 const SEMANTIC_TEXT_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,pre,blockquote,figcaption,td,th";
-const MAX_ELEMS_FOR_READABILITY = 2500;
+// Readability parses ~8k-element pages (e.g. long Wikipedia articles) in ~100ms; the
+// cap only guards pathological DOMs. Too low a cap sends ordinary long articles to
+// the fallback scraper, which keeps menus such as language pickers.
+const MAX_ELEMS_FOR_READABILITY = 15000;
 const MIN_CONTENT_LENGTH = 50;
 
 export interface WebpageExtractionResult {

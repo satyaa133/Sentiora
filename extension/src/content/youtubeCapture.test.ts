@@ -6,6 +6,8 @@ import {
   parseTimedTextJson3,
   parseTimedTextXml,
   decodeHtmlEntities,
+  parseYoutubeVideoUrl,
+  canonicalYoutubeUrl,
 } from "./youtubeCapture";
 import type { StructuredNode } from "../shared/types";
 
@@ -35,32 +37,36 @@ function makeTranscriptNodes(segments: { text: string; start: number; dur: numbe
 }
 
 // ──────────────────────────────────────────────
-// isYoutubeWatchPage
+// Video page detection (exercises the real parser)
 // ──────────────────────────────────────────────
-describe("isYoutubeWatchPage", () => {
-  it("detects youtube watch page by hostname + path + query", () => {
-    // We can't change window.location in jsdom easily, so we test the helper
-    // via URL inspection logic equivalence
-    const url = new URL("https://www.youtube.com/watch?v=abc123");
-    const result =
-      url.hostname.includes("youtube.com") &&
-      url.pathname === "/watch" &&
-      url.searchParams.has("v");
-    expect(result).toBe(true);
+describe("parseYoutubeVideoUrl", () => {
+  it("detects watch, shorts, live and mobile video pages", () => {
+    expect(parseYoutubeVideoUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toEqual({ videoId: "dQw4w9WgXcQ", kind: "watch" });
+    expect(parseYoutubeVideoUrl("https://www.youtube.com/watch?list=PL1&v=dQw4w9WgXcQ&t=42s")?.videoId).toBe("dQw4w9WgXcQ");
+    expect(parseYoutubeVideoUrl("https://m.youtube.com/watch?v=dQw4w9WgXcQ")?.kind).toBe("watch");
+    expect(parseYoutubeVideoUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ")).toEqual({ videoId: "dQw4w9WgXcQ", kind: "shorts" });
+    expect(parseYoutubeVideoUrl("https://www.youtube.com/live/dQw4w9WgXcQ")?.kind).toBe("live");
   });
 
-  it("rejects non-watch youtube pages", () => {
-    const url = new URL("https://www.youtube.com/channel/UCxyz");
-    const result =
-      url.hostname.includes("youtube.com") &&
-      url.pathname === "/watch" &&
-      url.searchParams.has("v");
-    expect(result).toBe(false);
+  it("rejects non-video and look-alike pages", () => {
+    for (const url of [
+      "https://www.youtube.com/channel/UCxyz",
+      "https://www.youtube.com/",
+      "https://www.youtube.com/results?search_query=x",
+      "https://www.youtube.com/watch?v=tooshort",
+      "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      "https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ",
+      "not a url",
+    ]) {
+      expect(parseYoutubeVideoUrl(url)).toBeNull();
+    }
+  });
+
+  it("builds a canonical watch URL", () => {
+    expect(canonicalYoutubeUrl("dQw4w9WgXcQ")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
   });
 });
 
-// ──────────────────────────────────────────────
-// Transcript nodes → content
 // ──────────────────────────────────────────────
 describe("YouTube transcript StructuredNode conversion", () => {
   it("produces paragraph nodes with start_seconds and end_seconds", () => {

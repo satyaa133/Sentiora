@@ -1,3 +1,12 @@
+# Local development services. Ports bind to 127.0.0.1 so the dev database,
+# unauthenticated Redis and pgAdmin are not reachable from the LAN; set
+# BIND_ADDRESS=0.0.0.0 only when you deliberately need LAN access.
+#
+#   docker compose up -d                  # postgres, redis, pgadmin (infra only)
+#   docker compose --profile app up -d    # also containerised backend + worker
+#
+# The backend/worker are opt-in so they never compete with host `npm start` /
+# `npm run dev:worker` processes for port 8000 and the capture queue.
 services:
   postgres:
     build:
@@ -10,7 +19,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME_LOCAL_DEV}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +34,7 @@ services:
     container_name: sentiora-redis
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -40,6 +49,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: sentiora-backend
+    profiles: ["app"]
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     env_file:
       - ./backend/.env
@@ -53,7 +63,7 @@ services:
     volumes:
       - ./backend:/app/backend
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,6 +75,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: sentiora-worker
+    profiles: ["app"]
     command: ["python", "-m", "app.workers.worker"]
     env_file:
       - ./backend/.env
@@ -88,7 +99,7 @@ services:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@sentiora.ai}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
     ports:
-      - "5050:80"
+      - "${BIND_ADDRESS:-127.0.0.1}:5050:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./infrastructure/pgadmin/servers.json:/pgadmin4/servers.json

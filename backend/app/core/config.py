@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_JWT_SECRET_KEY = "DEV_SECRET_KEY_CHANGE_IN_PRODUCTION_SENTIORA_2026"
 DEFAULT_DATABASE_URL = (
-    "postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora"
+    "postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@127.0.0.1:5432/Sentiora"
 )
 
 
@@ -23,19 +23,30 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://127.0.0.1:6379/0"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    # Reverse proxies whose X-Forwarded-For header is trusted for client IPs
+    # (rate limiting). Empty = ignore X-Forwarded-For entirely.
+    trusted_proxy_ips: list[str] = Field(default_factory=list)
+    # Reject request bodies larger than this (bytes) before parsing.
+    max_request_body_bytes: int = 4 * 1024 * 1024
     # MUST be overridden via JWT_SECRET_KEY env var in staging/production.
     jwt_secret_key: str = DEFAULT_JWT_SECRET_KEY
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 30
     llm_provider: str = "openai"
+    # Embedding provider for semantic search: "auto" | "openai" | "gemini" | "none".
+    # "auto" follows LLM_PROVIDER when it supports embeddings (openai/gemini);
+    # for chat-only providers such as openrouter it uses the first configured
+    # embedding key (OPENAI_API_KEY, then GEMINI_API_KEY).
+    embedding_provider: str = "auto"
     openai_api_key: str | None = None
     openai_embedding_model: str = "text-embedding-3-small"
     openai_chat_model: str = "gpt-4o-mini"
     gemini_api_key: str | None = None
-    gemini_embedding_model: str = "text-embedding-004"
+    # Must support EMBEDDING_DIMENSIONS output (text-embedding-004 caps at 768).
+    gemini_embedding_model: str = "gemini-embedding-001"
     gemini_chat_model: str = "gemini-2.5-flash"
     openrouter_api_key: str | None = None
     openrouter_chat_model: str = "anthropic/claude-haiku-4.5"
@@ -57,7 +68,7 @@ class Settings(BaseSettings):
     failed_login_base_backoff_seconds: int = 2
     failed_login_max_backoff_seconds: int = 60
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "trusted_proxy_ips", mode="before")
     @classmethod
     def parse_cors_origins(cls, value: object) -> list[str]:
         if value is None:
@@ -78,6 +89,16 @@ class Settings(BaseSettings):
             if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
                 raise ValueError(
                     "jwt_secret_key must be set via JWT_SECRET_KEY when "
+                    "app_environment is not 'development'"
+                )
+            if len(self.jwt_secret_key) < 32:
+                raise ValueError(
+                    "JWT_SECRET_KEY must be at least 32 characters when "
+                    "app_environment is not 'development'"
+                )
+            if "*" in self.cors_origins:
+                raise ValueError(
+                    "CORS_ORIGINS must list explicit origins (no '*') when "
                     "app_environment is not 'development'"
                 )
         return self

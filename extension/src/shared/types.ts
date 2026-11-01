@@ -107,6 +107,7 @@ export type CaptureErrorCode =
   | "YOUTUBE_CAPTIONS_UNAVAILABLE"
   | "YOUTUBE_TRANSCRIPT_FETCH_FAILED"
   | "YOUTUBE_TRANSCRIPT_PARSE_FAILED"
+  | "YOUTUBE_VIDEO_UNAVAILABLE"
   | "FILE_TYPE_UNSUPPORTED"
   | "FILE_PARSE_FAILED"
   | "UPLOAD_FAILED"
@@ -130,7 +131,30 @@ export type ExtensionMessage =
   | { type: "SYNC_AUTH_TOKENS"; payload: AuthSyncPayload }
   | { type: "CLEAR_AUTH_TOKENS" }
   | { type: "FETCH_PDF_BYTES"; url: string }
-  | { type: "CHECK_FILE_ACCESS" };
+  | { type: "CHECK_FILE_ACCESS" }
+  | { type: "GET_YOUTUBE_PLAYER_RESPONSE"; videoId: string };
+
+/**
+ * Trimmed, JSON-safe subset of YouTube's player response, read from the page's
+ * main world by the background worker (content scripts cannot see page globals).
+ */
+export interface YoutubePlayerResponse {
+  videoDetails?: {
+    videoId?: string;
+    title?: string;
+    author?: string;
+    channelId?: string;
+    lengthSeconds?: string | number;
+    isLive?: boolean;
+    thumbnail?: { thumbnails?: { url?: string; width?: number; height?: number }[] };
+  };
+  playabilityStatus?: { status?: string; reason?: string };
+  captions?: {
+    playerCaptionsTracklistRenderer?: {
+      captionTracks?: { baseUrl?: string; languageCode?: string; kind?: string }[];
+    };
+  };
+}
 
 export interface ExtensionState {
   readonly isReady: boolean;

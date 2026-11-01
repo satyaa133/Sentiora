@@ -65,9 +65,50 @@ _YOUTUBE_STUB_RE = re.compile(
 )
 
 
+_YOUTUBE_HOSTS = frozenset(
+    {
+        "youtube.com",
+        "www.youtube.com",
+        "m.youtube.com",
+        "music.youtube.com",
+        "youtu.be",
+        "youtube-nocookie.com",
+        "www.youtube-nocookie.com",
+    }
+)
+_YOUTUBE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def youtube_video_id(url: str) -> str | None:
+    """Extract the 11-char video ID from watch, shorts, live, embed and youtu.be URLs."""
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    if host not in _YOUTUBE_HOSTS:
+        return None
+    parts = [part for part in parsed.path.split("/") if part]
+    candidate: str | None = None
+    if host == "youtu.be":
+        candidate = parts[0] if parts else None
+    elif parsed.path == "/watch":
+        candidate = dict(parse_qsl(parsed.query)).get("v")
+    elif len(parts) >= 2 and parts[0] in ("shorts", "live", "embed", "v"):
+        candidate = parts[1]
+    if candidate and _YOUTUBE_ID_RE.match(candidate):
+        return candidate
+    return None
+
+
 def canonicalize_url(url: str) -> str:
     if not url:
         return ""
+    # Every YouTube video URL variant (timestamps, playlists, shorts, youtu.be)
+    # maps to one canonical watch URL so deduplication works across them.
+    video_id = youtube_video_id(url)
+    if video_id:
+        return f"https://www.youtube.com/watch?v={video_id}"
     try:
         parsed = urlparse(url)
         scheme = parsed.scheme.lower()

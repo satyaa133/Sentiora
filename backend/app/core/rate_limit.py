@@ -40,15 +40,26 @@ class SlidingWindowLimiter:
 limiter = SlidingWindowLimiter()
 
 
-def client_ip(request: Request) -> str:
+def client_ip(request: Request, settings: Settings | None = None) -> str:
+    """Client address for rate limiting.
+
+    X-Forwarded-For is honoured only when the direct peer is a configured
+    trusted proxy; otherwise any client could spoof a fresh IP per request and
+    bypass login/register limits. With trusted proxies, the right-most address
+    that is not itself a trusted proxy is the real client.
+    """
+    cfg = settings or get_settings()
+    peer = request.client.host if request.client else None
+    if peer == "testclient":
+        peer = "127.0.0.1"
+    trusted = set(cfg.trusted_proxy_ips)
     forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client and request.client.host:
-        if request.client.host == "testclient":
-            return "127.0.0.1"
-        return request.client.host
-    return "unknown"
+    if forwarded and peer in trusted:
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        for hop in reversed(hops):
+            if hop not in trusted:
+                return hop
+    return peer or "unknown"
 
 
 def enforce_rate_limit(key: str, limit: int, window_seconds: int) -> None:
