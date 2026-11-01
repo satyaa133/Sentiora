@@ -32,9 +32,9 @@ type Step = 1 | 2 | 3 | 4;
 
 const STEP_LABELS: Record<Step, string> = {
   1: "Meet Sentiora",
-  2: "How saving works",
-  3: "Choose what to remember",
-  4: "Finish setup",
+  2: "How Saving Works",
+  3: "Choose What to Remember",
+  4: "Finish Setup",
 };
 
 function PointList({

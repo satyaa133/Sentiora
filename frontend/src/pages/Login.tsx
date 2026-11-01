@@ -54,7 +54,7 @@ export default function Login() {
 
   return (
     <AuthLayout
-      title="Welcome back"
+      title="Welcome Back"
       subtitle="Sign in to your Sentiora memory."
       footer={
         <>
