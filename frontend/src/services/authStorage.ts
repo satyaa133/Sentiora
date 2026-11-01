@@ -31,6 +31,16 @@ export function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
+/** Session mirrored to localStorage (for the extension and other tabs), if any. */
+export function getStoredSession(): AuthSession | null {
+  try {
+    const raw = localStorage.getItem(AUTH_SESSION_KEY);
+    return raw ? (JSON.parse(raw) as AuthSession) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function setAuthTokens(accessToken: string, refreshToken: string, user?: AuthSessionUser): void {
   sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
   localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
@@ -39,17 +49,6 @@ export function setAuthTokens(accessToken: string, refreshToken: string, user?: 
     refreshToken,
     user,
   });
-}
-
-export function updateAccessToken(accessToken: string): void {
-  const refreshToken = getRefreshToken();
-  sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-  if (refreshToken) {
-    persistExtensionBridge({
-      accessToken,
-      refreshToken,
-    });
-  }
 }
 
 export function clearAuthStorage(): void {

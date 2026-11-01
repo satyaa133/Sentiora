@@ -1,20 +1,22 @@
 import logging
 import uuid
-from datetime import datetime, UTC
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.v1.ask_routes import router as ask_router
 from app.api.v1.auth_routes import router as auth_router
+from app.api.v1.dashboard_routes import router as dashboard_router
 from app.api.v1.health_routes import router as health_router
 from app.api.v1.memory_routes import router as memory_router
 from app.api.v1.user_routes import router as user_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 from app.models import MemoryChunk, MemoryItem  # noqa: F401
+from app.schemas.envelope import response_meta
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -83,13 +85,9 @@ if settings.cors_origins:
     )
 
 
-def _meta(request: Request) -> dict:
-    return {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "request_id": getattr(
-            request.state, "request_id", f"req_{uuid.uuid4().hex[:8]}"
-        ),
-    }
+def _meta(request: Request) -> dict[str, str]:
+    meta: dict[str, str] = jsonable_encoder(response_meta(request))
+    return meta
 
 
 @app.exception_handler(HTTPException)
@@ -161,3 +159,4 @@ app.include_router(auth_router, prefix=settings.api_v1_prefix)
 app.include_router(user_router, prefix=settings.api_v1_prefix)
 app.include_router(memory_router, prefix=settings.api_v1_prefix)
 app.include_router(ask_router, prefix=settings.api_v1_prefix)
+app.include_router(dashboard_router, prefix=settings.api_v1_prefix)

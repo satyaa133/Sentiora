@@ -1,5 +1,9 @@
 import { useMemo, useState } from "react";
-import type { FormEvent, RefObject } from "react";
+import type { FormEvent } from "react";
+import { emitEcho } from "../echo/echoEvents";
+import { useEchoSearchEvents } from "../echo/useEchoSearchEvents";
+import { useStatistics } from "../../hooks/useStatistics";
+import ThisWeekChart from "./ThisWeekChart";
 
 import {
   Button,
@@ -19,19 +23,11 @@ import {
   MemoryRowSkeleton,
 } from "@shared/ui";
 
-import type { MemoryItem, SourceType } from "../../types/memory";
+import EmptyState from "../EmptyState";
+import { SOURCE_FILTERS, type MemoryItem, type SourceFilter } from "../../types/memory";
 import { formatExtractedContent } from "../../utils/contentFormatter";
 import { dayLabel, greeting, savedAgo } from "../../utils/dates";
 import { pickResurfaced } from "../../utils/resurface";
-
-type Filter = "all" | SourceType;
-
-const FILTERS: Array<{ id: Filter; label: string }> = [
-  { id: "all", label: "All" },
-  { id: "webpage", label: "Web" },
-  { id: "pdf", label: "PDF" },
-  { id: "youtube", label: "Video" },
-];
 
 const DISMISSED_KEY = "sentiora-resurface-dismissed";
 
@@ -64,7 +60,6 @@ interface HomeViewProps {
   status: string | null;
   searchQuery: string;
   onSearchQueryChange: (value: string) => void;
-  searchInputRef: RefObject<HTMLInputElement>;
   onRetry: () => void;
   onSync: () => void;
   onAddMemory: () => void;
@@ -72,6 +67,8 @@ interface HomeViewProps {
   onAsk: (question: string) => void;
   onOpenPalette: () => void;
   onViewTimeline: () => void;
+  /** Changes when memories are added, removed or change status; refreshes "This week". */
+  statsRefreshKey?: unknown;
 }
 
 export default function HomeView({
@@ -83,7 +80,6 @@ export default function HomeView({
   status,
   searchQuery,
   onSearchQueryChange,
-  searchInputRef,
   onRetry,
   onSync,
   onAddMemory,
@@ -91,8 +87,10 @@ export default function HomeView({
   onAsk,
   onOpenPalette,
   onViewTimeline,
+  statsRefreshKey,
 }: HomeViewProps) {
-  const [filter, setFilter] = useState<Filter>("all");
+  const { stats } = useStatistics(statsRefreshKey);
+  const [filter, setFilter] = useState<SourceFilter>("all");
   const [dismissed, setDismissed] = useState<Set<string>>(readDismissed);
 
   const filtered = useMemo(() => {
@@ -107,6 +105,8 @@ export default function HomeView({
       );
     });
   }, [items, filter, searchQuery]);
+
+  useEchoSearchEvents(searchQuery, filtered.length);
 
   const resurfaced = useMemo(
     () => pickResurfaced(items, dismissed),
@@ -179,7 +179,6 @@ export default function HomeView({
         </label>
         <Input
           id="home-search"
-          ref={searchInputRef}
           value={searchQuery}
           onChange={(event) => onSearchQueryChange(event.target.value)}
           placeholder="Search or ask anything you've saved..."
@@ -198,7 +197,7 @@ export default function HomeView({
             </button>
           }
         />
-        <p id="home-search-hint" className="mt-2 min-h-[20px] text-sm text-muted">
+        <p id="home-search-hint" className="mt-2 min-h-[22px] text-[15px] text-muted">
           {searchQuery.trim()
             ? "Filtering your recent memories. Press Enter to ask Sentiora."
             : ""}
@@ -231,10 +230,20 @@ export default function HomeView({
             ) : null}
           </div>
           <div className="flex shrink-0 gap-2">
-            <Button onClick={() => onSelectItem(resurfaced)}>Revisit</Button>
+            <Button
+              onClick={() => {
+                emitEcho({ type: "resurfaced", action: "revisit" });
+                onSelectItem(resurfaced);
+              }}
+            >
+              Revisit
+            </Button>
             <Button
               variant="secondary"
-              onClick={() => dismissResurfaced(resurfaced.id)}
+              onClick={() => {
+                emitEcho({ type: "resurfaced", action: "dismiss" });
+                dismissResurfaced(resurfaced.id);
+              }}
             >
               Not now
             </Button>
@@ -253,7 +262,7 @@ export default function HomeView({
               aria-label="Filter by type"
               className="flex flex-wrap gap-2"
             >
-              {FILTERS.map((option) => (
+              {SOURCE_FILTERS.map((option) => (
                 <Chip
                   key={option.id}
                   selected={filter === option.id}
@@ -276,16 +285,15 @@ export default function HomeView({
               ))}
             </ul>
           ) : loadError ? (
-            <Card className="flex flex-col items-center py-10 text-center">
-              <Echo state="faded" size={72} />
-              <p className="mt-4 text-[17px] font-semibold text-fg">
-                Could not load your memories
-              </p>
-              <p className="mt-1 max-w-sm text-[15px] text-muted">{loadError}</p>
-              <Button variant="secondary" className="mt-5" onClick={onRetry}>
-                Try again
-              </Button>
-            </Card>
+            <EmptyState
+              title="Could not load your memories"
+              body={loadError}
+              action={
+                <Button variant="secondary" onClick={onRetry}>
+                  Try again
+                </Button>
+              }
+            />
           ) : filtered.length > 0 ? (
             <>
               <MemoryList>
@@ -325,24 +333,27 @@ export default function HomeView({
           )}
         </section>
 
-        <aside aria-labelledby="try-heading" className="min-w-0">
-          <h2 id="try-heading" className="mb-4 text-[20px] font-semibold text-fg">
-            Try asking
-          </h2>
-          <ul className="space-y-3">
-            {suggestions.map((question) => (
-              <li key={question}>
-                <button
-                  type="button"
-                  onClick={() => onAsk(question)}
-                  className="flex w-full items-start justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3.5 text-left text-[16px] text-fg transition-colors hover:bg-raised"
-                >
-                  <span>{question}</span>
-                  <IconArrowRight size={18} className="mt-0.5 shrink-0 text-link" />
-                </button>
-              </li>
-            ))}
-          </ul>
+        <aside aria-labelledby="try-heading" className="min-w-0 space-y-6">
+          <div>
+            <h2 id="try-heading" className="mb-4 text-[20px] font-semibold text-fg">
+              Try asking
+            </h2>
+            <ul className="space-y-3">
+              {suggestions.map((question) => (
+                <li key={question}>
+                  <button
+                    type="button"
+                    onClick={() => onAsk(question)}
+                    className="flex w-full items-start justify-between gap-3 rounded-card border border-line bg-surface px-4 py-3.5 text-left text-[16px] text-fg transition-colors hover:bg-raised"
+                  >
+                    <span>{question}</span>
+                    <IconArrowRight size={18} className="mt-0.5 shrink-0 text-link" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <ThisWeekChart daily={stats?.daily ?? null} />
         </aside>
       </div>
     </div>

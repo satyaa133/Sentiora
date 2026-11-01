@@ -6,7 +6,6 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { createRef } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -103,7 +102,6 @@ function renderHome(
     status: null,
     searchQuery: "",
     onSearchQueryChange: vi.fn(),
-    searchInputRef: createRef<HTMLInputElement>(),
     onRetry: vi.fn(),
     onSync: vi.fn(),
     onAddMemory: vi.fn(),
@@ -224,7 +222,7 @@ describe("AskSentioraView", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Send question" }));
 
-    const answer = await screen.findByRole("article", { name: "Sentiora's answer" });
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
     expect(answer).toHaveTextContent("Use multi-stage builds");
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
       "How do I keep images small?",
@@ -249,5 +247,133 @@ describe("AskSentioraView", () => {
     expect(
       await screen.findByText("I couldn't find that in your saved memories."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("AskSentioraView answer modes", () => {
+  it("labels a general answer and shows follow-up questions", async () => {
+    vi.mocked(askSentiora).mockResolvedValue({
+      answer: "A heap is a tree-shaped priority queue. Example: arr[1] holds a child.",
+      citations: [],
+      insufficient_context: false,
+      mode: "general",
+      suggested_followups: ["Can you give another example?"],
+    });
+    render(<AskSentioraView items={[]} />);
+    fireEvent.change(screen.getByLabelText("Your question"), {
+      target: { value: "What is a heap?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
+    expect(answer).toHaveTextContent("General knowledge · not from your saved memory");
+    // Without citations "[1]" is plain text, not a source pill.
+    expect(within(answer).queryByText("source")).not.toBeInTheDocument();
+    expect(vi.mocked(askSentiora)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ question: "What is a heap?", tz: expect.any(String) }),
+    );
+
+    vi.mocked(askSentiora).mockResolvedValue({
+      answer: "Another one.",
+      citations: [],
+      insufficient_context: false,
+      mode: "general",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Can you give another example?" }));
+    await screen.findByText("Another one.");
+    expect(vi.mocked(askSentiora)).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        question: "Can you give another example?",
+        history: [
+          { role: "user", content: "What is a heap?" },
+          { role: "assistant", content: expect.stringContaining("priority queue") },
+        ],
+      }),
+    );
+  });
+
+  it("separates the memory part of a combined answer", async () => {
+    vi.mocked(askSentiora).mockResolvedValue({
+      answer: "Sliding window reuses work.\n\n### From your saved memory\nYour playlist covers fixed windows [1].",
+      citations: [
+        {
+          memory_id: "v",
+          chunk_id: "c",
+          title: "Sliding window playlist",
+          url: "https://www.youtube.com/playlist?list=x",
+          source_type: "youtube",
+          domain: "www.youtube.com",
+          heading: null,
+          page_number: null,
+          captured_at: NOW.toISOString(),
+          excerpt: "Lecture 1 introduces fixed-size windows.",
+        },
+      ],
+      insufficient_context: false,
+      mode: "combined",
+    });
+    render(<AskSentioraView items={[item("v", "Sliding window playlist", 0)]} />);
+    fireEvent.change(screen.getByLabelText("Your question"), {
+      target: { value: "Explain sliding window based on the playlist I saved" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+
+    const memoryPart = await screen.findByRole("region", { name: "From your saved memory" });
+    expect(memoryPart).toHaveTextContent("Your playlist covers fixed windows");
+    expect(screen.getAllByText("Lecture 1 introduces fixed-size windows.").length).toBeGreaterThan(0);
+  });
+
+  it("keeps a launched scope until the user removes it", async () => {
+    vi.mocked(askSentiora).mockResolvedValue({
+      answer: "It covers fixed windows [1].",
+      citations: [],
+      insufficient_context: false,
+      mode: "memory",
+    });
+    const onLaunchConsumed = vi.fn();
+    render(
+      <AskSentioraView
+        items={[item("v", "Sliding window playlist", 0)]}
+        launch={{
+          id: 1,
+          question: 'What is "Sliding window playlist" about?',
+          scope: { memoryId: "v", label: "Sliding window playlist" },
+        }}
+        onLaunchConsumed={onLaunchConsumed}
+      />,
+    );
+    expect(onLaunchConsumed).toHaveBeenCalled();
+    expect(screen.getByLabelText("Your question")).toHaveValue(
+      'What is "Sliding window playlist" about?',
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+    await screen.findByText(/It covers fixed windows/);
+    expect(vi.mocked(askSentiora)).toHaveBeenLastCalledWith(
+      expect.objectContaining({ memory_id: "v" }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stop limiting answers to Sliding window playlist" }),
+    );
+    fireEvent.change(screen.getByLabelText("Your question"), { target: { value: "And?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(vi.mocked(askSentiora)).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(askSentiora).mock.lastCall?.[0]).not.toHaveProperty("memory_id");
+  });
+
+  it("offers a retry after an error", async () => {
+    vi.mocked(askSentiora).mockRejectedValueOnce(new Error("offline"));
+    render(<AskSentioraView items={[]} />);
+    fireEvent.change(screen.getByLabelText("Your question"), { target: { value: "Hello?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not reach the server");
+    vi.mocked(askSentiora).mockResolvedValueOnce({
+      answer: "Hi.",
+      citations: [],
+      insufficient_context: false,
+      mode: "general",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("Hi.")).toBeInTheDocument();
   });
 });

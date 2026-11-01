@@ -31,7 +31,7 @@ export function SourceBadge({ type, variant = "pill", className }: SourceBadgePr
     return (
       <span
         className={cx(
-          "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-btn font-mono text-[11px] font-semibold tracking-[0.04em]",
+          "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-btn font-mono text-xs font-semibold tracking-[0.04em]",
           kind.className,
           className,
         )}

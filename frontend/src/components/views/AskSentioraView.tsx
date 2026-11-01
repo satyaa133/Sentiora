@@ -1,11 +1,16 @@
 import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
 import {
   Button,
+  Chip,
   Echo,
   IconArrowUp,
   IconCheck,
+  IconClose,
   IconCopy,
+  IconNote,
   IconExternalLink,
+  IconPlus,
+  IconRefresh,
   cx,
   sourceKind,
 } from "@shared/ui";
@@ -13,16 +18,25 @@ import type { MemoryItem } from "../../types/memory";
 import {
   askSentiora,
   AskApiError,
+  type AnswerMode,
   type AskCitation,
+  type AskLaunch,
   type AskRequest,
+  type AskScope,
+  type AskTurn,
 } from "../../services/askService";
-import { safeHref } from "../../utils/safeHref";
+import { browserTimeZone } from "../../services/dashboardService";
+import { sourceHref } from "../../utils/safeHref";
+import { emitEcho } from "../echo/echoEvents";
+import { createMemoryItem } from "../../services/memoryService";
+import { videoJumpUrl, videoStart } from "../../utils/videoJump";
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
-  initialQuery?: string;
-  focusMemoryId?: string;
-  onClearInitialQuery?: () => void;
+  /** A question and/or scope sent from another view ("Ask Echo about this"). */
+  launch?: AskLaunch | null;
+  /** Called once the launch has been copied into the view's own state. */
+  onLaunchConsumed?: () => void;
   /** Opens the memory drawer; returns false when the memory isn't loaded. */
   onOpenMemory?: (memoryId: string) => boolean;
 }
@@ -32,20 +46,52 @@ interface Message {
   sender: "user" | "ai";
   text: string;
   citations?: AskCitation[];
+  mode?: AnswerMode;
+  followups?: string[];
   isNotFound?: boolean;
   isError?: boolean;
   usedFallback?: boolean;
+  /** The question to resend when an error answer offers Retry. */
+  retryQuestion?: string;
+}
+
+const MEMORY_HEADING_RE = /^#{2,4}\s*From your saved memory\s*:?\s*$/im;
+const HISTORY_TURNS = 4;
+// A list item: optional indent, then "1.", "-", "•" or a lone "*", then space.
+const LIST_ITEM_RE = /^\s*(?:\d+\.|[-•*])\s+/;
+
+const MODE_LABELS: Record<AnswerMode, string> = {
+  memory: "From your memory",
+  general: "General knowledge · not from your saved memory",
+  combined: "General knowledge and your saved memory",
+};
+
+let messageCounter = 0;
+const nextId = () => `m${Date.now()}-${messageCounter++}`;
+
+function clip(title: string, limit = 40) {
+  return title.length > limit ? `${title.slice(0, limit - 1).trimEnd()}…` : title;
 }
 
 export default function AskSentioraView({
   items = [],
-  initialQuery,
-  focusMemoryId,
-  onClearInitialQuery,
+  launch,
+  onLaunchConsumed,
   onOpenMemory,
 }: AskSentioraViewProps) {
   const [input, setInput] = useState("");
-  const [hasProcessedInitial, setHasProcessedInitial] = useState(false);
+  const [scope, setScope] = useState<AskScope | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isWriting, setIsWriting] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // Save as note (DESIGN.md §5.5): per answer, saving / saved / failed.
+  const [noteState, setNoteState] = useState<
+    Record<string, "saving" | "saved" | "failed">
+  >({});
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Effects can run twice (StrictMode); act on each launch only once.
+  const handledLaunchId = useRef<number | null>(null);
 
   const readyItems = items.filter(
     (item) =>
@@ -57,156 +103,166 @@ export default function AskSentioraView({
 
   const introText =
     readyItems.length > 0
-      ? `Answers come only from your ${readyItems.length} saved ${readyItems.length === 1 ? "memory" : "memories"}, with the sources linked.`
+      ? `Echo answers from your ${readyItems.length} saved ${readyItems.length === 1 ? "memory" : "memories"} and links the sources. General questions get a general answer, labelled as such.`
       : isIndexing
-        ? "Your latest saves are still being indexed. Ask again once they're ready."
-        : "You haven't saved anything yet. Save a page with the extension, then ask about it here.";
+        ? "Your latest saves are still being indexed. Until then Echo can answer general questions."
+        : "Nothing saved yet, so Echo answers general questions only. Save a page with the extension to ask about it here.";
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-
-  const firstTitle = readyItems[0]?.title || "";
-  const secondTitle = readyItems[1]?.title || "";
-
-  const clip = (title: string) =>
-    title.length > 40 ? `${title.slice(0, 39).trimEnd()}…` : title;
-
-  // Suggested questions built from real saved titles; none when nothing is saved.
-  const suggestedPrompts = [
-    firstTitle ? `What is “${clip(firstTitle)}” about?` : null,
-    firstTitle ? `Summarize “${clip(firstTitle)}”` : null,
-    secondTitle ? `Key points from “${clip(secondTitle)}”` : null,
+  // Starters cover each answer mode, built from real saves where possible.
+  const starters = [
+    readyItems[0] ? `Summarize “${clip(readyItems[0].title)}”` : null,
+    readyItems[1] ? `What are the key ideas in “${clip(readyItems[1].title)}”?` : null,
+    items.length > 0 ? "What did I capture this week?" : null,
+    "Explain recursion with a short example",
   ].filter((prompt): prompt is string => Boolean(prompt));
 
-  async function handleSendQuery(queryText: string) {
-    if (!queryText.trim()) return;
+  // Copy a launch (question + scope) into local state, then release it, so the
+  // scope survives until the user removes it.
+  useEffect(() => {
+    if (!launch || handledLaunchId.current === launch.id) return;
+    handledLaunchId.current = launch.id;
+    const nextScope = launch.scope !== undefined ? (launch.scope ?? null) : scope;
+    setScope(nextScope);
+    if (launch.question && launch.autoSend) {
+      void handleSendQuery(launch.question, nextScope);
+    } else if (launch.question) {
+      setInput(launch.question);
+    }
+    inputRef.current?.focus();
+    onLaunchConsumed?.();
+    // Runs once per launch; handleSendQuery and scope are read at that moment.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launch, onLaunchConsumed]);
 
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      sender: "user",
-      text: queryText,
-    };
+  // Staged status while waiting: retrieval first, then generation.
+  useEffect(() => {
+    if (!isGenerating) {
+      setIsWriting(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setIsWriting(true), 1500);
+    return () => window.clearTimeout(timer);
+  }, [isGenerating]);
 
-    setMessages((prev) => [...prev, userMsg]);
+  function historyFor(previous: Message[]): AskTurn[] {
+    return previous
+      .filter((msg) => !msg.isError)
+      .slice(-HISTORY_TURNS)
+      .map((msg) => ({
+        role: msg.sender === "user" ? "user" : "assistant",
+        content: msg.text.slice(0, 4000),
+      }));
+  }
+
+  async function handleSendQuery(queryText: string, scopeOverride?: AskScope | null) {
+    const question = queryText.trim();
+    if (!question || isGenerating) return;
+    const activeScope = scopeOverride !== undefined ? scopeOverride : scope;
+
+    const history = historyFor(messages);
+    setMessages((prev) => [...prev, { id: nextId(), sender: "user", text: question }]);
     setInput("");
     setIsGenerating(true);
-
-    if (items.length === 0) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: "ai",
-          text: "Your vault is empty. Capture a webpage, PDF, or YouTube video before asking Sentiora.",
-          isNotFound: true,
-        },
-      ]);
-      setIsGenerating(false);
-      return;
-    }
-
-    if (readyItems.length === 0 && isIndexing) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          sender: "ai",
-          text: "Your captures are still being indexed. Ask again once they show as Ready.",
-          isNotFound: true,
-        },
-      ]);
-      setIsGenerating(false);
-      return;
-    }
+    emitEcho({ type: "ask" });
 
     try {
-      const payload: AskRequest = { question: queryText.trim() };
-      if (focusMemoryId) {
-        payload.memory_id = focusMemoryId;
-      }
+      const payload: AskRequest = { question, tz: browserTimeZone() };
+      if (history.length > 0) payload.history = history;
+      if (activeScope?.memoryId) payload.memory_id = activeScope.memoryId;
+      if (activeScope?.sourceType) payload.source_type = activeScope.sourceType;
       const result = await askSentiora(payload);
       setMessages((prev) => [
         ...prev,
         {
-          id: (Date.now() + 1).toString(),
+          id: nextId(),
           sender: "ai",
           text: result.answer,
           citations: result.citations,
+          mode: result.mode ?? "memory",
+          followups: result.suggested_followups ?? [],
           isNotFound: result.insufficient_context,
           usedFallback: Boolean(result.used_fallback),
         },
       ]);
+      emitEcho({
+        type: "answer",
+        status: result.insufficient_context ? "not_found" : "ready",
+        cited: (result.citations?.length ?? 0) > 0,
+      });
     } catch (err) {
-      let errorText =
-        "Sentiora could not reach the server. Confirm the backend is running, then try again.";
-      let isError = true;
-
-      if (err instanceof AskApiError) {
-        if (err.status === 401 || err.status === 403) {
-          errorText =
-            "Your session expired or you are not signed in. Please sign in again to ask questions.";
-        } else if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
-          errorText =
-            err.message ||
-            "Sentiora AI is not configured, and no saved memory could be used to answer.";
-        } else if (err.code === "ASK_LLM_FAILED") {
-          errorText =
-            err.message ||
-            "The language model failed while answering. Your memories were found; try again in a moment.";
-        } else if (err.code === "ASK_SYSTEM_FAILED" || err.status === 502) {
-          errorText =
-            err.message ||
-            "The Sentiora server had a problem answering this question. This is not an AI configuration issue.";
-        } else if (err.status >= 500) {
-          errorText =
-            err.message ||
-            "The Sentiora server had a problem. This is not an AI configuration issue.";
-        } else {
-          errorText = err.message || errorText;
-        }
-      }
-
       setMessages((prev) => [
         ...prev,
         {
-          id: (Date.now() + 1).toString(),
+          id: nextId(),
           sender: "ai",
-          text: errorText,
-          isError,
+          text: errorMessage(err),
+          isError: true,
+          retryQuestion: question,
         },
       ]);
+      emitEcho({ type: "answer", status: "error", cited: false });
     } finally {
       setIsGenerating(false);
     }
   }
 
-  useEffect(() => {
-    if (initialQuery && !hasProcessedInitial && !isGenerating) {
-      setHasProcessedInitial(true);
-      setInput(initialQuery); // Just set the input instead of auto-sending to let user edit, or auto-send. The prompt says "pre-filled with the context query".
-      if (onClearInitialQuery) {
-        onClearInitialQuery();
-      }
-    }
-  }, [initialQuery, hasProcessedInitial, isGenerating, onClearInitialQuery]);
-
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    handleSendQuery(input);
+    void handleSendQuery(input);
+  }
+
+  /**
+   * Keep an answer as a note memory, the same way the extension saves notes:
+   * POST /memory-items with a sentiora.app/notes URL. The question, the answer
+   * and its sources become the note's text.
+   */
+  async function handleSaveNote(message: Message) {
+    if (noteState[message.id] === "saving" || noteState[message.id] === "saved") return;
+    const index = messages.findIndex((msg) => msg.id === message.id);
+    const question =
+      [...messages.slice(0, index)].reverse().find((msg) => msg.sender === "user")
+        ?.text ?? "";
+    const sources = (message.citations ?? []).map(
+      (citation, i) => `[${i + 1}] ${citation.title} (${citation.url})`,
+    );
+    setNoteState((prev) => ({ ...prev, [message.id]: "saving" }));
+    try {
+      await createMemoryItem({
+        source_type: "webpage",
+        title: clip(`Note: ${question || "Ask Sentiora answer"}`, 120),
+        url: `https://sentiora.app/notes/${Date.now()}`,
+        content: [
+          question && `Q: ${question}`,
+          message.text,
+          sources.length ? `Sources:\n${sources.join("\n")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      });
+      setNoteState((prev) => ({ ...prev, [message.id]: "saved" }));
+    } catch {
+      setNoteState((prev) => ({ ...prev, [message.id]: "failed" }));
+    }
   }
 
   function handleCopy(id: string, text: string) {
-    navigator.clipboard.writeText(text);
+    void navigator.clipboard?.writeText(text);
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+    window.setTimeout(() => setCopiedId(null), 2000);
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (!isGenerating) handleSendQuery(input);
+      void handleSendQuery(input);
     }
+  }
+
+  function startNewChat() {
+    setMessages([]);
+    setScope(null);
+    setInput("");
+    inputRef.current?.focus();
   }
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -215,69 +271,97 @@ export default function AskSentioraView({
   }, [messages, isGenerating]);
 
   const firstQuestion = messages.find((msg) => msg.sender === "user")?.text;
-  const conversationTitle = firstQuestion
-    ? firstQuestion.length > 60
-      ? `${firstQuestion.slice(0, 59).trimEnd()}…`
-      : firstQuestion
-    : "Ask Sentiora";
+  const conversationTitle = firstQuestion ? clip(firstQuestion, 60) : "Ask Sentiora";
   const latestCitations =
     [...messages].reverse().find((msg) => msg.sender === "ai" && msg.citations?.length)
       ?.citations ?? [];
+  const lastAiId = [...messages].reverse().find((msg) => msg.sender === "ai")?.id;
 
   function citationMeta(citation: AskCitation) {
     const kind = sourceKind(citation.source_type);
     const label = kind === "video" ? "Video" : kind === "pdf" ? "PDF" : "Web";
+    const saved = citation.captured_at
+      ? new Date(citation.captured_at).toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        })
+      : null;
     return [
       label,
       citation.domain,
       citation.page_number ? `p. ${citation.page_number}` : null,
+      saved,
     ]
       .filter(Boolean)
       .join(" · ");
   }
 
   function originalHref(citation: AskCitation): string | undefined {
-    if (citation.source_available === false || citation.url.startsWith("file:"))
-      return undefined;
-    return safeHref(citation.url);
+    if (citation.source_available === false) return undefined;
+    return sourceHref(citation.url);
   }
 
-  function renderFormattedMessage(text: string) {
-    const lines = text.split("\n");
+  function renderFormattedMessage(text: string, withCitations: boolean) {
+    // Fenced code blocks first: their lines keep indentation and are never
+    // read as headings ("# comment") or bullets.
+    const blocks: Array<{ code: string } | { line: string }> = [];
+    let fence: string[] | null = null;
+    for (const line of text.split("\n")) {
+      if (/^\s*```/.test(line)) {
+        if (fence) {
+          blocks.push({ code: fence.join("\n") });
+          fence = null;
+        } else {
+          fence = [];
+        }
+      } else if (fence) {
+        fence.push(line);
+      } else {
+        blocks.push({ line });
+      }
+    }
+    if (fence) blocks.push({ code: fence.join("\n") });
+
     return (
       <div className="space-y-2 text-[17px] leading-relaxed text-fg">
-        {lines.map((line, idx) => {
-          if (!line.trim()) return null;
+        {blocks.map((block, idx) => {
+          if ("code" in block) {
+            return (
+              <pre
+                key={idx}
+                className="overflow-x-auto rounded-btn bg-raised p-4 font-mono text-[15px] leading-normal"
+              >
+                <code>{block.code}</code>
+              </pre>
+            );
+          }
+          const { line } = block;
+          if (!line.trim() || /^-{3,}$/.test(line.trim())) return null;
 
-          if (line.startsWith("## ") || line.startsWith("### ")) {
+          if (/^#{1,4}\s+/.test(line)) {
             return (
               <h3 key={idx} className="pt-2 text-[17px] font-semibold text-fg">
-                {formatInlineText(line.replace(/^#{2,3}\s+/, ""))}
+                {formatInlineText(line.replace(/^#{1,4}\s+/, ""), withCitations)}
               </h3>
             );
           }
 
-          if (
-            /^\d+\.\s+/.test(line) ||
-            line.startsWith("• ") ||
-            line.startsWith("- ")
-          ) {
+          // "1. ", "- ", "• " and "* " bullets (Gemini uses "*   **Term:**").
+          if (LIST_ITEM_RE.test(line)) {
             return (
               <li key={idx} className="ml-5 list-disc">
-                {formatInlineText(
-                  line.replace(/^\d+\.\s+/, "").replace(/^[•-]\s*/, ""),
-                )}
+                {formatInlineText(line.replace(LIST_ITEM_RE, ""), withCitations)}
               </li>
             );
           }
 
-          return <p key={idx}>{formatInlineText(line)}</p>;
+          return <p key={idx}>{formatInlineText(line, withCitations)}</p>;
         })}
       </div>
     );
   }
 
-  function formatInlineText(text: string) {
+  function formatInlineText(text: string, withCitations: boolean) {
     const parts = text.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*|\[\d+\])/g);
     return parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {
@@ -287,7 +371,8 @@ export default function AskSentioraView({
           </strong>
         );
       }
-      if (/^\[\d+\]$/.test(part)) {
+      // Citation pills only where real citations exist; elsewhere "[1]" is text.
+      if (withCitations && /^\[\d+\]$/.test(part)) {
         return (
           <span
             key={i}
@@ -315,11 +400,36 @@ export default function AskSentioraView({
     });
   }
 
+  /** Combined answers: general explanation, then a visibly separate memory part. */
+  function renderAnswer(msg: Message) {
+    const withCitations = Boolean(msg.citations?.length);
+    const match = MEMORY_HEADING_RE.exec(msg.text);
+    if (!match) return renderFormattedMessage(msg.text, withCitations);
+    const general = msg.text.slice(0, match.index);
+    const memory = msg.text.slice(match.index + match[0].length);
+    return (
+      <div className="space-y-4">
+        {general.trim() ? renderFormattedMessage(general, false) : null}
+        <section
+          aria-label="From your saved memory"
+          className="rounded-btn border-l-4 border-accent bg-raised px-4 py-3"
+        >
+          <h3 className="font-mono text-eyebrow uppercase text-muted">
+            From your saved memory
+          </h3>
+          <div className="mt-2">{renderFormattedMessage(memory, withCitations)}</div>
+        </section>
+      </div>
+    );
+  }
+
   function renderSourceCard(citation: AskCitation, index: number) {
     const href = originalHref(citation);
+    const start = videoStart(citation.heading);
+    const jumpHref = href && start ? videoJumpUrl(href, start.seconds) : null;
     return (
       <li
-        key={`${citation.chunk_id}-${index}`}
+        key={`${citation.memory_id}-${index}`}
         className="rounded-card border border-line bg-surface p-4"
       >
         <div className="flex items-center justify-between gap-3">
@@ -331,10 +441,12 @@ export default function AskSentioraView({
           </span>
         </div>
         <p className="mt-2 font-semibold leading-snug text-fg">{citation.title}</p>
-        {citation.heading ? (
+        {citation.heading && citation.heading !== citation.title ? (
           <p className="mt-2 rounded-btn bg-raised px-3 py-2 text-[15px] text-muted">
             {citation.heading}
           </p>
+        ) : citation.excerpt ? (
+          <p className="mt-2 line-clamp-3 text-[15px] text-muted">{citation.excerpt}</p>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
           {onOpenMemory ? (
@@ -365,6 +477,17 @@ export default function AskSentioraView({
               Original unavailable
             </span>
           )}
+          {jumpHref && start ? (
+            <a
+              href={jumpHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-touch items-center gap-1 text-[15px] font-semibold text-link hover:underline"
+            >
+              Jump to {start.label}
+              <span className="sr-only">(opens the video in a new tab)</span>
+            </a>
+          ) : null}
         </div>
       </li>
     );
@@ -373,10 +496,27 @@ export default function AskSentioraView({
   return (
     <div className="flex min-h-0 flex-1">
       <section aria-labelledby="ask-title" className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center border-b border-line bg-surface px-4 sm:px-6">
-          <h1 id="ask-title" className="truncate text-[18px] font-semibold text-fg">
-            {conversationTitle}
-          </h1>
+        <header className="flex h-16 shrink-0 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6">
+          <Echo state="idle" size={32} still className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-eyebrow uppercase text-muted">Echo</p>
+            <h1
+              id="ask-title"
+              className="truncate text-[17px] font-semibold leading-tight text-fg"
+            >
+              {conversationTitle}
+            </h1>
+          </div>
+          {messages.length > 0 ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              leadingIcon={<IconPlus size={16} />}
+              onClick={startNewChat}
+            >
+              New chat
+            </Button>
+          ) : null}
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -385,24 +525,25 @@ export default function AskSentioraView({
               <div className="flex flex-col items-center pt-6 text-center sm:pt-12">
                 <Echo state={readyItems.length > 0 ? "idle" : "faded"} size={88} />
                 <h2 className="mt-5 font-display text-[28px] font-bold tracking-tight text-fg">
-                  Ask anything you&apos;ve saved
+                  Ask Echo
                 </h2>
                 <p className="mt-2 max-w-md text-[17px] text-muted">{introText}</p>
-                {suggestedPrompts.length > 0 ? (
-                  <ul className="mt-6 flex w-full max-w-lg flex-col gap-2">
-                    {suggestedPrompts.map((prompt) => (
-                      <li key={prompt}>
-                        <button
-                          type="button"
-                          onClick={() => handleSendQuery(prompt)}
-                          className="w-full rounded-card border border-line bg-surface px-4 py-3 text-left text-[16px] text-fg transition-colors hover:bg-raised"
-                        >
-                          {prompt}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                <ul
+                  aria-label="Suggested questions"
+                  className="mt-6 flex w-full max-w-lg flex-col gap-2"
+                >
+                  {starters.map((prompt) => (
+                    <li key={prompt}>
+                      <button
+                        type="button"
+                        onClick={() => void handleSendQuery(prompt)}
+                        className="w-full rounded-card border border-line bg-surface px-4 py-3 text-left text-[16px] text-fg transition-colors hover:bg-raised"
+                      >
+                        {prompt}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             ) : null}
 
@@ -414,11 +555,7 @@ export default function AskSentioraView({
                   </p>
                 </div>
               ) : (
-                <article
-                  key={msg.id}
-                  aria-label="Sentiora's answer"
-                  className="flex gap-3"
-                >
+                <article key={msg.id} aria-label="Echo's answer" className="flex gap-3">
                   <Echo
                     state={msg.isError || msg.isNotFound ? "faded" : "happy"}
                     size={36}
@@ -426,24 +563,44 @@ export default function AskSentioraView({
                     className="mt-0.5 shrink-0"
                   />
                   <div className="min-w-0 flex-1 space-y-3">
-                    {msg.usedFallback ? (
+                    {msg.isError ? null : (
                       <p className="font-mono text-eyebrow uppercase text-muted">
-                        From your saved memories, without the AI model
+                        {msg.usedFallback
+                          ? "From your saved memories, without the AI model"
+                          : msg.isNotFound
+                            ? "Not found in your saved memory"
+                            : MODE_LABELS[msg.mode ?? "memory"]}
                       </p>
-                    ) : null}
+                    )}
                     {msg.isError ? (
-                      <p
+                      <div
                         role="alert"
-                        className="rounded-btn bg-accent-soft px-4 py-3 text-[16px] text-accent-soft-fg"
+                        className="space-y-3 rounded-btn bg-accent-soft px-4 py-3"
                       >
-                        {msg.text}
-                      </p>
+                        <p className="text-[16px] text-accent-soft-fg">{msg.text}</p>
+                        {msg.retryQuestion ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            leadingIcon={<IconRefresh size={16} />}
+                            disabled={isGenerating}
+                            onClick={() =>
+                              void handleSendQuery(msg.retryQuestion ?? "")
+                            }
+                          >
+                            Try again
+                          </Button>
+                        ) : null}
+                      </div>
                     ) : msg.isNotFound ? (
                       <div className="text-muted [&_*]:text-muted">
-                        {renderFormattedMessage(msg.text)}
+                        {renderFormattedMessage(
+                          msg.text,
+                          Boolean(msg.citations?.length),
+                        )}
                       </div>
                     ) : (
-                      renderFormattedMessage(msg.text)
+                      renderAnswer(msg)
                     )}
 
                     {msg.citations && msg.citations.length > 0 ? (
@@ -470,6 +627,46 @@ export default function AskSentioraView({
                         >
                           {copiedId === msg.id ? "Copied" : "Copy answer"}
                         </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leadingIcon={
+                            noteState[msg.id] === "saved" ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconNote size={16} />
+                            )
+                          }
+                          loading={noteState[msg.id] === "saving"}
+                          disabled={noteState[msg.id] === "saved"}
+                          onClick={() => void handleSaveNote(msg)}
+                        >
+                          {noteState[msg.id] === "saved"
+                            ? "Saved as note"
+                            : "Save as note"}
+                        </Button>
+                        {noteState[msg.id] === "failed" ? (
+                          <p role="alert" className="w-full text-[15px] text-link">
+                            Could not save this note. Try again.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {msg.id === lastAiId && !isGenerating && msg.followups?.length ? (
+                      <div
+                        role="group"
+                        aria-label="Follow-up questions"
+                        className="flex flex-wrap gap-2"
+                      >
+                        {msg.followups.map((followup) => (
+                          <Chip
+                            key={followup}
+                            onClick={() => void handleSendQuery(followup)}
+                          >
+                            {followup}
+                          </Chip>
+                        ))}
                       </div>
                     ) : null}
                   </div>
@@ -483,7 +680,7 @@ export default function AskSentioraView({
                 className="flex items-center gap-3 text-[16px] text-muted"
               >
                 <Echo state="saving" size={36} still />
-                Looking through your memories…
+                {isWriting ? "Writing the answer…" : "Looking through your memories…"}
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -491,23 +688,39 @@ export default function AskSentioraView({
         </div>
 
         <form
+          data-echo-dock=""
           onSubmit={handleSubmit}
           className="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-4 pt-2 sm:px-6"
         >
+          {scope ? (
+            <div className="mb-2 flex items-center gap-2 text-[15px] text-muted">
+              <span>Asking about</span>
+              <span className="inline-flex max-w-[70%] items-center gap-1 rounded-full border border-line bg-surface py-1 pl-3 pr-1 text-fg">
+                <span className="truncate">{scope.label}</span>
+                <button
+                  type="button"
+                  onClick={() => setScope(null)}
+                  aria-label={`Stop limiting answers to ${scope.label}`}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted hover:bg-raised hover:text-fg"
+                >
+                  <IconClose size={14} />
+                </button>
+              </span>
+            </div>
+          ) : null}
           <div className="flex items-end gap-2 rounded-panel border border-line bg-surface p-2 pl-4 shadow-pop focus-within:border-accent">
             <label htmlFor="ask-input" className="sr-only">
               Your question
             </label>
             <textarea
               id="ask-input"
+              ref={inputRef}
               rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleComposerKeyDown}
               placeholder={
-                messages.length > 0
-                  ? "Ask a follow-up..."
-                  : "Ask anything you've saved..."
+                messages.length > 0 ? "Ask a follow-up..." : "Ask Echo anything..."
               }
               className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent py-2.5 text-[17px] text-fg placeholder:text-muted focus:outline-none"
             />
@@ -522,8 +735,9 @@ export default function AskSentioraView({
               <IconArrowUp size={20} />
             </button>
           </div>
-          <p className="mt-2 text-center text-sm text-muted">
-            Answers only use your saved memories.
+          <p className="mt-2 text-center text-[15px] text-muted">
+            Memory answers cite your saves. General answers are labelled as general
+            knowledge.
           </p>
         </form>
       </section>
@@ -543,10 +757,40 @@ export default function AskSentioraView({
           </ol>
         ) : (
           <p className="mt-2 text-[15px] text-muted">
-            Sources for the latest answer show up here.
+            Sources for the latest memory answer show up here.
           </p>
         )}
       </aside>
     </div>
   );
+}
+
+function errorMessage(err: unknown): string {
+  if (!(err instanceof AskApiError)) {
+    return "Echo could not reach the server. Confirm the backend is running, then try again.";
+  }
+  if (err.status === 401 || err.status === 403) {
+    return "Your session expired or you are not signed in. Please sign in again to ask questions.";
+  }
+  if (err.status === 429) {
+    return "You're asking faster than the limit allows. Wait a moment, then try again.";
+  }
+  if (err.status === 503 || err.code === "AI_NOT_CONFIGURED") {
+    return (
+      err.message ||
+      "Sentiora AI is not configured, and no saved memory could be used to answer."
+    );
+  }
+  if (err.code === "ASK_LLM_FAILED") {
+    return (
+      err.message || "The language model failed while answering. Try again in a moment."
+    );
+  }
+  if (err.code === "ASK_SYSTEM_FAILED" || err.status === 502) {
+    return err.message || "The Sentiora server had a problem answering this question.";
+  }
+  if (err.status >= 500) {
+    return err.message || "The Sentiora server had a problem.";
+  }
+  return err.message || "Echo could not answer right now.";
 }

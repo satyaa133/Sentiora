@@ -130,7 +130,7 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
             {mode === "login" ? "Sign in to Sentiora" : "Create your account"}
           </h1>
           <p className="text-[15px] text-muted">
-            Save pages you choose, find them later.
+            Saves what you read while signed in.
           </p>
         </div>
       </div>

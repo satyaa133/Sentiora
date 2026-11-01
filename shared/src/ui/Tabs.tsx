@@ -87,7 +87,7 @@ export function Tabs({
               onClick={() => select(item.id)}
               onKeyDown={(event) => onKeyDown(event, index)}
               className={cx(
-                "h-9 shrink-0 rounded-full px-4 text-[15px] font-medium transition-colors",
+                "touch-target h-9 shrink-0 rounded-full px-4 text-[15px] font-medium transition-colors",
                 isSelected
                   ? "bg-surface text-fg shadow-pop"
                   : "text-muted hover:text-fg",

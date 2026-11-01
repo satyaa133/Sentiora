@@ -1,4 +1,3 @@
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
@@ -6,7 +5,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
-from app.schemas.envelope import ResponseMeta
+from app.schemas.envelope import response_meta
 from app.schemas.source_preference import (
     BulkSourcePreferencesRequest,
     OnboardingCompleteRequest,
@@ -17,10 +16,6 @@ from app.services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
-
-def _meta(request: Request) -> ResponseMeta:
-    request_id = getattr(request.state, "request_id", f"req_{uuid.uuid4().hex[:8]}")
-    return ResponseMeta(request_id=request_id)
 
 
 def _serialize_profile(user: User) -> dict | None:
@@ -59,7 +54,7 @@ def get_user_profile(
                 current_user.profile and current_user.profile.onboarding_completed
             ),
         },
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
 
 
@@ -81,7 +76,7 @@ def get_source_preferences(
             "sources": {key: value.value for key, value in prefs.sources.items()},
             "onboarding_completed": prefs.onboarding_completed,
         },
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
 
 
@@ -105,7 +100,7 @@ def update_source_preference(
             "sources": {key: value.value for key, value in prefs.sources.items()},
             "onboarding_completed": prefs.onboarding_completed,
         },
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
 
 
@@ -128,7 +123,7 @@ def bulk_update_source_preferences(
             "sources": {key: value.value for key, value in prefs.sources.items()},
             "onboarding_completed": prefs.onboarding_completed,
         },
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }
 
 
@@ -151,5 +146,5 @@ def complete_onboarding(
             "sources": {key: value.value for key, value in prefs.sources.items()},
             "onboarding_completed": prefs.onboarding_completed,
         },
-        "meta": _meta(request).model_dump(),
+        "meta": response_meta(request).model_dump(),
     }

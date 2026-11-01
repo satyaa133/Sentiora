@@ -38,7 +38,7 @@ export function Toggle({
           {label}
         </label>
         {description ? (
-          <span id={`${switchId}-desc`} className="mt-0.5 block text-sm text-muted">
+          <span id={`${switchId}-desc`} className="mt-0.5 block text-[15px] text-muted">
             {description}
           </span>
         ) : null}
@@ -52,7 +52,7 @@ export function Toggle({
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cx(
-          "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+          "touch-target inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
           checked ? "border-accent bg-accent" : "border-line bg-raised",
         )}
       >

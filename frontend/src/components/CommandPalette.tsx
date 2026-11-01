@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import {
   IconArrowRight,
   IconClock,
+  IconEye,
   IconHome,
   IconLink,
   IconMessage,
@@ -40,6 +41,7 @@ interface CommandPaletteProps {
 
 const PAGES: Array<{ tab: NavTab; label: string; icon: ReactNode }> = [
   { tab: "dashboard", label: "Home", icon: <IconHome size={18} /> },
+  { tab: "intelligence", label: "Intelligence", icon: <IconEye size={18} /> },
   { tab: "timeline", label: "Timeline", icon: <IconClock size={18} /> },
   { tab: "ask", label: "Ask Sentiora", icon: <IconMessage size={18} /> },
   { tab: "search", label: "Search", icon: <IconSearch size={18} /> },

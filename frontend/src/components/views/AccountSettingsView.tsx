@@ -102,7 +102,7 @@ export default function AccountSettingsView() {
           <div className="flex flex-col gap-2 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <Label htmlFor="settings-format">Answer style</Label>
-              <p className="text-sm text-muted">
+              <p className="text-[15px] text-muted">
                 Default depth for Ask Sentiora answers.
               </p>
             </div>

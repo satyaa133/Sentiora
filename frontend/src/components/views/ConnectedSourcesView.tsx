@@ -12,20 +12,22 @@ import {
   IconCheck,
   IconFile,
   IconLink,
+  IconMessage,
   IconPlus,
   IconSearch,
   IconUpload,
   Input,
   Modal,
+  Tag,
   cx,
 } from "@shared/ui";
 import type { MemoryItem, SourceType } from "../../types/memory";
 import { SOURCE_ICONS } from "../sourceIcons";
 import { useAuth } from "../../context/AuthContext";
 import { createMemoryItem } from "../../services/memoryService";
-import { parsePdf } from "../../utils/pdfParser";
 import {
   SOURCE_CATALOG,
+  isSourceAvailable,
   statusToUiLabel,
   type SourceId,
   type SourceStatus,
@@ -34,6 +36,8 @@ import {
 interface ConnectedSourcesViewProps {
   items?: MemoryItem[];
   onRefreshFeed?: () => void;
+  /** Opens Ask limited to one source type. */
+  onAskAboutSource?: (sourceType: SourceType, label: string) => void;
 }
 
 interface IntegrationChannel {
@@ -42,6 +46,7 @@ interface IntegrationChannel {
   description: string;
   type: "Automatic" | "Manual" | "Sync Integration";
   category: "browser" | "docs" | "social" | "developer" | "ai";
+  available: boolean;
   status: "Active" | "Paused" | "Ready to Connect";
   count?: number;
   lastSync?: string;
@@ -64,9 +69,17 @@ const MEMORY_SOURCE_MAP: Partial<Record<SourceId, SourceType>> = {
   youtube: "youtube",
 };
 
+// What the Ask scope chip says: the content, not the integration's name.
+const SCOPE_LABELS: Record<SourceType, string> = {
+  webpage: "Your web pages",
+  pdf: "Your PDFs",
+  youtube: "Your videos",
+};
+
 export default function ConnectedSourcesView({
   items = [],
   onRefreshFeed,
+  onAskAboutSource,
 }: ConnectedSourcesViewProps) {
   const { user, updateSourcePreference } = useAuth();
   const [isConnectModalOpen, setIsConnectModalOpen] = useState(false);
@@ -140,7 +153,11 @@ export default function ConnectedSourcesView({
         description: source.description,
         type: source.type,
         category: source.category,
-        status: statusToUiLabel(persistedStatus),
+        available: source.available,
+        // A saved preference for a source that captures nothing yet is ignored.
+        status: source.available
+          ? statusToUiLabel(persistedStatus)
+          : "Ready to Connect",
         count,
         lastSync: memoryType ? getLatestSyncTime(memoryType) : "Ready to sync",
       };
@@ -167,6 +184,7 @@ export default function ConnectedSourcesView({
   }, [allAvailableSources, modalSearch]);
 
   async function toggleSourceStatus(id: SourceId) {
+    if (!isSourceAvailable(id)) return;
     const current = user?.source_preferences?.[id] ?? "not_connected";
     let nextStatus: SourceStatus;
 
@@ -198,6 +216,8 @@ export default function ConnectedSourcesView({
 
         if (file.name.toLowerCase().endsWith(".pdf")) {
           try {
+            // PDF.js is large; load it only when a PDF is actually uploaded.
+            const { parsePdf } = await import("../../utils/pdfParser");
             const buffer = await file.arrayBuffer();
             const nodes = await parsePdf(buffer);
             if (nodes && nodes.length > 0) {
@@ -220,10 +240,18 @@ export default function ConnectedSourcesView({
 
         textContent = textContent.slice(0, 500_000);
 
+        const isPdf = file.name.toLowerCase().endsWith(".pdf");
+        // The API returns the existing memory for a URL it has seen, so each
+        // upload gets its own (as notes do): an edited file is saved again.
+        const fileName = `${Date.now()}-${encodeURIComponent(file.name)}`;
         await createMemoryItem({
           title: file.name.replace(/\.[^/.]+$/, ""),
-          url: `file://uploads/${encodeURIComponent(file.name)}`,
-          source_type: file.name.toLowerCase().endsWith(".pdf") ? "pdf" : "webpage",
+          // The API accepts file:// only for PDFs; text and Markdown uploads use
+          // Sentiora's own manual-vault URL, as notes do.
+          url: isPdf
+            ? `file://uploads/${fileName}`
+            : `https://sentiora.app/manual/uploads/${fileName}`,
+          source_type: isPdf ? "pdf" : "webpage",
           content: textContent || `Uploaded file ${file.name}`,
           author: "Local Upload",
           structured_content: structuredNodes,
@@ -331,7 +359,7 @@ export default function ConnectedSourcesView({
                       </span>
                     </div>
                     <p className="mt-0.5 text-[15px] text-muted">{src.description}</p>
-                    <p className="mt-0.5 text-sm text-muted">
+                    <p className="mt-0.5 text-[15px] text-muted">
                       {src.count || 0} {src.count === 1 ? "memory" : "memories"}
                       {src.lastSync && src.lastSync !== "Ready to sync"
                         ? ` · last saved ${src.lastSync.toLowerCase()}`
@@ -340,6 +368,19 @@ export default function ConnectedSourcesView({
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-3 self-end sm:self-center">
+                  {onAskAboutSource && MEMORY_SOURCE_MAP[src.id] && (src.count ?? 0) > 0 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leadingIcon={<IconMessage size={16} />}
+                      onClick={() => {
+                        const type = MEMORY_SOURCE_MAP[src.id] as SourceType;
+                        onAskAboutSource(type, SCOPE_LABELS[type]);
+                      }}
+                    >
+                      Ask Echo about these
+                    </Button>
+                  ) : null}
                   <span
                     className={cx(
                       "text-[15px] font-medium",
@@ -407,7 +448,7 @@ export default function ConnectedSourcesView({
           <span className="text-[16px] font-semibold text-fg">
             {uploading ? "Adding your files…" : "Drop files here, or choose files"}
           </span>
-          <span className="text-sm text-muted">PDF, TXT or Markdown</span>
+          <span className="text-[15px] text-muted">PDF, TXT or Markdown</span>
         </button>
         <p
           id="upload-status"
@@ -426,7 +467,7 @@ export default function ConnectedSourcesView({
         size="lg"
         footer={
           <>
-            <span className="mr-auto self-center text-sm text-muted">
+            <span className="mr-auto self-center text-[15px] text-muted">
               {allAvailableSources.length} sources
             </span>
             <Button onClick={() => setIsConnectModalOpen(false)}>Done</Button>
@@ -455,10 +496,12 @@ export default function ConnectedSourcesView({
                 </span>
                 <div className="min-w-0">
                   <p className="font-semibold text-fg">{channel.name}</p>
-                  <p className="text-sm text-muted">{channel.description}</p>
+                  <p className="text-[15px] text-muted">{channel.description}</p>
                 </div>
               </div>
-              {channel.status === "Active" ? (
+              {!channel.available ? (
+                <Tag className="shrink-0">Coming soon</Tag>
+              ) : channel.status === "Active" ? (
                 <span className="inline-flex shrink-0 items-center gap-1 text-[15px] text-muted">
                   <IconCheck size={16} />
                   Added

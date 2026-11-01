@@ -2,7 +2,7 @@
 
 This file is the single source of truth for the Sentiora UI/UX redesign.
 It covers the web app (`frontend/`), the Chrome extension popup (`extension/`) and shared UI (`shared/`).
-Reference screenshots live in `docs/design/` (exported from the design canvas).
+Reference screenshots live in `docs/design/` (exported from the design canvas). The interactive reference is `docs/design/preview/sentiora-preview.html`: open it in a browser. It is a throwaway prototype for behavior and feel, not code to copy as-is. Where this spec and the preview disagree, this spec wins.
 
 Do not change backend APIs, auth logic, data fetching, routes or capture logic. This is a visual and UX rewrite only.
 
@@ -11,7 +11,7 @@ Do not change backend APIs, auth logic, data fetching, routes or capture logic. 
 ## 1. Brand
 
 - **Name:** sentiora (lowercase in the wordmark)
-- **Promise:** "Remember everything you read." Sentiora saves the articles, PDFs and videos you choose, then answers questions from them with sources.
+- **Promise:** "Remember everything you read." Sentiora saves the articles, PDFs and videos you read (automatically while signed in, skipping sensitive pages), then answers questions from them with sources.
 - **Tone:** calm, plain, short sentences. No hype, no exclamation marks, no emoji in UI.
 - **Mascot:** Echo, a friendly ghost (see section 4).
 
@@ -96,11 +96,11 @@ Remove: dark gradient hero, blurred glow blobs, orbit rings, floating emoji chip
 
 Sections, in order:
 1. **Sticky nav**: logo + wordmark · How it works · Ask · Privacy · FAQ · Log in · "Add to Chrome" (graphite button in light, coral in dark).
-2. **Hero** (two columns, stacks on mobile): pill "A private memory for everything you read"; H1 "Remember everything you read."; sub "Sentiora saves the articles, PDFs and videos you choose, then answers your questions from them, with the sources linked."; buttons "Add to Chrome, it's free" (coral) and "See how it works"; small line "Saves only when you click. Skips banking and health pages on its own." Right: browser-window mockup of an article with the extension icon highlighted, and a floating "Saved to your memory" card with happy Echo and tags.
+2. **Hero**: see section 9.1 (replaces the earlier browser-mockup hero).
 3. **"Saves from" strip**: Web articles · PDFs & papers · YouTube transcripts · Your own notes · Uploaded files.
-4. **How it works** (sticky scroll: steps swap as you scroll on desktop, stacked cards on mobile): 01 Save with one click (Alt+Shift+S keycaps) · 02 Search by meaning (search box finding the right page) · 03 Ask, with sources (Q&A bubble with citation chip).
+4. **Before/after** (9.2), then **How it works scroll story** (9.3), then **Extension clip** (9.4).
 5. **Ask band**: "Ask your own library, not the whole internet." with a chat card showing a question, an answer with numbered citations, and the source list.
-6. **Privacy**: guarding Echo + three points: Nothing saves until you click · Sensitive pages are skipped · Export or delete anytime.
+6. **Privacy**: guarding Echo + three points: You stay in control (saving runs only while signed in; block any site, delete anything) · Sensitive pages are skipped · Export or delete anytime. Followed by the privacy flow diagram (9.5).
 7. **FAQ**: native `<details>` accordion, 4 questions. Leave answers as `[TODO]` where unknown, do not invent pricing.
 8. **Final CTA**: happy Echo, "Give your reading a memory.", "Add to Chrome".
 9. **Footer**: wordmark, Privacy, Terms, GitHub, Contact.
@@ -109,7 +109,7 @@ No invented stats, testimonials or logos.
 
 ### 5.2 Chrome extension popup (`extension/src/popup/App.tsx`, 360px wide)
 Three states, keep all existing capture/auth logic:
-1. **Ready**: header (logo, settings icon button), page card (type · read time · domain, title), optional note input, primary button "Save to memory" with shortcut hint, "Recently saved" list (2 items) + "Open Sentiora →".
+1. **Ready / status**: header (logo, settings icon button), page card (type · read time · domain, title) showing the current page status (Saved / Saving… / Blocked), since saving is automatic; optional note input; "Recently saved" list (2 items, existing GET) + "Open Sentiora →".
 2. **Saved**: dark header area with happy Echo, "Saved. Echo's got it.", "Searchable in a few seconds", title, editable tags, "Undo" + "Open in Sentiora".
 3. **Protected page** (from `sensitiveGuard` / blocklist): guarding Echo, "Echo won't save this page", reason sentence, domain chip with "Built-in rule" / "Your rule", "Review blocked sites", "Why was this blocked?".
 Also: error state using faded Echo with a retry button; logged-out state restyled (`PopupAuth.tsx`).
@@ -124,7 +124,7 @@ Greeting ("Good evening, {name}") + "Add memory" button; large search/ask input 
 Narrow icon rail, conversation centered (max 780px), user bubbles graphite (light) / raised (dark), answers with happy Echo avatar and numbered citation chips, action buttons (Copy, Save as note), composer pinned at bottom with "Answers only use your saved memories." Right panel "Sources used": cards with number, type, date, quoted snippet, "Open memory" / "Jump to 14:20" for video. When the answer isn't in memory, say so plainly.
 
 ### 5.6 Onboarding (`frontend/src/pages/Onboarding.tsx`)
-Split layout: left graphite panel with waving Echo and a 3-step progress list; right: "Step 2 of 3 · What should Echo remember?" with selectable source cards (checkbox inside a label), privacy note, Back / Continue.
+Split layout: left graphite panel with happy Echo and a progress list showing all 4 existing steps; right: "What should Echo remember?" (copy must say Echo saves the pages you read and you can block sites in Privacy) with selectable source cards (checkbox inside a label), privacy note, Back / Continue.
 
 ### 5.7 Remaining views (same components, no mockup)
 Timeline, Search, Connected Sources, Privacy Center, Account Settings, Login, Sign up, Forgot password, Memory detail drawer, Add memory modal, skeletons. Apply the tokens, type scale and components; use faded Echo for empty states and guarding Echo in Privacy Center.
@@ -139,3 +139,122 @@ Button (primary / secondary / ghost / icon), Input + Label, Textarea, Chip / Tag
 - Keep all existing tests passing; update snapshot or text assertions that change.
 - Real `<button>`, `<a>`, `<label>`; `aria-label` on icon-only buttons.
 - Motion: 150–250ms, one easing curve, respect reduced motion.
+
+---
+
+# Additions (v2): landing experience, Echo behavior, extras
+
+## 8. Echo behavior (two modes)
+
+One `EchoCompanion` component, mounted once at the app root, with a `mode` prop driven by the route.
+
+### 8.1 Roaming mode: landing page only (`/`)
+- Echo (96px, 64px on screens under 720px) floats freely over the page with steering movement: accelerates toward a target, eases in, tilts toward its direction, flips horizontally, gentle 4px bob. Little arms swing with speed.
+- **Memories:** small coral page-scraps (with a label: article, PDF, video, note, paper…) pop out of real headings and paragraphs every ~2s while fewer than 7 are visible. Echo chases the nearest visible one with a Pac-style chomping mouth, eats it (+1 pop, counter in nav "Echo saved N" increments).
+- When nothing is left it wanders to a new random point every ~3.5s. Never stays still for long.
+- **Interactions:**
+  - **Click / Enter:** tickle; squish, happy eyes, short line ("hehe!").
+  - **Drag:** carry it; "wheee" on release.
+  - **Double-click on empty space:** drop a memory.
+  - **Fast swipe near it:** scared; turns translucent, flees, says "eek!".
+  - **Hover a primary button:** flies over and points ("click this one").
+  - **Idle 40s+:** short 5s power-nap with "z z", wakes by itself.
+  - **Occasional spin trick.**
+- Eyes follow the cursor and blink every ~4s.
+- Echo must never sit on top of the main hero CTA for more than a moment: exclude a padded rectangle around the hero buttons from targets.
+- Speech bubble: short lines only, 1–2s.
+
+### 8.2 Corner mode: every logged-in page (`/app/*`), extension never
+- On entering the app Echo flies to the bottom-right corner (76px), above the controls, then **locks in place**: no roaming, no dragging, no bouncing, no memories on screen, double-click does nothing. Bob reduced to 1.5px.
+- A small counter under Echo shows the user's total memories (from `useMemoryStats`), flashing coral on change.
+- Echo shows faces and reacts **in place** using the states below. Messages are short and appear in a bubble to the left of Echo.
+
+| Event (real app source) | Echo state | Bubble |
+|---|---|---|
+| New memory saved (feed refresh / capture event) | chomp → happy, counter +1 | "+1 {title}" |
+| Page skipped by sensitive guard | guarding (shield) | "Skipped a banking page" |
+| Typing in search | searching (magnifier moving) | "Found N matches" after results |
+| Ask submitted / answer ready | thinking (thought dots) → happy | "Answer ready, with sources" |
+| Resurfaced: Revisit / Not now | love (heart) / reading (book) | short line |
+| Sidebar: Timeline / Ask / Sources / Privacy | reading / thinking / searching / guarding | short line |
+| Idle 20s | sleeping (faded, "z z") until any input or event | none |
+| Every ~4.5s while idle | random face (happy, love, think, read, giggle, look around) | none |
+| Click Echo | tiny tick sound, a tip ("press Ctrl K to search") | tip |
+
+- Only events that really exist in the app may trigger reactions. No fake events in production (the preview's timed demo saves are for demo only).
+
+### 8.3 States and art
+Use the ghost from section 4 with arms (two rounded strokes), plus props: magnifier, open book, heart, coral shield with check, thought dots, "z z". Mouth shapes: smile, open, chomp (Pac-style), o, flat, giggle. See `docs/design/echo/` PNG/GIF pack and the preview.
+
+### 8.4 Sound (off by default)
+- A "Sound off/on" toggle sits in a small control group bottom-right with "Pause Echo / Wake Echo". Remember both choices in localStorage (try/catch).
+- All sounds are generated with Web Audio (no files): soft sine/triangle tones, master gain ~0.7 with individual sounds at 0.03–0.3. Turning sound on plays a quiet two-note chime.
+- **Landing:** short babble (one blip per letter, max 7 letters) for speech bubbles, plus soft chomp, giggle, "wheee", scared, wake, pop.
+- **App (corner mode):** no babble. Only a tiny tick on new saves and clicks.
+- Nothing plays before the user turns sound on.
+
+### 8.5 Accessibility
+- Echo is decorative: `aria-hidden` on the roaming layer, except a focusable "Pause Echo" control. The corner counter has a text label.
+- `prefers-reduced-motion`: Echo still moves but ~40% slower, no sparkle trail, no spin, no bob, no word-swap animation, no floating cards.
+- Pause Echo stops all Echo motion and sound.
+
+## 9. Landing page sections (new)
+
+### 9.1 Hero
+- Faint dot-grid background behind the right column, masked to fade out (no gradients or blobs).
+- H1 "Remember everything you **read**." The last word swaps every 2.6s: read → watch → study → skim → bookmark, with a coral underline that draws in.
+- Sub: "Sentiora saves the articles, PDFs and videos you read, then answers your questions from them, with the sources linked."
+- Buttons: "Add to Chrome" (coral, store link [TODO]) and "See how it works".
+- Trust row (3 dot items): Saves automatically while signed in · Skips banking, health and login pages · Export or delete anytime.
+- **Right column: live demo card** "Try it · sample library":
+  - Audience tabs: **Students (default) / Developers / Researchers**, each with its own 10-item sample library and 4 prepared Q&As.
+  - Question input + Ask button, suggestion chips, answer area with Echo avatar.
+  - Answer types out, then citation chips appear; matching library items light up; source cards (number, title, type, date) slide in.
+  - Unknown questions get: "Nothing in this sample library covers that. In your own Sentiora, Echo searches everything you've saved."
+  - **Autoplay:** while untouched for 12s (first run after ~1.5s) it types and answers its own questions in a loop.
+  - All answers are prepared static data. **No API calls from the landing page.**
+- Three floating "saved item" cards (VID / PDF / WEB) around the demo with slight mouse parallax; after an answer one flies into the library. Hidden under 860px.
+
+### 9.2 Before / after ("Where did I read that?")
+Two panels: **Without Sentiora** (dashed, muted: a row of tiny jiggling tabs, bookmark folders with counts, a search with "0 results in bookmarks") vs **With Sentiora** (the same query finding the right page with quote and "Found it in 0.4s" with Echo). Stacks on mobile.
+
+### 9.3 How it works: scroll story
+- Section ~340vh tall with a sticky inner layout: 4 beats on the left (You read like normal → It becomes a memory → Find it by meaning → Ask, with sources), one stage on the right that cross-fades between 4 scenes.
+- Active beat highlighted with a coral bar; clicking a beat scrolls to it. The roaming Echo reacts per beat (point, chomp, search, happy).
+- Under 860px or with reduced motion: no sticky; beats and scenes simply stack.
+
+### 9.4 Extension clip ("Watch it save a real page.")
+- Animated Chrome mock: 4 tabs (article, YouTube, local PDF, bank login), moving cursor that clicks tabs, extension icon with a counter badge (41 → 44).
+- Each tab: icon pulses, a toast stacks bottom-right ("Saved: …", "Saved transcript: …", "Saved: OS notes…"); bank tab turns the icon green with a shield and toast "Skipped: banking page". Echo chomps on saves.
+- 4.2s per step, loops, only runs while on screen.
+- **Replace later** with a real 10–15s MP4/WebM screen recording (`autoplay muted loop playsinline`, poster image, paused under reduced motion). Keep the animated version as fallback until then.
+
+### 9.5 Privacy flow diagram
+"What happens to a page you visit": 1 You open a page (while signed in) → 2 Privacy check (banking, health, login pages and your blocklist) → Skipped (nothing is sent anywhere) / Saved (clean text, title and link only) → 3 Your private vault (only you can search it · export as JSON · delete anytime).
+**Verify** that skipped pages are detected in the content script before any network call; if not, change the copy.
+
+### 9.6 Header
+Sticky. Nav: How it works · Extension · Ask · Privacy · FAQ. Right: "Echo saved N" chip (landing only), theme toggle, Log in, Add to Chrome. The Add to Chrome button switches from graphite to coral after scrolling past the hero.
+
+### 9.7 Final landing order
+Header → Hero → Saves-from strip → Before/after → How it works (scroll story) → Extension clip → Ask band → Privacy + flow diagram → FAQ → Final CTA → Footer.
+
+## 10. Extra pages and details
+- **404 page:** large Echo searching with a moving magnifier, "404", "Echo couldn't find this page.", buttons to home and dashboard. Echo roams here too.
+- **Easter eggs (landing only):** Konami code makes Echo spin ("dance party!"); typing "boo" makes Echo jump ("hey, that's MY line!"); clicking Echo 7 times quickly shows a heart ("ok ok, you found my secret").
+- **Favicon / link preview:** Echo mark on coral; OG image 1200×630 with Echo + headline.
+
+## 11. Performance rules
+- Landing must load fast on a mid-range phone (aim < 2.5s LCP). Echo, demo and story are plain React + CSS + requestAnimationFrame: no animation libraries unless already in the repo.
+- Animations pause when the tab is hidden or the section is off screen.
+- Sound and Echo code load lazily after first paint.
+
+## 12. Later (not in this redesign, note in TASKS.md)
+"Try it on any link" in the hero (needs backend fetch), Memory year-in-review card, shareable answer cards, pause-saving toggle in the popup ("pause on this site / for 1 hour"), Chrome Web Store listing assets, Product Hunt launch.
+
+## 13. Logo: the dot in the i (replaces the ghost + wordmark logo)
+- Wordmark "sentiora" in the display font, weight 800, letter-spacing -0.045em. The "i" is a dotless ı with a **coral circle** (`--accent`, about 0.3em) as its dot. The ghost no longer appears in the logo; Echo stays the mascot everywhere else.
+- Used in the landing header, footer, app sidebar and extension popup header. Each letter is its own span so it can animate; give the whole mark `role="img" aria-label="sentiora"`.
+- **Wave:** about 1.2s after load and then every 10s, the letters hop up one after another (60ms apart, 0.7s springy ease), and the coral dot hops higher with a small squash. It also waves on hover. No wave under reduced motion, and only while the mark is visible.
+- Favicon / extension icon: the coral dot alone, or the dotless ı with the coral dot, on graphite.
+- Dot states (optional, for later): pulses while saving, becomes a check when saved, becomes a lock on protected pages.

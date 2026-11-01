@@ -69,9 +69,3 @@ class AuthRepository:
             .values(is_revoked=True)
         )
         self.db.commit()
-
-    def deactivate_session(self, session_id: UUID) -> None:
-        self.db.execute(
-            update(Session).where(Session.id == session_id).values(is_active=False)
-        )
-        self.db.commit()

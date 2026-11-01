@@ -24,7 +24,7 @@ def test_openrouter_routing(monkeypatch: pytest.MonkeyPatch) -> None:
         )(),
     )
 
-    def mock_complete(self: Any, question: str, context: str) -> str:
+    def mock_complete(self: Any, prompt: str, system_prompt: str, backend: Any) -> str:
         return "OpenRouter mock response"
 
     monkeypatch.setattr("app.services.rag_service.RagService._complete_openrouter", mock_complete)
@@ -112,7 +112,7 @@ def test_openrouter_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
         )(),
     )
 
-    def mock_complete(self: Any, question: str, context: str) -> str:
+    def mock_complete(self: Any, prompt: str, system_prompt: str, backend: Any) -> str:
         raise LLMProviderError("Provider is down")
 
     monkeypatch.setattr("app.services.rag_service.RagService._complete_openrouter", mock_complete)
@@ -136,5 +136,11 @@ def test_openrouter_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
             ]
 
     rag = RagService(retrieval=MockRetrieval())  # type: ignore[arg-type]
+    user = UUID("00000000-0000-0000-0000-000000000000")
+    # Memory that covers the question is answered locally instead of failing.
+    resp = rag.ask(user_id=user, question="What is the fallback data?")
+    assert resp.used_fallback is True
+    assert resp.citations[0].title == "Mock"
+    # A general question the memory doesn't cover still reports the failure.
     with pytest.raises(LLMProviderError, match="Provider is down"):
-        rag.ask(user_id=UUID("00000000-0000-0000-0000-000000000000"), question="Test?")
+        rag.ask(user_id=user, question="Test?")

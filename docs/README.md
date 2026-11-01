@@ -32,4 +32,16 @@ Single source of truth for engineering progress, completed phases, and upcoming 
 10. [PROMPT_GUIDE.md](PROMPT_GUIDE.md) - AI Prompt Guide
 Guide and instructions for AI agents on how to read docs, write code, and verify tasks.
 
+11. [DESIGN.md](DESIGN.md) - Design System and Redesign Handoff
+Tokens, components and screen layouts for the web app, extension popup and shared UI. Reference screenshots are in [design/](design/).
+
+12. [RELEASE.md](RELEASE.md) - Release Guide
+Production Docker Compose deployment, Chrome Web Store packaging, and YouTube capture limits.
+
+13. [Capture_Module_v2_Technical_Design.pdf](Capture_Module_v2_Technical_Design.pdf) - Capture Module v2 Technical Design
+Technical design for version 2 of the capture module (extension capture and the capture API).
+
+14. [qa-audit/](qa-audit/) - QA Audit and Team Setup
+[TEAM_SETUP.md](qa-audit/TEAM_SETUP.md) (setup walkthrough and troubleshooting), cross-machine checklist, bug register, and test results.
+
 The documents in this directory are the canonical source of truth for the Sentiora project. If conflicts arise between implementation and documentation, the documentation should be reviewed before making engineering decisions.

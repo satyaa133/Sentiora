@@ -59,7 +59,7 @@ export interface IconButtonProps extends Omit<
   size?: "sm" | "md";
 }
 
-const ICON_SIZES = { sm: "h-9 w-9", md: "h-11 w-11" } as const;
+const ICON_SIZES = { sm: "touch-target h-9 w-9", md: "h-11 w-11" } as const;
 
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(
   function IconButton(

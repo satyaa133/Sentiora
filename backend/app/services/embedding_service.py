@@ -11,9 +11,6 @@ from app.services.embedding_port import EmbeddingPort
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_DIMENSIONS = 1536
-
-
 class EmbeddingNotConfiguredError(RuntimeError):
     pass
 
@@ -38,11 +35,15 @@ class OpenAIEmbeddingAdapter(EmbeddingPort):
 class GeminiEmbeddingAdapter(EmbeddingPort):
     def __init__(self) -> None:
         from google import genai
+        from google.genai import types
 
         settings = get_settings()
         if not settings.gemini_api_key:
             raise EmbeddingNotConfiguredError("GEMINI_API_KEY is not configured.")
-        self._client = genai.Client(api_key=settings.gemini_api_key)
+        self._client = genai.Client(
+            api_key=settings.gemini_api_key,
+            http_options=types.HttpOptions(timeout=30_000),  # ms; matches OpenAI
+        )
         self._model = settings.gemini_embedding_model
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:

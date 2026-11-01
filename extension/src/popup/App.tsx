@@ -6,7 +6,7 @@ import ErrorView from "./views/ErrorView";
 import NoteView from "./views/NoteView";
 import PopupHeader from "./views/PopupHeader";
 import ProtectedView from "./views/ProtectedView";
-import ReadyView, { type RecentMemory } from "./views/ReadyView";
+import ReadyView, { type PageStatus, type RecentMemory } from "./views/ReadyView";
 import SavedView from "./views/SavedView";
 import SettingsView from "./views/SettingsView";
 import {
@@ -15,6 +15,7 @@ import {
   getCachedUser,
   setCachedUser,
   clearAllAuthData,
+  getUserBlockedDomains,
   type CachedUser,
 } from "../services/storage";
 import {
@@ -22,10 +23,10 @@ import {
   ExtApiError,
   attemptTokenRefresh,
 } from "../services/extApiClient";
-import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
+import { getUrlBlockReason, isInternalUrl, isPdfUrl } from "../shared/blocklist";
 import { sendCaptureMessage } from "../shared/captureUtils";
 import { appPageUrl } from "../shared/appUrl";
-import type { CapturePayload } from "../shared/types";
+import type { CapturePayload, PageCaptureStatus } from "../shared/types";
 
 type PopupView =
   | "auth"
@@ -41,6 +42,8 @@ const EXTRACT_TIMEOUT_MS = 8_000;
 const PDF_YOUTUBE_EXTRACT_TIMEOUT_MS = 25_000;
 const SAVE_TIMEOUT_MS = 8_000;
 const PING_TIMEOUT_MS = 400;
+const STATUS_TIMEOUT_MS = 800;
+const SAVING_POLL_MS = 1500;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -64,6 +67,30 @@ function pingTab(tabId: number): Promise<boolean> {
     chrome.tabs.sendMessage(tabId, { type: "PING" }, { frameId: 0 }, () => {
       window.clearTimeout(timer);
       resolve(!chrome.runtime.lastError);
+    });
+  });
+}
+
+/** Page-level check (password field, noindex) from the content script; null when clear or unknown. */
+function requestSensitivity(tabId: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => resolve(null), STATUS_TIMEOUT_MS);
+    chrome.tabs.sendMessage(tabId, { type: "GET_SENSITIVITY" }, { frameId: 0 }, (response) => {
+      window.clearTimeout(timer);
+      const reason = (response as { reason?: unknown } | undefined)?.reason;
+      resolve(!chrome.runtime.lastError && typeof reason === "string" ? reason : null);
+    });
+  });
+}
+
+/** Whether the background saved this URL in this browser session, or is saving it now. */
+function requestPageStatus(url: string): Promise<PageCaptureStatus> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(() => resolve("not_saved"), STATUS_TIMEOUT_MS);
+    chrome.runtime.sendMessage({ type: "GET_PAGE_STATUS", url }, (response) => {
+      window.clearTimeout(timer);
+      const status = (response as { status?: PageCaptureStatus } | undefined)?.status;
+      resolve(!chrome.runtime.lastError && status ? status : "not_saved");
     });
   });
 }
@@ -120,6 +147,10 @@ export default function App() {
   );
   const [activeTabHost, setActiveTabHost] = useState("");
   const [activeTabRawUrl, setActiveTabRawUrl] = useState("");
+  const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  // Saving is automatic, so the ready view leads with what happened to this page.
+  const [pageStatus, setPageStatus] = useState<PageStatus>("checking");
+  const [userBlockedDomains, setUserBlockedDomains] = useState<string[]>([]);
 
   // Last save, for the saved view and Undo (only set when the save created a new memory).
   const [savedTitle, setSavedTitle] = useState("");
@@ -219,6 +250,7 @@ export default function App() {
         method: "DELETE",
       });
       setSavedMemoryId(null);
+      if (lastAttempt === "page") setPageStatus("not_saved");
       setNotice("Removed from your memory.");
       setViewState("ready");
       fetchItemCount();
@@ -233,6 +265,7 @@ export default function App() {
   useEffect(() => {
     if (typeof chrome !== "undefined" && chrome.tabs) {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (typeof tabs[0]?.id === "number") setActiveTabId(tabs[0].id);
         if (tabs[0]?.url) {
           const urlStr = tabs[0].url;
           try {
@@ -321,6 +354,48 @@ export default function App() {
     checkAuth();
   }, [checkAuth]);
 
+  // Resolve the page status once signed in: blocklists first (no page access),
+  // then the content script's page check, then the background's save record.
+  useEffect(() => {
+    if (!isAuthenticated || !activeTabRawUrl) return;
+    let cancelled = false;
+    void (async () => {
+      const domains = await getUserBlockedDomains();
+      if (cancelled) return;
+      setUserBlockedDomains(domains);
+      const rule = getUrlBlockReason(activeTabRawUrl, {
+        allowLocalPdf: isPdfUrl(activeTabRawUrl),
+        userDomains: domains,
+      });
+      let blocked = rule !== null;
+      if (!blocked && activeTabId !== null && (await pingTab(activeTabId))) {
+        blocked = (await requestSensitivity(activeTabId)) !== null;
+      }
+      if (cancelled) return;
+      if (blocked) {
+        setPageStatus("blocked");
+        setViewState((view) => (view === "ready" ? "sensitive" : view));
+        return;
+      }
+      const status = await requestPageStatus(activeTabRawUrl);
+      if (!cancelled) setPageStatus(status);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, activeTabRawUrl, activeTabId]);
+
+  // An automatic save is in flight: follow it until the background finishes.
+  useEffect(() => {
+    if (pageStatus !== "saving" || !activeTabRawUrl) return;
+    const interval = window.setInterval(() => {
+      void requestPageStatus(activeTabRawUrl).then((status) => {
+        if (status !== "saving") setPageStatus(status);
+      });
+    }, SAVING_POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [pageStatus, activeTabRawUrl]);
+
   async function handleSignOut() {
     await clearAllAuthData();
     setIsAuthenticated(false);
@@ -336,7 +411,8 @@ export default function App() {
     }
 
     const urlStr = tab.url.slice(0, 2048);
-    if (isUrlBlocked(urlStr, { allowLocalPdf: isPdfUrl(urlStr) })) {
+    const userDomains = await getUserBlockedDomains();
+    if (getUrlBlockReason(urlStr, { allowLocalPdf: isPdfUrl(urlStr), userDomains })) {
       setCaptureError("This page is protected and cannot be captured.");
       setViewState("sensitive");
       return false;
@@ -454,6 +530,7 @@ export default function App() {
 
       if (response?.skipped && response.reason === "sensitive") {
         setCaptureError("This page is protected and cannot be captured.");
+        setPageStatus("blocked");
         setViewState("sensitive");
         setIsCapturing(false);
         return;
@@ -509,6 +586,7 @@ export default function App() {
       );
 
       if (saved) {
+        setPageStatus("saved");
         setSavedTitle(activeTabTitle);
         setSavedType(activeTabType);
         setViewState("saved");
@@ -636,6 +714,7 @@ export default function App() {
           tabHost={activeTabHost || activeTabUrl}
           recent={recentItems}
           notice={notice}
+          status={pageStatus}
           saving={isCapturing}
           onSave={handleSaveCurrentPage}
           onAddNote={() => {
@@ -694,10 +773,15 @@ export default function App() {
       {isAuthenticated && viewState === "sensitive" && (
         <ProtectedView
           host={activeTabHost}
-          builtInRule={
-            Boolean(activeTabRawUrl) &&
-            isUrlBlocked(activeTabRawUrl, { allowLocalPdf: isPdfUrl(activeTabRawUrl) })
+          rule={
+            activeTabRawUrl
+              ? getUrlBlockReason(activeTabRawUrl, {
+                  allowLocalPdf: isPdfUrl(activeTabRawUrl),
+                  userDomains: userBlockedDomains,
+                })
+              : null
           }
+          internal={Boolean(activeTabRawUrl) && isInternalUrl(activeTabRawUrl)}
           onReviewBlockedSites={() => openAppPage("/privacy")}
         />
       )}

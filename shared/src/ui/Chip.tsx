@@ -26,7 +26,7 @@ export function Chip({
       type={type}
       aria-pressed={selected}
       className={cx(
-        "inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors",
+        "touch-target inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-4 text-[15px] font-medium transition-colors",
         selected
           ? "border border-fg bg-fg text-bg"
           : "border border-line bg-surface text-fg hover:bg-raised",
@@ -63,7 +63,7 @@ export function Tag({ children, onRemove, className }: TagProps) {
           type="button"
           onClick={onRemove}
           aria-label={`Remove tag ${typeof children === "string" ? children : ""}`.trim()}
-          className="inline-flex h-5 w-5 items-center justify-center rounded-full hover:opacity-70"
+          className="touch-target inline-flex h-5 w-5 items-center justify-center rounded-full hover:opacity-70"
         >
           <IconClose size={14} />
         </button>

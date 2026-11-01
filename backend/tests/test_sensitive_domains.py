@@ -26,6 +26,31 @@ def test_is_sensitive_url_allows_local_pdf_and_manual_notes() -> None:
     assert is_sensitive_url("https://docs.example.com/article", SourceType.webpage) is False
 
 
+
+def test_manual_note_paths_do_not_bypass_blocked_domains() -> None:
+    # Regression: synthetic-note paths used to be exempt on any host.
+    assert is_sensitive_url("https://www.chase.com/notes", SourceType.webpage) is True
+    assert is_sensitive_url("https://paypal.com/manual/1", SourceType.webpage) is True
+    assert is_sensitive_url("https://sentiora.app/welcome", SourceType.webpage) is False
+    assert is_sensitive_url("https://sentiora.app/notes/42", SourceType.webpage) is False
+    assert is_sensitive_url("https://sentiora.app/dashboard", SourceType.webpage) is True
+
+
+def test_malformed_port_is_refused_not_a_server_error() -> None:
+    assert is_sensitive_url("https://example.com:99999/page", SourceType.webpage) is True
+    headers = _auth_headers("safety_port@example.com")
+    resp = client.post(
+        "/api/v1/memory-items",
+        json={
+            "source_type": "webpage",
+            "url": "https://example.com:99999/page",
+            "title": "Bad port",
+            "content": "Some ordinary article text that is long enough to be captured.",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 403
+
 def test_create_rejects_sensitive_domain() -> None:
     headers = _auth_headers("safety_block@example.com")
     resp = client.post(

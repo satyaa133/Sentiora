@@ -102,3 +102,22 @@ def limit_chat(request: Request, user_id: str, settings: Settings | None = None)
         cfg.rate_limit_chat_per_user_per_minute,
         60,
     )
+
+
+def limit_refresh(request: Request, settings: Settings | None = None) -> None:
+    cfg = settings or get_settings()
+    enforce_rate_limit(
+        f"refresh:ip:{client_ip(request)}",
+        cfg.rate_limit_refresh_per_minute,
+        60,
+    )
+
+
+def limit_search(request: Request, user_id: str, settings: Settings | None = None) -> None:
+    # Each search embeds the query, which is a paid provider call.
+    cfg = settings or get_settings()
+    enforce_rate_limit(
+        f"search:user:{user_id}",
+        cfg.rate_limit_search_per_user_per_minute,
+        60,
+    )

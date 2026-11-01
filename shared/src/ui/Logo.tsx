@@ -1,7 +1,14 @@
-import { ECHO_BODY_PATH } from "./echoShape.js";
+import type { CSSProperties } from "react";
+
+import { cx } from "./cx.js";
+import { useLogoWave } from "./useLogoWave.js";
 
 /** "inverse" draws the logo for graphite panels (bg-inverse). */
 export type LogoTone = "default" | "inverse";
+
+/** The wordmark's letters; index 4 is the dotless ı that carries the coral dot. */
+const LETTERS = ["s", "e", "n", "t", "ı", "o", "r", "a"] as const;
+const DOT_INDEX = 4;
 
 export interface LogoMarkProps {
   size?: number;
@@ -11,7 +18,7 @@ export interface LogoMarkProps {
   className?: string;
 }
 
-/** Simplified Echo: body and eyes, no cheeks (DESIGN.md §4). */
+/** Compact mark: the dotless ı with its coral dot (DESIGN.md §13). */
 export function LogoMark({
   size = 24,
   title,
@@ -21,65 +28,86 @@ export function LogoMark({
   const a11y = title
     ? ({ role: "img", "aria-label": title } as const)
     : ({ "aria-hidden": true, focusable: false } as const);
-  const inverse = tone === "inverse";
   return (
     <svg
-      viewBox="26 22 68 82"
-      width={size}
+      viewBox="0 0 24 32"
+      width={(size * 24) / 32}
       height={size}
       className={className}
+      data-logo-mark=""
       {...a11y}
     >
       {title ? <title>{title}</title> : null}
-      <path d={ECHO_BODY_PATH} fill={inverse ? "var(--on-inverse)" : "var(--text)"} />
-      <g fill={inverse ? "var(--inverse)" : "var(--surface)"}>
-        <ellipse cx={50} cy={56} rx={6} ry={8} />
-        <ellipse cx={70} cy={56} rx={6} ry={8} />
-      </g>
+      <rect
+        x={8}
+        y={13}
+        width={8}
+        height={19}
+        rx={1.5}
+        fill={tone === "inverse" ? "var(--on-inverse)" : "var(--text)"}
+      />
+      <circle cx={12} cy={5.5} r={5.5} fill="var(--accent)" />
     </svg>
   );
 }
 
 export interface LogoProps {
-  /** Wordmark font size in px; the mark scales with it. */
+  /** Wordmark font size in px. */
   size?: number;
-  /** Hide the wordmark and show the mark alone (it then carries the name). */
+  /** Show the compact mark alone (it then carries the name). */
   markOnly?: boolean;
   tone?: LogoTone;
+  /** Wave the letters on load, every 10s and on hover. On by default. */
+  animated?: boolean;
   className?: string;
 }
 
-/** Logo lockup: ghost mark + lowercase "sentiora" wordmark. */
+/** Wordmark "sentiora" whose ı is dotted with a coral circle (DESIGN.md §13). */
 export default function Logo({
   size = 22,
   markOnly = false,
   tone = "default",
+  animated = true,
   className,
 }: LogoProps) {
+  const { ref, waving, wave } = useLogoWave<HTMLSpanElement>(animated && !markOnly);
+
   if (markOnly) {
     return (
       <LogoMark
-        size={Math.round(size * 1.15)}
-        title="Sentiora"
+        size={Math.round(size * 1.3)}
+        title="sentiora"
         tone={tone}
         className={className}
       />
     );
   }
-  const textClass = tone === "inverse" ? "text-on-inverse" : "text-fg";
+
   return (
     <span
-      className={["inline-flex items-center gap-2", textClass, className]
-        .filter(Boolean)
-        .join(" ")}
+      ref={ref}
+      role="img"
+      aria-label="sentiora"
+      onMouseEnter={wave}
+      className={cx(
+        "logo-wordmark",
+        waving && "logo-waving",
+        tone === "inverse" ? "text-on-inverse" : "text-fg",
+        className,
+      )}
+      style={{ fontSize: size }}
     >
-      <LogoMark size={Math.round(size * 1.05)} tone={tone} />
-      <span
-        className="font-display font-bold leading-none"
-        style={{ fontSize: size, letterSpacing: "-0.035em" }}
-      >
-        sentiora
-      </span>
+      {LETTERS.map((letter, i) => (
+        <span
+          key={i}
+          aria-hidden="true"
+          className={cx("logo-letter", i === DOT_INDEX && "logo-i")}
+          style={{ "--logo-i": i } as CSSProperties}
+        >
+          {letter}
+          {i === DOT_INDEX ? <span className="logo-dot" data-logo-dot="" /> : null}
+        </span>
+      ))}
     </span>
   );
 }

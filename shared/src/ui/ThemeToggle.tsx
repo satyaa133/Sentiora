@@ -67,7 +67,7 @@ export function ThemeToggle({ variant = "segmented", className }: ThemeTogglePro
             aria-pressed={checked}
             onClick={() => setPreference(option.value)}
             className={cx(
-              "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors",
+              "touch-target inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors",
               checked ? "bg-surface text-fg shadow-pop" : "text-muted hover:text-fg",
             )}
           >

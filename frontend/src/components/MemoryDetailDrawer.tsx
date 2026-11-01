@@ -14,7 +14,7 @@ import {
 } from "@shared/ui";
 import type { MemoryItem } from "../types/memory";
 import { formatExtractedContent } from "../utils/contentFormatter";
-import { safeHref } from "../utils/safeHref";
+import { sourceHref } from "../utils/safeHref";
 
 interface MemoryDetailDrawerProps {
   item: MemoryItem | null;
@@ -58,6 +58,7 @@ export default function MemoryDetailDrawer({
     setTimeout(() => setCopied(false), 2000);
   }
 
+  const originalHref = sourceHref(item.url);
   let domain = "";
   try {
     domain = new URL(item.url).hostname;
@@ -109,16 +110,18 @@ export default function MemoryDetailDrawer({
             Ask about this
           </Button>
         )}
-        <a
-          href={safeHref(item.url)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={buttonClasses("secondary", "md")}
-        >
-          Open original
-          <IconExternalLink size={16} />
-          <span className="sr-only">(opens in a new tab)</span>
-        </a>
+        {originalHref && (
+          <a
+            href={originalHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={buttonClasses("secondary", "md")}
+          >
+            Open original
+            <IconExternalLink size={16} />
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        )}
       </div>
       <Button
         variant="ghost"
@@ -150,16 +153,20 @@ export default function MemoryDetailDrawer({
       footer={footer}
     >
       <div className="space-y-6">
-        <a
-          href={safeHref(item.url)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex max-w-full items-center gap-1 text-[15px] text-link hover:underline"
-        >
-          <span className="truncate">{domain}</span>
-          <IconExternalLink size={14} className="shrink-0" />
-          <span className="sr-only">(opens in a new tab)</span>
-        </a>
+        {originalHref ? (
+          <a
+            href={originalHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex max-w-full items-center gap-1 text-[15px] text-link hover:underline"
+          >
+            <span className="truncate">{domain}</span>
+            <IconExternalLink size={14} className="shrink-0" />
+            <span className="sr-only">(opens in a new tab)</span>
+          </a>
+        ) : (
+          <p className="truncate text-[15px] text-muted">{domain}</p>
+        )}
 
         {item.status === "failed" && (
           <p

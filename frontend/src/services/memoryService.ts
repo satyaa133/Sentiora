@@ -1,23 +1,24 @@
-import apiClient from "./apiClient";
-import type { MemoryItem, MemoryItemListResponse, StructuredNode, ExtractionMetadata } from "../types/memory";
-
-interface APIEnvelope<T> {
-  success: boolean;
-  data: T;
-}
+import apiClient, { type APIEnvelope } from "./apiClient";
+import type {
+  MemoryItem,
+  MemoryItemListResponse,
+  MemoryListFilters,
+  StructuredNode,
+  ExtractionMetadata,
+} from "../types/memory";
 
 export async function fetchMemoryItems(
   page = 1,
-  perPage = 20
+  perPage = 20,
+  filters: MemoryListFilters = {},
 ): Promise<MemoryItemListResponse> {
-  const resp = await apiClient.get<APIEnvelope<MemoryItemListResponse>>(
-    `/memory-items?page=${page}&per_page=${perPage}`
-  );
-  return resp.data.data;
-}
-
-export async function fetchMemoryItemById(id: string): Promise<MemoryItem> {
-  const resp = await apiClient.get<APIEnvelope<MemoryItem>>(`/memory-items/${id}`);
+  const params: Record<string, string | number> = { page, per_page: perPage };
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params[key] = value;
+  }
+  const resp = await apiClient.get<APIEnvelope<MemoryItemListResponse>>("/memory-items", {
+    params,
+  });
   return resp.data.data;
 }
 

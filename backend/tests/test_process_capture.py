@@ -306,3 +306,38 @@ def test_process_capture_does_not_reprocess_ready_item() -> None:
     process_capture(item_id)
 
     assert _status_and_chunks(item_id) == (status, chunks)
+
+
+def test_process_capture_tolerates_multiple_ready_duplicates() -> None:
+    # Regression: two READY rows with the same URL used to crash the dedup lookup.
+    url = "https://docs.example.com/many-ready"
+    first_id = _new_capture("dup_ready@example.com", url)
+    process_capture(first_id)
+
+    db = SessionLocal()
+    try:
+        first = db.query(MemoryItem).filter(MemoryItem.id == UUID(first_id)).one()
+
+        def _clone(status: ItemStatus) -> MemoryItem:
+            return MemoryItem(
+                user_id=first.user_id,
+                source_type=first.source_type,
+                url=first.url,
+                title=first.title,
+                content=first.content,
+                status=status,
+            )
+
+        db.add(_clone(ItemStatus.ready))
+        pending = _clone(ItemStatus.pending)
+        db.add(pending)
+        db.commit()
+        pending_id = str(pending.id)
+    finally:
+        db.close()
+
+    process_capture(pending_id)
+
+    status, chunks = _status_and_chunks(pending_id)
+    assert status.endswith("ready")
+    assert chunks > 0

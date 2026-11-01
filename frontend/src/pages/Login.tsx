@@ -59,7 +59,7 @@ export default function Login() {
       footer={
         <>
           Don&apos;t have an account?{" "}
-          <Link to="/onboarding" className="font-semibold text-link hover:underline">
+          <Link to="/signup" className="font-semibold text-link hover:underline">
             Sign up
           </Link>
         </>
@@ -123,7 +123,7 @@ export default function Login() {
       </div>
 
       <Button variant="secondary" fullWidth disabled>
-        Continue with Google
+        Continue with Google (coming soon)
       </Button>
     </AuthLayout>
   );

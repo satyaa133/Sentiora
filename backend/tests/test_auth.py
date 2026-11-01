@@ -124,3 +124,26 @@ def test_auth_flow(clean_db) -> None:
     resp = client.get(
         "/api/v1/users/me", headers={"Authorization": f"Bearer {access_token}"}
     )
+
+
+def test_refresh_rejected_for_disabled_account(clean_db) -> None:
+    from app.core.db import _get_session_factory
+
+    email = "test_disabled_refresh@example.com"
+    client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "Password123!", "full_name": "Disabled"},
+    )
+    login = client.post("/api/v1/auth/login", json={"email": email, "password": "Password123!"})
+    refresh_token = login.json()["data"]["refresh_token"]
+
+    db = _get_session_factory()()
+    try:
+        db.query(User).filter(User.email == email).update({"is_active": False})
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.post("/api/v1/auth/refresh-token", json={"refresh_token": refresh_token})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "AUTH_FORBIDDEN"

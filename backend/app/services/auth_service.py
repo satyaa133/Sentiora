@@ -171,6 +171,15 @@ class AuthService:
                 },
             )
 
+        # A disabled or deleted account must not keep minting tokens.
+        user = self.user_repo.get_by_id(user_id)
+        if user is None or not user.is_active:
+            self.auth_repo.revoke_user_token_family(user_id)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"code": "AUTH_FORBIDDEN", "message": "Account is disabled."},
+            )
+
         # Rotate refresh token: revoke current, issue new pair
         self.auth_repo.revoke_refresh_token(token_record)
 

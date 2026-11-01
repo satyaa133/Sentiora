@@ -1,13 +1,14 @@
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import Echo, { type EchoState } from "@shared/ui/Echo";
+import Echo from "@shared/ui/Echo";
+import { ECHO_STATES } from "@shared/ui/echoShape";
 import Logo from "@shared/ui/Logo";
 import { IconSearch } from "@shared/ui/icons";
 
 afterEach(cleanup);
 
-const STATES: EchoState[] = ["idle", "saving", "happy", "faded", "guarding"];
+const STATES = ECHO_STATES;
 
 describe("Echo", () => {
   it.each(STATES)("renders the %s state", (state) => {
@@ -36,11 +37,18 @@ describe("Echo", () => {
     expect(container.querySelector("svg")).not.toHaveClass("echo-bob");
   });
 
+  it("draws arms only when asked", () => {
+    const { container, rerender } = render(<Echo />);
+    expect(container.querySelector(".echo-arm-left")).toBeNull();
+    rerender(<Echo arms />);
+    expect(container.querySelector(".echo-arm-left")).not.toBeNull();
+  });
+
   it("uses tokens, not raw colours", () => {
     const { container } = render(
       <>
         {STATES.map((state) => (
-          <Echo key={state} state={state} />
+          <Echo key={state} state={state} arms />
         ))}
       </>,
     );
@@ -56,14 +64,64 @@ describe("Echo", () => {
 });
 
 describe("Logo", () => {
-  it("renders the lowercase wordmark", () => {
-    render(<Logo />);
-    expect(screen.getByText("sentiora")).toBeInTheDocument();
+  function mockReducedMotion(reduce: boolean) {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: reduce && query.includes("reduce"),
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
-  it("names the mark when shown alone", () => {
-    render(<Logo markOnly />);
-    expect(screen.getByRole("img", { name: "Sentiora" })).toBeInTheDocument();
+  it("is one image named sentiora, built from per-letter spans", () => {
+    mockReducedMotion(false);
+    const { container } = render(<Logo />);
+    const mark = screen.getByRole("img", { name: "sentiora" });
+    const letters = mark.querySelectorAll(".logo-letter");
+    expect([...letters].map((l) => l.textContent).join("")).toBe("sentıora");
+    for (const letter of letters) expect(letter).toHaveAttribute("aria-hidden", "true");
+    // The coral dot sits on the dotless ı; the ghost is gone from the logo.
+    expect(mark.querySelector(".logo-i [data-logo-dot]")).not.toBeNull();
+    expect(container.querySelector("path")).toBeNull();
+  });
+
+  it("waves after load and on hover", () => {
+    vi.useFakeTimers();
+    mockReducedMotion(false);
+    render(<Logo />);
+    const mark = screen.getByRole("img", { name: "sentiora" });
+    expect(mark).not.toHaveClass("logo-waving");
+    act(() => vi.advanceTimersByTime(1200));
+    expect(mark).toHaveClass("logo-waving");
+    act(() => vi.advanceTimersByTime(1300));
+    expect(mark).not.toHaveClass("logo-waving");
+    fireEvent.mouseEnter(mark);
+    expect(mark).toHaveClass("logo-waving");
+  });
+
+  it("never waves under reduced motion", () => {
+    vi.useFakeTimers();
+    mockReducedMotion(true);
+    render(<Logo />);
+    const mark = screen.getByRole("img", { name: "sentiora" });
+    act(() => vi.advanceTimersByTime(12_000));
+    fireEvent.mouseEnter(mark);
+    expect(mark).not.toHaveClass("logo-waving");
+  });
+
+  it("shows the compact ı-and-dot mark, named, when shown alone", () => {
+    mockReducedMotion(false);
+    const { container } = render(<Logo markOnly />);
+    expect(screen.getByRole("img", { name: "sentiora" })).toBeInTheDocument();
+    expect(container.querySelector("circle")).toHaveAttribute("fill", "var(--accent)");
   });
 });
 

@@ -2,17 +2,30 @@ import { useId, useState } from "react";
 
 import { Button, Echo, IconChevronDown, Tag, cx } from "@shared/ui";
 
+import type { UrlBlockReason } from "../../shared/blocklist";
+
+const REASON: Record<UrlBlockReason | "page" | "internal", string> = {
+  internal: "Browser pages, local files and Sentiora itself are never saved.",
+  built_in:
+    "This looks like a banking, payment, health, ID or sign-in page. Pages like this are always skipped.",
+  user: "You blocked this site in Privacy, so Echo skips it.",
+  page: "This page looks private, like a sign-in form or a page that asks not to be indexed. Echo skips pages like this.",
+};
+
 interface ProtectedViewProps {
   /** Hostname of the blocked page, if known. */
   host: string;
-  /** True when the URL matches the extension's built-in blocklist. */
-  builtInRule: boolean;
+  /** Which blocklist matched the URL; null for page-level checks (password field, noindex). */
+  rule: UrlBlockReason | null;
+  /** A browser page, local file or Sentiora page rather than a sensitive site. */
+  internal?: boolean;
   onReviewBlockedSites: () => void;
 }
 
 export default function ProtectedView({
   host,
-  builtInRule,
+  rule,
+  internal = false,
   onReviewBlockedSites,
 }: ProtectedViewProps) {
   const [showWhy, setShowWhy] = useState(false);
@@ -25,15 +38,15 @@ export default function ProtectedView({
         Echo won&apos;t save this page
       </h1>
       <p className="mt-2 text-[15px] leading-relaxed text-muted">
-        {builtInRule
-          ? "This site handles banking, health or tax details. Pages like this are always skipped."
-          : "This page looks private, like a sign-in form or a page that asks not to be indexed. Echo skips pages like this."}
+        {REASON[internal ? "internal" : (rule ?? "page")]}
       </p>
 
       {host ? (
         <div className="mt-5 flex w-full items-center justify-between gap-3 rounded-btn bg-raised px-4 py-3">
           <span className="truncate font-mono text-sm text-fg">{host}</span>
-          {builtInRule ? <Tag className="shrink-0">Built-in rule</Tag> : null}
+          {rule ? (
+            <Tag className="shrink-0">{rule === "user" ? "Your rule" : "Built-in rule"}</Tag>
+          ) : null}
         </div>
       ) : null}
 
@@ -64,9 +77,10 @@ export default function ProtectedView({
         hidden={!showWhy}
         className="text-left text-[15px] leading-relaxed text-muted"
       >
-        Sentiora never saves banking, health, tax or browser pages, pages with a visible
-        password field, or pages marked noindex. This check runs on your device before
-        anything is sent.
+        Sentiora skips banking, payment, health, insurance, tax and ID sites it
+        recognises, sign-in pages, pages with a visible password field, pages marked
+        noindex, and any site you block in Privacy. This check runs on your device
+        before anything is sent.
       </div>
     </section>
   );

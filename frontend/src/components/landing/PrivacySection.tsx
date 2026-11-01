@@ -2,16 +2,18 @@ import type { ReactNode } from "react";
 
 import { Echo, IconDownload, IconEye, IconShield } from "@shared/ui";
 
+import PrivacyFlow from "./PrivacyFlow";
+
 const POINTS: Array<{ icon: ReactNode; title: string; body: string }> = [
   {
     icon: <IconEye size={20} />,
-    title: "Every save is visible",
-    body: "Everything Sentiora saves shows up in your timeline, where you can open it or delete it.",
+    title: "You stay in control",
+    body: "Saving runs only while you're signed in. Block any site, and delete anything you've saved.",
   },
   {
     icon: <IconShield size={20} />,
     title: "Sensitive pages are skipped",
-    body: "Banking, health, tax and sign-in pages are never saved. The check runs in your browser before anything is sent.",
+    body: "Banking, health and sign-in pages it recognises are skipped, plus any site you block. The check runs in your browser before anything is sent.",
   },
   {
     icon: <IconDownload size={20} />,
@@ -51,6 +53,9 @@ export default function PrivacySection() {
             ))}
           </ul>
         </div>
+      </div>
+      <div className="mx-auto max-w-6xl px-4 sm:px-6">
+        <PrivacyFlow />
       </div>
     </section>
   );

@@ -11,28 +11,35 @@ import {
   Tag,
 } from "@shared/ui";
 import type { MemoryItem } from "../../types/memory";
+import { fetchMemoryItems } from "../../services/memoryService";
+import { normalizeBlockedDomain } from "../../utils/blockedDomain";
 
-interface PrivacyCenterViewProps {
-  items?: MemoryItem[];
-}
-
-export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps) {
+export default function PrivacyCenterView() {
   const [blockedDomains, setBlockedDomains] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem("sentiora_blocked_domains");
-      return saved ? JSON.parse(saved) : [];
+      const saved: unknown = JSON.parse(localStorage.getItem("sentiora_blocked_domains") ?? "[]");
+      if (!Array.isArray(saved)) return [];
+      // Lists saved before normalization may hold paths or non-domains.
+      const domains = saved
+        .map((entry) => (typeof entry === "string" ? normalizeBlockedDomain(entry) : null))
+        .filter((domain): domain is string => domain !== null);
+      return [...new Set(domains)];
     } catch {
       return [];
     }
   });
 
   const [newDomain, setNewDomain] = useState("");
+  const [domainError, setDomainError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportSuccess, setExportSuccess] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
       localStorage.setItem("sentiora_blocked_domains", JSON.stringify(blockedDomains));
+      // The extension's content script on this page reads the list from storage.
+      window.postMessage({ type: "SENTIORA_BLOCKLIST_SYNC" }, window.location.origin);
     } catch (e) {
       console.error("Failed to save blocked domains:", e);
     }
@@ -40,10 +47,14 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
 
   function handleAddDomain() {
     if (!newDomain.trim()) return;
-    const cleanDomain = newDomain
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "");
+    // Store exactly what the extension enforces, so the list never shows a
+    // rule (a path, or a word that is not a site) that blocks nothing.
+    const cleanDomain = normalizeBlockedDomain(newDomain);
+    if (!cleanDomain) {
+      setDomainError("Enter a site like example.com.");
+      return;
+    }
+    setDomainError(null);
     if (!blockedDomains.includes(cleanDomain)) {
       setBlockedDomains((prev) => [...prev, cleanDomain]);
     }
@@ -54,37 +65,49 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
     setBlockedDomains((prev) => prev.filter((d) => d !== domain));
   }
 
-  function handleExportVault() {
+  async function handleExportVault() {
     setExporting(true);
     setExportSuccess(false);
+    setExportError(null);
 
-    setTimeout(() => {
+    // The loaded feed holds only the newest 100 memories; page through the API
+    // so the export really is everything.
+    const allItems: MemoryItem[] = [];
+    try {
+      for (let page = 1; ; page++) {
+        const batch = await fetchMemoryItems(page, 100);
+        allItems.push(...batch.items);
+        if (!batch.has_more || batch.items.length === 0) break;
+      }
+    } catch {
+      setExportError("Could not download your memory. Please try again.");
+      return;
+    } finally {
       setExporting(false);
-      setExportSuccess(true);
+    }
 
-      const exportPayload = {
-        app: "Sentiora Memory Vault",
-        export_date: new Date().toISOString(),
-        total_items: items.length,
-        items: items,
-      };
+    const exportPayload = {
+      app: "Sentiora Memory Vault",
+      export_date: new Date().toISOString(),
+      total_items: allItems.length,
+      items: allItems,
+    };
+    // A Blob URL, not a data: URL, so a large vault still downloads whole.
+    const blob = new Blob([JSON.stringify(exportPayload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.href = url;
+    const dateString = new Date().toISOString().slice(0, 10);
+    downloadAnchor.download = `sentiora-vault-export-${dateString}.json`;
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    URL.revokeObjectURL(url);
 
-      const dataStr =
-        "data:text/json;charset=utf-8," +
-        encodeURIComponent(JSON.stringify(exportPayload, null, 2));
-      const downloadAnchor = document.createElement("a");
-      downloadAnchor.setAttribute("href", dataStr);
-      const dateString = new Date().toISOString().slice(0, 10);
-      downloadAnchor.setAttribute(
-        "download",
-        `sentiora-vault-export-${dateString}.json`,
-      );
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-
-      setTimeout(() => setExportSuccess(false), 4000);
-    }, 600);
+    setExportSuccess(true);
+    setTimeout(() => setExportSuccess(false), 4000);
   }
 
   return (
@@ -105,9 +128,9 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
             Sensitive pages are always skipped
           </h2>
           <p className="mt-1 text-[16px] leading-relaxed text-muted">
-            The extension never saves banking, health, tax or browser pages, pages with
-            a visible password field, or pages marked noindex. The check runs in your
-            browser before anything is sent.
+            The extension skips banking, payment, health, insurance, tax and ID sites it
+            recognises, sign-in pages, pages with a visible password field, and pages
+            marked noindex. The check runs in your browser before anything is sent.
           </p>
         </div>
       </Card>
@@ -120,9 +143,8 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
           Your blocked sites
         </h2>
         <p className="mt-1 text-[15px] text-muted">
-          {/* TODO: the extension doesn't read this list yet; it is stored in this browser only. */}
-          Sites you add here are kept in this browser. The extension doesn&apos;t use
-          this list yet.
+          The extension in this browser skips these sites and their subdomains. Changes
+          apply as soon as you add or remove a site.
         </p>
 
         <form
@@ -138,14 +160,24 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
           <Input
             id="block-domain"
             value={newDomain}
-            onChange={(e) => setNewDomain(e.target.value)}
+            onChange={(e) => {
+              setNewDomain(e.target.value);
+              setDomainError(null);
+            }}
             placeholder="example.com"
             className="font-mono"
+            invalid={Boolean(domainError)}
+            aria-describedby={domainError ? "block-domain-error" : undefined}
           />
           <Button type="submit" variant="inverse" className="shrink-0">
             Add site
           </Button>
         </form>
+        {domainError ? (
+          <p id="block-domain-error" role="alert" className="mt-2 text-[15px] text-link">
+            {domainError}
+          </p>
+        ) : null}
 
         {blockedDomains.length === 0 ? (
           <p className="mt-5 rounded-btn border border-dashed border-line px-4 py-6 text-center text-[15px] text-muted">
@@ -187,11 +219,10 @@ export default function PrivacyCenterView({ items = [] }: PrivacyCenterViewProps
               Export your memory
             </h2>
             <p className="mt-1 text-[15px] text-muted">
-              Download everything you&apos;ve saved ({items.length}{" "}
-              {items.length === 1 ? "memory" : "memories"}) as a JSON file.
+              Download everything you&apos;ve saved as a JSON file.
             </p>
             <p role="status" className="mt-1 min-h-[22px] text-[15px] text-fg">
-              {exportSuccess ? "Your export has downloaded." : ""}
+              {exportError ?? (exportSuccess ? "Your export has downloaded." : "")}
             </p>
           </div>
           <Button

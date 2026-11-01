@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session as DBSession
 
@@ -106,6 +104,3 @@ class UserService:
         profile.onboarding_completed = True
         self.repo.commit_profile(profile)
         return self.get_source_preferences(user)
-
-    def get_user_by_id(self, user_id: UUID) -> User | None:
-        return self.repo.get_by_id(user_id)

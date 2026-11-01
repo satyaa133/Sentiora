@@ -50,9 +50,16 @@ class Settings(BaseSettings):
     gemini_chat_model: str = "gemini-2.5-flash"
     openrouter_api_key: str | None = None
     openrouter_chat_model: str = "anthropic/claude-haiku-4.5"
+    # Optional second OpenRouter key. Ask rotates across every configured chat
+    # key and skips one that is out of credits or rate-limited (llm_pool.py).
+    openrouter_api_key_2: str | None = None
+    # How long a failing chat key is skipped before it is tried again.
+    llm_key_cooldown_seconds: int = 300
     # RAG retrieval tuning
     rag_top_k: int = 15
     rag_max_distance: float = 0.65
+    # A semantic-only hit is kept next to keyword hits only below this distance.
+    rag_strong_distance: float = 0.4
     # Maximum total characters of retrieved chunk content sent to the LLM.
     # Keeps prompt size predictable and within token budget.
     rag_max_context_chars: int = 12000
@@ -64,6 +71,8 @@ class Settings(BaseSettings):
     rate_limit_register_per_minute: int = 5
     rate_limit_chat_per_minute: int = 20
     rate_limit_chat_per_user_per_minute: int = 10
+    rate_limit_refresh_per_minute: int = 30
+    rate_limit_search_per_user_per_minute: int = 30
     failed_login_max_attempts: int = 5
     failed_login_base_backoff_seconds: int = 2
     failed_login_max_backoff_seconds: int = 60

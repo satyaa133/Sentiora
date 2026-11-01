@@ -3,34 +3,33 @@
 Error hierarchy:
   LLMNotConfiguredError  → HTTP 503  AI_NOT_CONFIGURED
     (only when no retrieved memory can be used for a local fallback)
+  LLMProviderError       → HTTP 503  AI_PROVIDER_UNAVAILABLE (credits, key, quota, overload)
+                         → HTTP 502  ASK_LLM_FAILED (anything else)
+    (raised only when no matching memory could answer locally)
   Any other exception    → HTTP 502  ASK_SYSTEM_FAILED
 """
 
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session as DBSession
 
 from app.api.deps import get_current_user, get_db
+from app.core.config import get_settings
 from app.models.memory_item import SourceType
 from app.models.user import User
 from app.schemas.ask import AskRequest, AskResponse, SearchHit
-from app.schemas.envelope import APIResponse, ResponseMeta
-from app.core.rate_limit import limit_chat
+from app.schemas.envelope import APIResponse, response_meta
+from app.core.rate_limit import limit_chat, limit_search
 from app.services.rag_service import LLMNotConfiguredError, LLMProviderError, RagService
 from app.services.retrieval_service import RetrievalService
 
 router = APIRouter(tags=["Ask Sentiora"])
 logger = logging.getLogger(__name__)
 
-
-def _meta(request: Request) -> ResponseMeta:
-    request_id = getattr(request.state, "request_id", f"req_{uuid.uuid4().hex[:8]}")
-    return ResponseMeta(request_id=request_id)
 
 
 @router.post(
@@ -54,6 +53,8 @@ def ask_memories(
             source_type=req.source_type,
             top_k=req.top_k,
             memory_id=req.memory_id,
+            history=req.history,
+            tz=req.tz,
         )
     except LLMNotConfiguredError:
         raise HTTPException(
@@ -68,14 +69,28 @@ def ask_memories(
             },
         ) from None
     except LLMProviderError as exc:
+        # Provider error text can include upstream details; it stays in the log.
         logger.exception("Ask LLM provider failed")
+        if exc.provider_unavailable:
+            # Out of credits, bad key, quota or overload: retrying won't help soon.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "AI_PROVIDER_UNAVAILABLE",
+                    "message": (
+                        "The AI provider is unavailable right now (for example it is "
+                        "out of credits or rate-limited). Questions about your saved "
+                        "memories still work; general questions need the provider."
+                    ),
+                },
+            ) from None
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
                 "code": "ASK_LLM_FAILED",
                 "message": (
                     "Sentiora could not generate an AI answer because the language "
-                    f"model failed ({exc}). Your memories were retrieved; try again "
+                    "model failed. Your memories were retrieved; try again "
                     "in a moment."
                 ),
             },
@@ -93,7 +108,7 @@ def ask_memories(
                 ),
             },
         ) from None
-    return APIResponse(data=data, meta=_meta(request))
+    return APIResponse(data=data, meta=response_meta(request))
 
 
 @router.get(
@@ -110,6 +125,7 @@ def search_memories(
     source_type: SourceType | None = Query(default=None),
     top_k: int = Query(default=8, ge=1, le=20),
 ) -> APIResponse[list[SearchHit]]:
+    limit_search(request, str(current_user.id))
     retrieval = RetrievalService(db)
     chunks = retrieval.retrieve_relevant_memories(
         user_id=current_user.id,
@@ -117,6 +133,14 @@ def search_memories(
         top_k=top_k,
         source_type=source_type,
     )
+    # Ask lets the model ignore loose vector neighbours; a results list cannot,
+    # so keep keyword matches and only strong meaning-only matches.
+    strong = get_settings().rag_strong_distance
+    chunks = [
+        chunk
+        for chunk in chunks
+        if chunk.distance is None or chunk.rank > 0 or chunk.distance <= strong
+    ]
     hits = [
         SearchHit(
             memory_id=chunk.memory_id,
@@ -132,4 +156,4 @@ def search_memories(
         )
         for chunk in chunks
     ]
-    return APIResponse(data=hits, meta=_meta(request))
+    return APIResponse(data=hits, meta=response_meta(request))

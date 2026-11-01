@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { safeHref } from "./safeHref";
+import { safeHref, sourceHref } from "./safeHref";
+
+describe("sourceHref", () => {
+  it("links real pages", () => {
+    expect(sourceHref("https://developer.mozilla.org/x")).toBe("https://developer.mozilla.org/x");
+    expect(sourceHref("https://sentiora.app/pricing")).toBe("https://sentiora.app/pricing");
+  });
+
+  it("gives no link for notes, uploads, the welcome memory and files", () => {
+    for (const url of [
+      "https://sentiora.app/notes/1793169915225",
+      "https://sentiora.app/manual/uploads/cn-notes.txt",
+      "https://sentiora.app/welcome",
+      "file://uploads/a.pdf",
+    ]) {
+      expect(sourceHref(url)).toBeUndefined();
+    }
+  });
+});
 
 describe("safeHref", () => {
   it("allows http and https", () => {

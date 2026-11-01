@@ -1,6 +1,6 @@
-import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
+import { getUrlBlockReason, isPdfUrl } from "../shared/blocklist";
 
-export type SensitivityReason = "blocked_url" | "noindex" | "password_field";
+export type SensitivityReason = "blocked_url" | "user_blocked" | "noindex" | "password_field";
 
 function isVisiblePasswordField(): boolean {
   const passwordInputs = document.querySelectorAll<HTMLInputElement>('input[type="password"]');
@@ -13,12 +13,21 @@ function isVisiblePasswordField(): boolean {
   return false;
 }
 
-export function getPageSensitivityReason(): SensitivityReason | null {
+/**
+ * Runs in the page before any extraction or message, so a sensitive page never
+ * leaves the browser. `userDomains` are the sites blocked in the Privacy Center.
+ */
+export function getPageSensitivityReason(
+  userDomains: readonly string[] = [],
+): SensitivityReason | null {
   const url = window.location.href;
-  const allowLocalPdf = isPdfUrl(url);
+  const blockReason = getUrlBlockReason(url, { allowLocalPdf: isPdfUrl(url), userDomains });
 
-  if (isUrlBlocked(url, { allowLocalPdf })) {
+  if (blockReason === "built_in") {
     return "blocked_url";
+  }
+  if (blockReason === "user") {
+    return "user_blocked";
   }
 
   const noindexMeta = document.querySelector('meta[name="robots"][content*="noindex"]');
@@ -34,6 +43,6 @@ export function getPageSensitivityReason(): SensitivityReason | null {
   return null;
 }
 
-export function isCurrentPageSensitive(_manualCapture = false): boolean {
-  return getPageSensitivityReason() !== null;
+export function isCurrentPageSensitive(userDomains: readonly string[] = []): boolean {
+  return getPageSensitivityReason(userDomains) !== null;
 }

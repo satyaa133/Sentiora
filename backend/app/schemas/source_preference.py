@@ -27,11 +27,6 @@ def default_source_preferences() -> dict[str, str]:
     return {source.value: SourceStatus.NOT_CONNECTED.value for source in SourceId}
 
 
-class SourcePreferenceItem(BaseModel):
-    source_id: SourceId
-    status: SourceStatus
-
-
 class SourcePreferencesData(BaseModel):
     sources: dict[str, SourceStatus]
     onboarding_completed: bool = False

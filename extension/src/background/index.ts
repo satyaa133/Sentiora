@@ -1,9 +1,23 @@
-import { extApiFetch } from "../services/extApiClient";
-import { setAccessToken, setRefreshToken, setCachedUser, clearAllAuthData } from "../services/storage";
-import { isPdfUrl, isUrlBlocked } from "../shared/blocklist";
+import { attemptTokenRefresh, extApiFetch } from "../services/extApiClient";
+import {
+  setAccessToken,
+  setRefreshToken,
+  setCachedUser,
+  clearAllAuthData,
+  getAccessToken,
+  getRefreshToken,
+  getUserBlockedDomains,
+  setUserBlockedDomains,
+} from "../services/storage";
+import { isPdfUrl, isUrlBlocked, sanitizeUserBlockedDomains } from "../shared/blocklist";
 import { isTrustedAppUrl } from "../shared/appUrl";
 import { postCapturePayload, sanitizeCapturePayload } from "../shared/captureUtils";
-import type { ExtensionMessage, CapturePayload, YoutubePlayerResponse } from "../shared/types";
+import type {
+  ExtensionMessage,
+  CapturePayload,
+  PageCaptureStatus,
+  YoutubePlayerResponse,
+} from "../shared/types";
 
 chrome.runtime.onInstalled.addListener(() => {
   console.info("Sentiora extension background initialized.");
@@ -23,6 +37,27 @@ async function isUrlCapturedRecently(url: string): Promise<boolean> {
     // If storage session fails, proceed
   }
   return false;
+}
+
+/**
+ * Signed in means a usable access token, refreshing an expired one if a refresh
+ * token exists. Without one, captures stop here: no page content is sent.
+ */
+async function hasUsableSession(): Promise<boolean> {
+  if (await getAccessToken()) return true;
+  if (!(await getRefreshToken())) return false;
+  return Boolean(await attemptTokenRefresh());
+}
+
+async function getPageStatus(url: string): Promise<PageCaptureStatus> {
+  if (inFlightCaptures.has(url)) return "saving";
+  try {
+    const key = `captured_${url}`;
+    const result = await chrome.storage.session.get(key);
+    return result[key] ? "saved" : "not_saved";
+  } catch {
+    return "not_saved";
+  }
 }
 
 async function markUrlCaptured(url: string): Promise<void> {
@@ -83,8 +118,24 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     return true;
   }
 
+  if (message.type === "GET_SESSION_STATE") {
+    hasUsableSession()
+      .then((signedIn) => sendResponse({ signedIn }))
+      .catch(() => sendResponse({ signedIn: false }));
+    return true;
+  }
+
+  if (message.type === "GET_PAGE_STATUS") {
+    getPageStatus(message.url)
+      .then((status) => sendResponse({ status }))
+      .catch(() => sendResponse({ status: "not_saved" }));
+    return true;
+  }
+
   if (
-    (message.type === "SYNC_AUTH_TOKENS" || message.type === "CLEAR_AUTH_TOKENS") &&
+    (message.type === "SYNC_AUTH_TOKENS" ||
+      message.type === "CLEAR_AUTH_TOKENS" ||
+      message.type === "SYNC_BLOCKLIST") &&
     !isTrustedAuthSender(sender)
   ) {
     sendResponse({ success: false, error: "Untrusted sender" });
@@ -106,6 +157,13 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
         console.error("[Sentiora Background] Token sync error:", err);
         sendResponse({ success: false, error: String(err) });
       });
+    return true;
+  }
+
+  if (message.type === "SYNC_BLOCKLIST") {
+    setUserBlockedDomains(sanitizeUserBlockedDomains(message.domains))
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }));
     return true;
   }
 
@@ -144,12 +202,17 @@ type CaptureMessageResult = {
 export async function handleCaptureMessage(payload: CapturePayload): Promise<CaptureMessageResult> {
   const sanitized = sanitizeCapturePayload(payload);
   const allowLocalPdf = sanitized.source_type === "pdf" && isPdfUrl(sanitized.url);
-  if (isUrlBlocked(sanitized.url, { allowLocalPdf })) {
+  const userDomains = await getUserBlockedDomains();
+  if (isUrlBlocked(sanitized.url, { allowLocalPdf, userDomains })) {
     return { success: false, error: "This page is protected and cannot be captured." };
   }
 
-  // Claim the URL before any await so concurrent messages for the same page
-  // (e.g. YouTube SPA events firing twice) cannot both reach the API.
+  if (!(await hasUsableSession())) {
+    return { success: false, error: "Sign in to Sentiora to save pages." };
+  }
+
+  // Check and claim the URL with no await in between, so concurrent messages for
+  // the same page (e.g. YouTube SPA events firing twice) cannot both reach the API.
   if (inFlightCaptures.has(sanitized.url)) {
     console.info("[Sentiora Background] Skipping capture, URL currently in-flight:", sanitized.url);
     return { success: true, deduplicated: true };
