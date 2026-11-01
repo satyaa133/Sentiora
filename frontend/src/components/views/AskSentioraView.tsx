@@ -1,14 +1,30 @@
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
+import {
+  Button,
+  Echo,
+  IconArrowUp,
+  IconCheck,
+  IconCopy,
+  IconExternalLink,
+  cx,
+  sourceKind,
+} from "@shared/ui";
 import type { MemoryItem } from "../../types/memory";
-import { askSentiora, AskApiError, type AskCitation, type AskRequest } from "../../services/askService";
+import {
+  askSentiora,
+  AskApiError,
+  type AskCitation,
+  type AskRequest,
+} from "../../services/askService";
 import { safeHref } from "../../utils/safeHref";
-
 
 interface AskSentioraViewProps {
   items?: MemoryItem[];
   initialQuery?: string;
   focusMemoryId?: string;
   onClearInitialQuery?: () => void;
+  /** Opens the memory drawer; returns false when the memory isn't loaded. */
+  onOpenMemory?: (memoryId: string) => boolean;
 }
 
 interface Message {
@@ -26,52 +42,42 @@ export default function AskSentioraView({
   initialQuery,
   focusMemoryId,
   onClearInitialQuery,
+  onOpenMemory,
 }: AskSentioraViewProps) {
   const [input, setInput] = useState("");
   const [hasProcessedInitial, setHasProcessedInitial] = useState(false);
 
   const readyItems = items.filter(
-    (item) => item.status === "ready" && (item.word_count > 0 || Boolean(item.content?.trim())),
+    (item) =>
+      item.status === "ready" && (item.word_count > 0 || Boolean(item.content?.trim())),
   );
-  const isIndexing = items.some((item) => item.status === "pending" || item.status === "processing");
+  const isIndexing = items.some(
+    (item) => item.status === "pending" || item.status === "processing",
+  );
 
-  const initialWelcomeText = readyItems.length > 0
-    ? `Hello! I am **Sentiora AI**. I can synthesize answers strictly based on your **${readyItems.length} saved memory source${readyItems.length > 1 ? "s" : ""}**:\n\n${readyItems.slice(0, 3).map((i) => `• **"${i.title}"**`).join("\n")}\n\nAsk me anything about your saved archive!`
-    : isIndexing
-      ? "Hello! I am **Sentiora AI**. Your latest captures are still being indexed. Ask again once they show as Ready."
-      : "Hello! I am **Sentiora AI**. You currently have no saved memories in your vault. Connect browser sources or save pages to enable AI Q&A.";
+  const introText =
+    readyItems.length > 0
+      ? `Answers come only from your ${readyItems.length} saved ${readyItems.length === 1 ? "memory" : "memories"}, with the sources linked.`
+      : isIndexing
+        ? "Your latest saves are still being indexed. Ask again once they're ready."
+        : "You haven't saved anything yet. Save a page with the extension, then ask about it here.";
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "1",
-      sender: "ai",
-      text: initialWelcomeText,
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const firstTitle = readyItems[0]?.title || "";
   const secondTitle = readyItems[1]?.title || "";
 
-  // Dynamic suggested prompt chips from real items
-  const suggestedPrompts = readyItems.length > 0 && firstTitle
-    ? [
-        `What is "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}" about?`,
-        `Summarize "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}"`,
-        secondTitle
-          ? `Key details from "${secondTitle.length > 22 ? secondTitle.slice(0, 22) + "..." : secondTitle}"`
-          : `What design & topic details are saved?`,
-      ]
-    : [
-        "What web sources can I capture?",
-        "How does Sentiora memory vault work?",
-        "How to save YouTube transcripts?",
-      ];
+  const clip = (title: string) =>
+    title.length > 40 ? `${title.slice(0, 39).trimEnd()}…` : title;
 
-  const dynamicPlaceholder = readyItems.length > 0 && firstTitle
-    ? `Ask about "${firstTitle.length > 22 ? firstTitle.slice(0, 22) + "..." : firstTitle}" or your ${readyItems.length} saved source${readyItems.length > 1 ? "s" : ""}...`
-    : "Ask a question about your saved articles, notes, or YouTube transcripts...";
+  // Suggested questions built from real saved titles; none when nothing is saved.
+  const suggestedPrompts = [
+    firstTitle ? `What is “${clip(firstTitle)}” about?` : null,
+    firstTitle ? `Summarize “${clip(firstTitle)}”` : null,
+    secondTitle ? `Key points from “${clip(secondTitle)}”` : null,
+  ].filter((prompt): prompt is string => Boolean(prompt));
 
   async function handleSendQuery(queryText: string) {
     if (!queryText.trim()) return;
@@ -196,59 +202,111 @@ export default function AskSentioraView({
     setTimeout(() => setCopiedId(null), 2000);
   }
 
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (!isGenerating) handleSendQuery(input);
+    }
+  }
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView?.({ block: "end" });
+  }, [messages, isGenerating]);
+
+  const firstQuestion = messages.find((msg) => msg.sender === "user")?.text;
+  const conversationTitle = firstQuestion
+    ? firstQuestion.length > 60
+      ? `${firstQuestion.slice(0, 59).trimEnd()}…`
+      : firstQuestion
+    : "Ask Sentiora";
+  const latestCitations =
+    [...messages].reverse().find((msg) => msg.sender === "ai" && msg.citations?.length)
+      ?.citations ?? [];
+
+  function citationMeta(citation: AskCitation) {
+    const kind = sourceKind(citation.source_type);
+    const label = kind === "video" ? "Video" : kind === "pdf" ? "PDF" : "Web";
+    return [
+      label,
+      citation.domain,
+      citation.page_number ? `p. ${citation.page_number}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function originalHref(citation: AskCitation): string | undefined {
+    if (citation.source_available === false || citation.url.startsWith("file:"))
+      return undefined;
+    return safeHref(citation.url);
+  }
+
   function renderFormattedMessage(text: string) {
     const lines = text.split("\n");
     return (
-      <div className="space-y-1.5 leading-relaxed text-xs">
+      <div className="space-y-2 text-[17px] leading-relaxed text-fg">
         {lines.map((line, idx) => {
-          if (!line.trim()) return <div key={idx} className="h-1" />;
+          if (!line.trim()) return null;
 
-          if (line.startsWith("## ")) {
+          if (line.startsWith("## ") || line.startsWith("### ")) {
             return (
-              <h3 key={idx} className="font-serif font-bold text-sm text-ink-900 mt-2 mb-1">
-                {formatInlineText(line.replace(/^##\s+/, ""))}
+              <h3 key={idx} className="pt-2 text-[17px] font-semibold text-fg">
+                {formatInlineText(line.replace(/^#{2,3}\s+/, ""))}
               </h3>
             );
           }
 
-          if (line.startsWith("### ")) {
+          if (
+            /^\d+\.\s+/.test(line) ||
+            line.startsWith("• ") ||
+            line.startsWith("- ")
+          ) {
             return (
-              <h4 key={idx} className="font-serif font-bold text-xs sm:text-sm text-ink-900 mt-2 mb-1">
-                {formatInlineText(line.replace("### ", ""))}
-              </h4>
-            );
-          }
-
-          if (/^\d+\.\s+/.test(line) || line.startsWith("• ") || line.startsWith("- ")) {
-            return (
-              <li key={idx} className="ml-4 list-disc text-ink-800">
-                {formatInlineText(line.replace(/^\d+\.\s+/, "").replace(/^[•-]\s*/, ""))}
+              <li key={idx} className="ml-5 list-disc">
+                {formatInlineText(
+                  line.replace(/^\d+\.\s+/, "").replace(/^[•-]\s*/, ""),
+                )}
               </li>
             );
           }
 
-          return (
-            <p key={idx} className="text-ink-800">
-              {formatInlineText(line)}
-            </p>
-          );
+          return <p key={idx}>{formatInlineText(line)}</p>;
         })}
       </div>
     );
   }
 
   function formatInlineText(text: string) {
-    const parts = text.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*)/g);
+    const parts = text.split(/(\*\*.*?\*\*|`.*?`|\*.*?\*|\[\d+\])/g);
     return parts.map((part, i) => {
       if (part.startsWith("**") && part.endsWith("**")) {
-        return <strong key={i} className="font-bold text-ink-900">{part.slice(2, -2)}</strong>;
+        return (
+          <strong key={i} className="font-semibold">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      if (/^\[\d+\]$/.test(part)) {
+        return (
+          <span
+            key={i}
+            className="mx-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded bg-accent-soft px-1 align-[2px] font-mono text-xs font-semibold text-accent-soft-fg"
+          >
+            <span className="sr-only">source </span>
+            {part.slice(1, -1)}
+          </span>
+        );
       }
       if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
-        return <em key={i} className="italic text-ink-600">{part.slice(1, -1)}</em>;
+        return <em key={i}>{part.slice(1, -1)}</em>;
       }
       if (part.startsWith("`") && part.endsWith("`")) {
         return (
-          <code key={i} className="px-1.5 py-0.5 rounded bg-parchment-100 font-mono text-[11px] text-moss-700 font-semibold border border-parchment-200/60">
+          <code
+            key={i}
+            className="rounded bg-raised px-1.5 py-0.5 font-mono text-[15px]"
+          >
             {part.slice(1, -1)}
           </code>
         );
@@ -257,145 +315,238 @@ export default function AskSentioraView({
     });
   }
 
-  return (
-    <div className="flex flex-col h-[calc(100vh-140px)] max-w-4xl bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl shadow-xl overflow-hidden font-sans">
-      {/* Header */}
-      <div className="p-4 border-b border-parchment-200/80 bg-parchment-50/90 backdrop-blur-md flex items-center justify-between">
-        <div>
-          <h2 className="font-serif font-bold text-base text-ink-900">Ask Sentiora RAG Assistant</h2>
-          <p className="text-[11px] text-ink-500">
-            {readyItems.length > 0
-              ? `Synthesizing answers strictly from your ${readyItems.length} indexed memory source${readyItems.length !== 1 ? "s" : ""}.`
-              : isIndexing
-                ? "Waiting for captures to finish indexing before answers can be grounded."
-                : "No indexed memories yet. Capture a page to enable grounded answers."}
-            {isIndexing && readyItems.length > 0 ? " Newer captures are still processing." : ""}
-          </p>
+  function renderSourceCard(citation: AskCitation, index: number) {
+    const href = originalHref(citation);
+    return (
+      <li
+        key={`${citation.chunk_id}-${index}`}
+        className="rounded-card border border-line bg-surface p-4"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-accent px-1.5 font-mono text-xs font-semibold text-on-accent">
+            {index + 1}
+          </span>
+          <span className="truncate font-mono text-xs text-muted">
+            {citationMeta(citation)}
+          </span>
         </div>
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-moss-100/90 backdrop-blur-xs text-moss-700 text-[10px] font-bold shadow-xs">
-          <span className="w-1.5 h-1.5 rounded-full bg-moss-600 animate-pulse" />
-          {readyItems.length > 0
-            ? `RAG Engine Active (${readyItems.length} Sources)`
-            : isIndexing
-              ? "Indexing memories"
-              : "No indexed sources"}
-        </span>
-      </div>
-
-      {/* Suggested Prompt Chips */}
-      <div className="px-4 py-2.5 bg-parchment-50/70 backdrop-blur-xs border-b border-parchment-200/80 flex items-center gap-2 overflow-x-auto text-xs">
-        <span className="text-ink-500 font-semibold shrink-0">Try asking:</span>
-        {suggestedPrompts.map((prompt, idx) => (
-          <button
-            key={idx}
-            onClick={() => handleSendQuery(prompt)}
-            className="px-3 py-1 rounded-lg bg-white/80 hover:bg-white backdrop-blur-xs border border-parchment-200/80 hover:border-moss-600 hover:text-moss-600 text-ink-700 text-[11px] font-medium transition-all hover:scale-105 whitespace-nowrap shrink-0 shadow-xs"
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
-
-      {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-parchment-0/50 backdrop-blur-xs">
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={`flex flex-col ${msg.sender === "user" ? "items-end" : "items-start"}`}
-          >
-            <div
-              className={`p-4 rounded-2xl text-xs leading-relaxed space-y-2 relative group transition-all ${
-                msg.sender === "user"
-                  ? "max-w-xl bg-moss-600/95 text-white rounded-br-none shadow-md"
-                  : msg.isError
-                  ? "max-w-2xl bg-rose-50/90 border border-rose-200/90 text-rose-950 rounded-bl-none shadow-card"
-                  : msg.isNotFound
-                  ? "max-w-2xl bg-amber-50/90 border border-amber-200/90 text-amber-950 rounded-bl-none shadow-card"
-                  : "max-w-2xl bg-white/90 backdrop-blur-md border border-parchment-200/80 text-ink-900 rounded-bl-none shadow-card hover:shadow-md"
-              }`}
+        <p className="mt-2 font-semibold leading-snug text-fg">{citation.title}</p>
+        {citation.heading ? (
+          <p className="mt-2 rounded-btn bg-raised px-3 py-2 text-[15px] text-muted">
+            {citation.heading}
+          </p>
+        ) : null}
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+          {onOpenMemory ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (!onOpenMemory(citation.memory_id) && href)
+                  window.open(href, "_blank", "noopener");
+              }}
+              className="inline-flex min-h-touch items-center text-[15px] font-semibold text-link hover:underline"
             >
-              {msg.sender === "ai" && (
-                <div className="flex items-center justify-between border-b border-parchment-200/60 pb-2 mb-2 text-[11px]">
-                  <span className="flex items-center gap-1 font-serif font-bold text-moss-700">
-                    <span>✨</span> Sentiora AI Assistant
-                  </span>
-                  <button
-                    onClick={() => handleCopy(msg.id, msg.text)}
-                    className="text-[10px] text-ink-500 hover:text-moss-600 font-semibold px-2 py-0.5 rounded bg-parchment-100/60 hover:bg-parchment-100 transition-colors"
-                  >
-                    {copiedId === msg.id ? "✓ Copied" : "📋 Copy"}
-                  </button>
-                </div>
-              )}
+              Open memory
+            </button>
+          ) : null}
+          {href ? (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex min-h-touch items-center gap-1 text-[15px] text-muted hover:text-fg hover:underline"
+            >
+              Original
+              <IconExternalLink size={14} />
+              <span className="sr-only">(opens in a new tab)</span>
+            </a>
+          ) : (
+            <span className="inline-flex min-h-touch items-center text-[15px] text-muted">
+              Original unavailable
+            </span>
+          )}
+        </div>
+      </li>
+    );
+  }
 
-              {msg.sender === "user" ? (
-                <p className="whitespace-pre-wrap">{msg.text}</p>
-              ) : (
-                <>
-                  {msg.usedFallback && (
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-ink-500">
-                      Answered from your saved memory (AI provider unavailable)
-                    </p>
-                  )}
-                  {renderFormattedMessage(msg.text)}
-                </>
-              )}
+  return (
+    <div className="flex min-h-0 flex-1">
+      <section aria-labelledby="ask-title" className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-16 shrink-0 items-center border-b border-line bg-surface px-4 sm:px-6">
+          <h1 id="ask-title" className="truncate text-[18px] font-semibold text-fg">
+            {conversationTitle}
+          </h1>
+        </header>
 
-              {/* Citations */}
-              {msg.citations && msg.citations.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-parchment-200/80 space-y-1.5">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-ink-500">
-                    Source Citations:
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[780px] space-y-8 px-4 py-8 sm:px-6">
+            {messages.length === 0 ? (
+              <div className="flex flex-col items-center pt-6 text-center sm:pt-12">
+                <Echo state={readyItems.length > 0 ? "idle" : "faded"} size={88} />
+                <h2 className="mt-5 font-display text-[28px] font-bold tracking-tight text-fg">
+                  Ask anything you&apos;ve saved
+                </h2>
+                <p className="mt-2 max-w-md text-[17px] text-muted">{introText}</p>
+                {suggestedPrompts.length > 0 ? (
+                  <ul className="mt-6 flex w-full max-w-lg flex-col gap-2">
+                    {suggestedPrompts.map((prompt) => (
+                      <li key={prompt}>
+                        <button
+                          type="button"
+                          onClick={() => handleSendQuery(prompt)}
+                          className="w-full rounded-card border border-line bg-surface px-4 py-3 text-left text-[16px] text-fg transition-colors hover:bg-raised"
+                        >
+                          {prompt}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+
+            {messages.map((msg) =>
+              msg.sender === "user" ? (
+                <div key={msg.id} className="flex justify-end">
+                  <p className="max-w-[85%] whitespace-pre-wrap rounded-card border border-inverse-border bg-inverse px-4 py-3 text-[16px] text-on-inverse">
+                    {msg.text}
                   </p>
-                  {msg.citations.map((c, i) => (
-                    <a
-                      key={i}
-                      href={c.source_available === false ? undefined : safeHref(c.url)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-between p-2 rounded-lg bg-parchment-50/90 backdrop-blur-xs border border-parchment-200/80 text-[11px] text-moss-600 hover:underline font-medium transition-colors"
-                    >
-                      <span className="truncate">
-                        [{i + 1}] {c.title}
-                        {c.page_number ? ` · p.${c.page_number}` : ""}
-                        {c.source_available === false || c.url.startsWith("file:") ? " · original unavailable" : ""}
-                      </span>
-                      <svg className="w-3 h-3 text-moss-600 shrink-0 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                      </svg>
-                    </a>
-                  ))}
                 </div>
-              )}
-            </div>
-          </div>
-        ))}
+              ) : (
+                <article
+                  key={msg.id}
+                  aria-label="Sentiora's answer"
+                  className="flex gap-3"
+                >
+                  <Echo
+                    state={msg.isError || msg.isNotFound ? "faded" : "happy"}
+                    size={36}
+                    still
+                    className="mt-0.5 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1 space-y-3">
+                    {msg.usedFallback ? (
+                      <p className="font-mono text-eyebrow uppercase text-muted">
+                        From your saved memories, without the AI model
+                      </p>
+                    ) : null}
+                    {msg.isError ? (
+                      <p
+                        role="alert"
+                        className="rounded-btn bg-accent-soft px-4 py-3 text-[16px] text-accent-soft-fg"
+                      >
+                        {msg.text}
+                      </p>
+                    ) : msg.isNotFound ? (
+                      <div className="text-muted [&_*]:text-muted">
+                        {renderFormattedMessage(msg.text)}
+                      </div>
+                    ) : (
+                      renderFormattedMessage(msg.text)
+                    )}
 
-        {isGenerating && (
-          <div className="flex items-center gap-2 text-xs text-ink-500 p-3 bg-white/90 backdrop-blur-md border border-parchment-200/80 rounded-2xl w-fit shadow-card">
-            <span className="w-2 h-2 rounded-full bg-moss-600 animate-ping" />
-            Synthesizing answer from your personal memory archive...
-          </div>
-        )}
-      </div>
+                    {msg.citations && msg.citations.length > 0 ? (
+                      <ol aria-label="Sources" className="space-y-3 xl:hidden">
+                        {msg.citations.map((citation, index) =>
+                          renderSourceCard(citation, index),
+                        )}
+                      </ol>
+                    ) : null}
 
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="p-4 border-t border-parchment-200/80 bg-white/90 backdrop-blur-md flex gap-3">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={dynamicPlaceholder}
-          className="flex-1 bg-parchment-50/80 backdrop-blur-xs border border-parchment-200/80 rounded-xl px-4 py-2.5 text-xs text-ink-900 placeholder-ink-500 focus:outline-none focus:border-moss-600 focus:bg-white font-medium transition-colors"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || isGenerating}
-          className="px-5 py-2.5 bg-moss-600 hover:bg-moss-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold transition-colors shadow-sm"
+                    {!msg.isError ? (
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          leadingIcon={
+                            copiedId === msg.id ? (
+                              <IconCheck size={16} />
+                            ) : (
+                              <IconCopy size={16} />
+                            )
+                          }
+                          onClick={() => handleCopy(msg.id, msg.text)}
+                        >
+                          {copiedId === msg.id ? "Copied" : "Copy answer"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                </article>
+              ),
+            )}
+
+            {isGenerating && (
+              <div
+                role="status"
+                className="flex items-center gap-3 text-[16px] text-muted"
+              >
+                <Echo state="saving" size={36} still />
+                Looking through your memories…
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        <form
+          onSubmit={handleSubmit}
+          className="mx-auto w-full max-w-[780px] shrink-0 px-4 pb-4 pt-2 sm:px-6"
         >
-          Send Query
-        </button>
-      </form>
+          <div className="flex items-end gap-2 rounded-panel border border-line bg-surface p-2 pl-4 shadow-pop focus-within:border-accent">
+            <label htmlFor="ask-input" className="sr-only">
+              Your question
+            </label>
+            <textarea
+              id="ask-input"
+              rows={1}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              placeholder={
+                messages.length > 0
+                  ? "Ask a follow-up..."
+                  : "Ask anything you've saved..."
+              }
+              className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent py-2.5 text-[17px] text-fg placeholder:text-muted focus:outline-none"
+            />
+            <button
+              type="submit"
+              aria-label="Send question"
+              disabled={!input.trim() || isGenerating}
+              className={cx(
+                "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-btn bg-accent text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50",
+              )}
+            >
+              <IconArrowUp size={20} />
+            </button>
+          </div>
+          <p className="mt-2 text-center text-sm text-muted">
+            Answers only use your saved memories.
+          </p>
+        </form>
+      </section>
+
+      <aside
+        aria-labelledby="sources-used"
+        className="hidden w-[340px] shrink-0 overflow-y-auto border-l border-line bg-surface p-5 xl:block"
+      >
+        <h2 id="sources-used" className="text-[18px] font-semibold text-fg">
+          Sources used
+        </h2>
+        {latestCitations.length > 0 ? (
+          <ol className="mt-4 space-y-3 [&>li]:bg-bg">
+            {latestCitations.map((citation, index) =>
+              renderSourceCard(citation, index),
+            )}
+          </ol>
+        ) : (
+          <p className="mt-2 text-[15px] text-muted">
+            Sources for the latest answer show up here.
+          </p>
+        )}
+      </aside>
     </div>
   );
 }

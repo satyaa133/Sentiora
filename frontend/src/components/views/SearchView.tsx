@@ -1,6 +1,9 @@
 import { useState, useMemo } from "react";
-import MemoryCard from "../MemoryCard";
+import { Chip, IconSearch, Input, MemoryList, MemoryRow } from "@shared/ui";
+import EmptyState from "../EmptyState";
 import type { MemoryItem } from "../../types/memory";
+import { formatExtractedContent } from "../../utils/contentFormatter";
+import { dayLabel } from "../../utils/dates";
 
 interface SearchViewProps {
   items: MemoryItem[];
@@ -18,92 +21,91 @@ export default function SearchView({ items, onSelectItem }: SearchViewProps) {
         item.title.toLowerCase().includes(q) ||
         item.url.toLowerCase().includes(q) ||
         (item.content?.toLowerCase().includes(q) ?? false) ||
-        (item.author?.toLowerCase().includes(q) ?? false)
+        (item.author?.toLowerCase().includes(q) ?? false),
     );
   }, [items, query]);
 
-  return (
-    <div className="space-y-6 max-w-4xl font-sans">
-      {/* Big Search Input */}
-      <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-6 shadow-card space-y-4">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-ink-500">
-          ARCHIVE SEARCH & DISCOVERY
-        </h2>
-        <div className="relative">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Type any keyword, phrase, or domain name..."
-            className="w-full bg-parchment-50/80 backdrop-blur-xs border border-parchment-200/80 rounded-xl pl-11 pr-4 py-3.5 text-sm text-ink-900 placeholder-ink-500 focus:outline-none focus:border-moss-600 focus:bg-white font-medium transition-colors"
-            autoFocus
-          />
-          <svg
-            className="w-5 h-5 text-ink-500 absolute left-4 top-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </div>
+  // Quick suggestions: the domains you've saved from.
+  const suggestions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          items.flatMap((item) => {
+            try {
+              return [new URL(item.url).hostname.replace(/^www\./, "")];
+            } catch {
+              return [];
+            }
+          }),
+        ),
+      ).slice(0, 5),
+    [items],
+  );
 
-        {/* Suggested tags */}
-        <div className="flex items-center gap-2 text-xs flex-wrap">
-          <span className="text-ink-500 font-medium">Quick suggestions:</span>
-          {(items.length > 0
-            ? Array.from(
-                new Set(
-                  items.flatMap((item) => {
-                    try {
-                      return [new URL(item.url).hostname.replace(/^www\./, "")];
-                    } catch {
-                      return [item.source_type];
-                    }
-                  })
-                )
-              ).slice(0, 5)
-            : ["Webpages", "PDFs", "YouTube", "Notes"]
-          ).map((tag) => (
-            <button
-              key={tag}
-              onClick={() => setQuery(tag)}
-              className="px-2.5 py-1 rounded-lg bg-parchment-100/80 hover:bg-moss-100 backdrop-blur-xs text-ink-700 hover:text-moss-600 transition-all font-medium text-[11px] hover:scale-105"
-            >
-              {tag}
-            </button>
-          ))}
-        </div>
+  return (
+    <div className="space-y-6">
+      <div role="search" className="space-y-3">
+        <label htmlFor="search-query" className="sr-only">
+          Search your memories
+        </label>
+        <Input
+          id="search-query"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by title, text or address"
+          leadingIcon={<IconSearch size={20} />}
+          className="h-14 rounded-card text-[17px]"
+          autoFocus
+        />
+        {suggestions.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[15px] text-muted">Try:</span>
+            {suggestions.map((tag) => (
+              <Chip key={tag} selected={query === tag} onClick={() => setQuery(tag)}>
+                {tag}
+              </Chip>
+            ))}
+          </div>
+        ) : null}
       </div>
 
-      {/* Results Header */}
-      {query.trim() && (
-        <div className="flex items-center justify-between text-xs text-ink-500 px-1">
-          <span>Found {searchResults.length} results for "{query}"</span>
-        </div>
-      )}
+      {query.trim() ? (
+        <p role="status" className="text-[15px] text-muted">
+          {searchResults.length} {searchResults.length === 1 ? "result" : "results"} for
+          &ldquo;{query}&rdquo;
+        </p>
+      ) : null}
 
-      {/* Results Grid */}
       {searchResults.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <MemoryList>
           {searchResults.map((item) => (
-            <MemoryCard key={item.id} item={item} onSelect={onSelectItem} />
+            <MemoryRow
+              key={item.id}
+              title={item.title}
+              snippet={formatExtractedContent(item).cleanText.slice(0, 240)}
+              sourceType={item.source_type}
+              dateLabel={dayLabel(item.captured_at)}
+              dateTime={item.captured_at}
+              onSelect={() => onSelectItem(item)}
+            />
           ))}
-        </div>
+        </MemoryList>
       ) : query.trim() ? (
-        <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-12 text-center space-y-2 shadow-card">
-          <p className="text-sm font-serif font-bold text-ink-900">No results found</p>
-          <p className="text-xs text-ink-500">
-            No memories match your query "{query}".
-          </p>
-        </div>
+        <EmptyState
+          title="No results"
+          body={
+            <>
+              Nothing you saved matches &ldquo;{query}&rdquo;. Try fewer words, or ask
+              Sentiora.
+            </>
+          }
+        />
       ) : (
-        <div className="bg-white/85 backdrop-blur-md border border-parchment-200/80 rounded-2xl p-12 text-center space-y-2 shadow-card">
-          <p className="text-sm font-serif font-bold text-ink-900">Search Your Digital Memory</p>
-          <p className="text-xs text-ink-500">
-            Enter a search term above to instantly locate saved articles, PDFs, or YouTube transcripts.
-          </p>
-        </div>
+        <EmptyState
+          echo="idle"
+          title="Search your memory"
+          body="Type a word, a phrase or a website to find saved articles, PDFs and videos."
+        />
       )}
     </div>
   );
