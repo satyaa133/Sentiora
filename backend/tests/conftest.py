@@ -36,6 +36,9 @@ from app.core.login_backoff import login_backoff  # noqa: E402
 from app.core.rate_limit import limiter  # noqa: E402
 from app.services.llm_pool import key_pool  # noqa: E402
 
+# OPENROUTER_API_KEY_<n> from local .env files must not reach tests either.
+get_settings().openrouter_numbered_keys = {}
+
 
 def pytest_report_header() -> str:
     source = "derived from DATABASE_URL" if _derived else "TEST_DATABASE_URL"
@@ -84,3 +87,27 @@ def reset_security_limiters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "rate_limit_refresh_per_minute", 1000)
     monkeypatch.setattr(settings, "rate_limit_search_per_user_per_minute", 1000)
     monkeypatch.setattr(settings, "failed_login_max_attempts", 1000)
+
+
+@pytest.fixture(autouse=True)
+def disable_live_answer_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The structured {mode, usedSources, followUps} call never leaves the test
+    process; answers fall back to metadata derived from their [S#] markers.
+    Tests that exercise it patch RagService._call_structured themselves."""
+
+    def offline(*args: object, **kwargs: object) -> str:
+        raise RuntimeError("structured metadata calls are disabled in tests")
+
+    monkeypatch.setattr("app.services.rag_service.RagService._call_structured", offline)
+
+
+@pytest.fixture(autouse=True)
+def block_live_llm_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No chat request leaves the test process, even when a test configures fake
+    keys and only mocks part of the pipeline (e.g. query rewriting)."""
+
+    class _Offline:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            raise RuntimeError("live LLM clients are disabled in tests")
+
+    monkeypatch.setattr("app.services.rag_service.OpenAI", _Offline)

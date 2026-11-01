@@ -9,9 +9,10 @@ from fastapi.testclient import TestClient
 from app.core.db import SessionLocal
 from app.main import app
 from app.models.memory_chunk import MemoryChunk
-from app.services.chunking import chunk_transcript, format_timestamp
+from app.services.chunking import MAX_CHUNK_CHARS, chunk_transcript, format_timestamp
 from app.services.content_normalizer import canonicalize_url, youtube_video_id
 from app.workers.jobs.process_capture import process_capture
+from scripts.reprocess_memories import main as reprocess
 
 client = TestClient(app)
 
@@ -75,6 +76,7 @@ def _auth_headers(email: str) -> dict[str, str]:
 
 class _HashedAdapter:
     """Deterministic bag-of-words embeddings (stable across processes)."""
+    model_id = "test:hashed"
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         vectors = []
@@ -148,11 +150,11 @@ def test_chunk_transcript_preserves_order_and_time_ranges() -> None:
     drafts = chunk_transcript(nodes, title="Lighthouse Keepers")
     assert drafts, "expected transcript chunks"
     assert [d.chunk_index for d in drafts] == list(range(len(drafts)))
-    assert drafts[0].heading is not None and drafts[0].heading.startswith("Lighthouse Keepers [00:00–")
+    assert drafts[0].heading is not None and drafts[0].heading.startswith("[00:00–")
     assert drafts[-1].heading is not None and drafts[-1].heading.endswith("01:38]")
     joined = " ".join(d.content for d in drafts)
     assert joined.index("welcome back") < joined.index("great gale")
-    assert all(len(d.content) <= 1800 for d in drafts)
+    assert all(len(d.content) <= MAX_CHUNK_CHARS for d in drafts)
 
 
 def test_chunk_transcript_splits_long_transcripts_within_limits() -> None:
@@ -168,7 +170,7 @@ def test_chunk_transcript_splits_long_transcripts_within_limits() -> None:
     ]
     drafts = chunk_transcript(long_nodes, title="Long Video")
     assert len(drafts) > 5
-    assert all(len(d.content) <= 1800 for d in drafts)
+    assert all(len(d.content) <= MAX_CHUNK_CHARS for d in drafts)
     starts = [d.heading for d in drafts]
     assert starts == sorted(set(starts), key=starts.index)  # no duplicate ranges
 
@@ -205,6 +207,7 @@ def test_youtube_capture_persists_transcript_and_timestamped_chunks(
     assert chunks
     assert all(c.source_type.value == "youtube" for c in chunks)
     assert all(c.heading and "[" in c.heading for c in chunks)
+    assert all(c.start_sec is not None and c.end_sec is not None for c in chunks)
     assert all(c.embedding is not None and len(c.embedding) == 1536 for c in chunks)
     assert "nine gallons" in " ".join(c.content for c in chunks)
 
@@ -237,28 +240,29 @@ def test_metadata_only_youtube_capture_is_marked_failed_not_ready() -> None:
     assert _chunks(item["id"]) == []
 
 
-def test_embedding_failure_is_visible_and_recoverable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embedding_failure_keeps_capture_searchable_and_backfill_recovers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     headers = _auth_headers("yt_embed_fail@example.com")
     monkeypatch.setattr(
         "app.workers.jobs.process_capture.get_embedding_adapter", lambda: _FailingAdapter()
     )
-    failed = client.post("/api/v1/memory-items", json=_payload(), headers=headers).json()["data"]
-    process_capture(failed["id"])
-    after = client.get(f"/api/v1/memory-items/{failed['id']}", headers=headers).json()["data"]
-    assert after["status"] == "failed"
-    assert "Embedding generation failed" in after["processing_error"]
-    assert _chunks(failed["id"]) == []
+    item = client.post("/api/v1/memory-items", json=_payload(), headers=headers).json()["data"]
+    process_capture(item["id"])
+    after = client.get(f"/api/v1/memory-items/{item['id']}", headers=headers).json()["data"]
+    # The capture is not lost: it is READY and found by full-text search.
+    assert after["status"] == "ready"
+    chunks = _chunks(item["id"])
+    assert chunks and all(c.embedding is None for c in chunks)
+    hits = client.get(
+        "/api/v1/search", params={"q": "whale oil consumption"}, headers=headers
+    ).json()["data"]
+    assert hits and hits[0]["memory_id"] == item["id"]
 
-    # Retry: a failed capture does not block a fresh capture of the same video.
-    monkeypatch.setattr(
-        "app.workers.jobs.process_capture.get_embedding_adapter", lambda: _HashedAdapter()
-    )
-    retry = client.post("/api/v1/memory-items", json=_payload(), headers=headers).json()["data"]
-    assert retry["id"] != failed["id"]
-    process_capture(retry["id"])
-    ready = client.get(f"/api/v1/memory-items/{retry['id']}", headers=headers).json()["data"]
-    assert ready["status"] == "ready"
-    assert _chunks(retry["id"])
+    # The embedding backfill fills the vectors in once the provider works.
+    monkeypatch.setattr("scripts.reprocess_memories.get_embedding_adapter", lambda: _HashedAdapter())
+    assert reprocess(["--embed", "--user", "yt_embed_fail@example.com"]) == 0
+    assert all(c.embedding is not None for c in _chunks(item["id"]))
 
 
 def test_transcript_phrase_is_retrievable_lexically() -> None:
@@ -291,7 +295,7 @@ def test_transcript_is_retrievable_semantically(monkeypatch: pytest.MonkeyPatch)
 
     # Bag-of-words test vectors are far sparser than real embeddings, so a short
     # query sits further away; widen the cutoff for this fixture only.
-    monkeypatch.setattr(get_settings(), "rag_max_distance", 0.95)
+    monkeypatch.setattr(get_settings(), "rag_min_similarity", 0.05)
 
     db = SessionLocal()
     try:

@@ -35,6 +35,19 @@
 | 13: Landing sections, final order | ✅ Completed | c20a41c | Before/after, scroll story, extension clip, privacy flow |
 | 14: Performance and docs | ✅ Completed | this commit | App pages code-split; landing LCP 1.75s on throttled mobile (`npm run perf:landing`) |
 
+### Ask Sentiora RAG v2 (docs/RAG_v2_ADDENDUM.md, branch `feat/ask-rag-v2`)
+
+| Phase | Status | Notes |
+| ----- | ------ | ----- |
+| R1: Ingestion cleanup | ✅ Completed | Rolling-caption normalizer, title kept out of chunk text, `scripts.reprocess_memories --reclean` |
+| R2: Chunking | ✅ Completed | Recursive 400–600 token chunks with 15% overlap, 60–90s transcript windows, migration 006 (`start_sec`, `end_sec`, `embedding_model`, tsvector GIN indexes) |
+| R3: Embeddings | ✅ Completed | OpenRouter embeddings (pluggable), per-chunk `embedding_model`, same-model queries only, non-fatal capture embedding, `--embed` backfill |
+| R4: Retrieval | ✅ Completed | LLM query rewrite, pgvector + Postgres full-text fused with RRF, `RAG_MIN_SIMILARITY` 0.25, near-dup removal, MMR, 2 chunks per memory, top 6 |
+| R5: Generation | ✅ Completed | Unified `[S#]` prompt, SSE `POST /chat/stream`, strict json_schema metadata (mode, usedSources, followUps), `OPENROUTER_FALLBACK_MODELS`, `/chat` shape kept |
+| R6: Env and keys | ✅ Completed | `OPENROUTER_API_KEY_1..N` auto-detected, exponential cooldown with Retry-After, `LLM_MAX_ATTEMPTS`, readable startup validation, `npm run check:secrets` in CI |
+| R7: Ask page UX | ✅ Completed | Streaming with Stop/Regenerate, `[S#]` citation chips with previews and video timestamps, collapsible sources, mode badge, model follow-ups, scope picker, local history, keyboard shortcuts |
+| R8: Evaluation | ✅ Completed | `npm run eval:rag` (hit@k, MRR, noise, reject, threshold sweep); dev baseline hit@6 1.00, MRR 0.96, reject 1.00; `RAG_MIN_SIMILARITY` kept at 0.25 |
+
 
 ---
 

@@ -158,7 +158,7 @@ def test_process_capture_fails_when_extraction_is_empty() -> None:
     assert ready["processing_error"]
 
 
-def test_process_capture_fails_when_embeddings_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_process_capture_stays_ready_when_embeddings_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class BoomAdapter:
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             raise RuntimeError("quota exceeded")
@@ -181,8 +181,12 @@ def test_process_capture_fails_when_embeddings_fail(monkeypatch) -> None:  # typ
     item_id = create_resp.json()["data"]["id"]
     process_capture(item_id)
     ready = client.get(f"/api/v1/memory-items/{item_id}", headers=headers).json()["data"]
-    assert ready["status"] == "failed"
-    assert "Embedding" in (ready["processing_error"] or "")
+    # Full-text search still works; the backfill embeds it later.
+    assert ready["status"] == "ready"
+    assert not ready["processing_error"]
+    with SessionLocal() as db:
+        chunks = db.query(MemoryChunk).filter(MemoryChunk.memory_id == UUID(item_id)).all()
+    assert chunks and all(c.embedding is None and c.embedding_model is None for c in chunks)
 
 
 def test_youtube_transcript_becomes_ready_chunks() -> None:

@@ -51,6 +51,9 @@ class AskCitation(BaseModel):
     domain: str | None = None
     heading: str | None = None
     page_number: int | None = None
+    # Transcript time range of the cited chunk, in seconds (video only).
+    start_sec: float | None = None
+    end_sec: float | None = None
     source_available: bool = True
     captured_at: datetime | None = None
     excerpt: str | None = None
@@ -78,5 +81,7 @@ class SearchHit(BaseModel):
     content: str
     heading: str | None = None
     page_number: int | None = None
+    start_sec: float | None = None
+    end_sec: float | None = None
     captured_at: datetime
     distance: float | None = None

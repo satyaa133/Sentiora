@@ -1,13 +1,13 @@
-"""Phase 5 embedding hook.
-
-Chunk storage is complete in Phase 4. Vector generation must not run yet
-and must not write fake embeddings.
-"""
+"""Interface every embedding provider implements."""
 
 from typing import Protocol
 
 
 class EmbeddingPort(Protocol):
+    # Stable "provider:model" id stored on each chunk (memory_chunks.embedding_model).
+    # Vectors are only compared with vectors that have the same id.
+    model_id: str
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Return one embedding vector per input text."""
         ...

@@ -91,3 +91,6 @@ infrastructure/pgadmin_data/
 brain/
 .gemini/
 .tempmediaStorage/
+
+# RAG reprocess script progress
+backend/.reprocess-checkpoint.json

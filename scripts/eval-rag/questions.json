@@ -1,0 +1,50 @@
+{
+  "description": "Ask Sentiora retrieval eval. PLACEHOLDERS: written from the dev account's saved titles; replace or extend with real questions. 'expected' lists substrings of memory titles that count as a hit (case-insensitive); an empty list means the question is NOT covered by memory and retrieval should return nothing. 'history' holds earlier turns for vague follow-ups.",
+  "questions": [
+    { "id": "pascal-cover", "question": "What does the Pascal Triangle video cover?", "expected": ["Pascal Triangle"] },
+    { "id": "ncr-fast", "question": "What's the quickest way to compute n choose r?", "expected": ["Pascal Triangle"] },
+    { "id": "move-zeros", "question": "How do I shift all the zeroes to the back of a list?", "expected": ["Move Zeros"] },
+    { "id": "rotate-k", "question": "How can I rotate an array to the right by k steps?", "expected": ["Rotate Array"] },
+    { "id": "rotated-dupes", "question": "How do you search a rotated sorted array that has duplicate values?", "expected": ["Rotated Sorted Array"] },
+    { "id": "binary-search", "question": "How does binary search work and what is its complexity?", "expected": ["Binary Search"] },
+    { "id": "sliding-template", "question": "Is there a general template for sliding window problems?", "expected": ["Sliding Window"] },
+    { "id": "flip-zeros", "question": "Longest run of 1s if I'm allowed to flip at most k zeros", "expected": ["Max Consecutive Ones"] },
+    { "id": "fruit-baskets", "question": "Picking fruits with only two baskets, how is it solved?", "expected": ["Fruit Into Baskets"] },
+    { "id": "cards-points", "question": "Maximum score from taking cards from either end", "expected": ["Maximum Points"] },
+    { "id": "yolo", "question": "How does YOLO detect objects in a single pass?", "expected": ["YOLO"] },
+    { "id": "load-balancing", "question": "What did I learn about load balancers and CDNs?", "expected": ["System Design"] },
+    { "id": "backprop", "question": "Explain backpropagation from my neural network notes", "expected": ["Neural_Networks", "Deep_Networks"] },
+    { "id": "vanishing-gradient", "question": "Why do gradients vanish in deep networks?", "expected": ["Deep_Networks", "Neural_Networks"] },
+    { "id": "llm-intro", "question": "What is a large language model?", "expected": ["Large Language Model"] },
+    { "id": "oop-pillars", "question": "What are the four pillars of object oriented programming?", "expected": ["Object Oriented Programming"] },
+    {
+      "id": "followup-optimal",
+      "question": "what about the optimal one?",
+      "history": [
+        { "role": "user", "content": "How do I move all zeros to the end of an array?" },
+        { "role": "assistant", "content": "The video shows a brute force approach with a temporary array, then a better two-pointer version." }
+      ],
+      "expected": ["Move Zeros"]
+    },
+    {
+      "id": "followup-complexity",
+      "question": "and its time complexity?",
+      "history": [
+        { "role": "user", "content": "What does the Pascal Triangle video cover?" },
+        { "role": "assistant", "content": "It explains how to build Pascal's triangle and how to find a single nCr value." }
+      ],
+      "expected": ["Pascal Triangle"]
+    },
+    {
+      "id": "followup-another",
+      "question": "give me another example of that pattern",
+      "history": [
+        { "role": "user", "content": "Explain the sliding window technique from my playlist" },
+        { "role": "assistant", "content": "A sliding window keeps a running window over the array and moves its ends with two pointers." }
+      ],
+      "expected": ["Sliding Window"]
+    },
+    { "id": "not-covered-bread", "question": "How do I bake sourdough bread?", "expected": [] },
+    { "id": "not-covered-capital", "question": "What is the capital of Australia?", "expected": [] }
+  ]
+}
