@@ -18,7 +18,7 @@ export interface LogoMarkProps {
   className?: string;
 }
 
-/** Compact mark: the dotless ı with its coral dot (DESIGN.md §13). */
+/** Compact mark: the "S" logo with its coral dot. */
 export function LogoMark({
   size = 24,
   title,
@@ -30,23 +30,23 @@ export function LogoMark({
     : ({ "aria-hidden": true, focusable: false } as const);
   return (
     <svg
-      viewBox="0 0 24 32"
-      width={(size * 24) / 32}
+      viewBox="0 0 32 32"
+      width={size}
       height={size}
       className={className}
       data-logo-mark=""
       {...a11y}
     >
       {title ? <title>{title}</title> : null}
-      <rect
-        x={8}
-        y={13}
-        width={8}
-        height={19}
-        rx={1.5}
-        fill={tone === "inverse" ? "var(--on-inverse)" : "var(--text)"}
+      <path
+        d="M 22 11 C 22 8.5 19.5 7 16 7 C 12.5 7 10 9 10 11.5 C 10 14.5 12.5 15.5 16 16.5 C 19.5 17.5 22 18.5 22 21 C 22 23.5 19.5 25 16 25 C 12 25 10 23 10 20.5"
+        fill="none"
+        stroke={tone === "inverse" ? "var(--on-inverse)" : "var(--text)"}
+        strokeWidth="3.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
-      <circle cx={12} cy={5.5} r={5.5} fill="var(--accent)" />
+      <circle cx="22.5" cy="7.5" r="2" fill="var(--accent)" />
     </svg>
   );
 }

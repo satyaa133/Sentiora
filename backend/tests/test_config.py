@@ -32,6 +32,7 @@ def test_development_accepts_default_secret(monkeypatch):
     from app.core.config import get_settings, Settings
     get_settings.cache_clear()
     monkeypatch.setenv("APP_ENVIRONMENT", "development")
-    settings = Settings()
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    settings = Settings(_env_file=None)
     assert settings.app_environment == "development"
     assert settings.jwt_secret_key == "DEV_SECRET_KEY_CHANGE_IN_PRODUCTION_SENTIORA_2026"

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button, Echo, IconAlert, TextField, cx } from "@shared/ui";
+import { Button, Echo, IconAlert, TextField, cx, isTrustedEmail } from "@shared/ui";
 import { API_DISPLAY_URL, extApiFetch, ExtApiError } from "../services/extApiClient";
 import { appPageUrl } from "../shared/appUrl";
 import { setAccessToken, setRefreshToken, setCachedUser } from "../services/storage";
@@ -24,6 +24,12 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
     }
 
     if (mode === "register") {
+      if (!isTrustedEmail(email)) {
+        setError(
+          "Please use an email from a trusted provider (e.g. Gmail, Outlook, Yahoo, iCloud, Proton) or educational institution.",
+        );
+        return;
+      }
       if (password.length < 10) {
         setError("Password must be at least 10 characters long.");
         return;

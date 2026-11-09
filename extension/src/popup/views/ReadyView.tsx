@@ -97,8 +97,7 @@ export default function ReadyView({
           </h1>
           {status === "not_saved" ? (
             <p className="mt-2 text-[15px] text-muted">
-              Echo saves pages as you read them. Save this one now if it didn&apos;t
-              catch it.
+              Click &ldquo;Capture page&rdquo; to save this into your Sentiora vault.
             </p>
           ) : null}
         </div>
@@ -110,7 +109,7 @@ export default function ReadyView({
         ) : null}
 
         {status === "not_saved" ? (
-          <Button variant="secondary" fullWidth onClick={onSave} loading={saving}>
+          <Button variant="primary" fullWidth onClick={onSave} loading={saving}>
             Save now
           </Button>
         ) : null}

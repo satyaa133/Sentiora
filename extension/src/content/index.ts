@@ -2,7 +2,6 @@ import { getPageSensitivityReason, isCurrentPageSensitive } from "./sensitiveGua
 import { isYoutubeHost, isYoutubeVideoPage, captureYoutube, parseYoutubeVideoUrl } from "./youtubeCapture";
 import { isPdfDocument, capturePdf } from "./pdfCapture";
 import { captureWebpageTimed } from "./webpageCapture";
-import { sendCaptureMessage } from "../shared/captureUtils";
 import { isTrustedAppUrl } from "../shared/appUrl";
 import { getUserBlockedDomains } from "../services/storage";
 import type { CapturePayload, ExtensionMessage, CaptureErrorCode } from "../shared/types";
@@ -21,19 +20,6 @@ declare global {
   interface Window {
     __sentioraContentLoaded?: boolean;
   }
-}
-
-/** Asks the background whether a session exists; any failure counts as signed out. */
-function isSignedIn(): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      chrome.runtime.sendMessage({ type: "GET_SESSION_STATE" } satisfies ExtensionMessage, (response) => {
-        resolve(!chrome.runtime.lastError && response?.signedIn === true);
-      });
-    } catch {
-      resolve(false);
-    }
-  });
 }
 
 export async function extractCapturePayload(manualCapture = false): Promise<ExtractCaptureResult> {
@@ -83,72 +69,20 @@ export async function extractCapturePayload(manualCapture = false): Promise<Extr
   }
 }
 
-async function submitExtractedPayload(payload: CapturePayload): Promise<CapturePipelineResult> {
-  const messageType: ExtensionMessage["type"] =
-    payload.source_type === "youtube"
-      ? "CAPTURE_YOUTUBE"
-      : payload.source_type === "pdf"
-        ? "CAPTURE_PDF"
-        : "CAPTURE_WEBPAGE";
-
-  const result = await sendCaptureMessage({ type: messageType, payload } as ExtensionMessage);
-  if (!result.success) {
-    return { status: "failed", error: result.error ?? "Capture API failed." };
-  }
-  return { status: "saved", deduplicated: result.deduplicated };
-}
-
-async function runAutoCapturePipeline(): Promise<CapturePipelineResult> {
-  // On YouTube only video pages are memories; never auto-save home/search/channel pages.
-  if (isYoutubeHost() && !isYoutubeVideoPage()) {
-    return { status: "skipped", reason: "no_payload" };
-  }
-  // Signed out: do not even read the page.
-  if (!(await isSignedIn())) {
-    return { status: "skipped", reason: "signed_out" };
-  }
-  const extracted = await extractCapturePayload(false);
-  if (extracted.status === "skipped") {
-    return { status: "skipped", reason: extracted.reason };
-  }
-  if (extracted.status === "failed") {
-    return { status: "failed", error: extracted.error };
-  }
-  return submitExtractedPayload(extracted.payload);
-}
-
 function initContentScript(): void {
   if (window.__sentioraContentLoaded) {
     return;
   }
   window.__sentioraContentLoaded = true;
 
-  let autoCaptureQueued = false;
   let extractInFlight = false;
-
-  function queueAutoCapture(): void {
-    if (autoCaptureQueued) return;
-    autoCaptureQueued = true;
-    setTimeout(async () => {
-      autoCaptureQueued = false;
-      if (extractInFlight) return;
-      extractInFlight = true;
-      try {
-        await runAutoCapturePipeline();
-      } finally {
-        extractInFlight = false;
-      }
-    }, 1000);
-  }
-
-  if (document.readyState === "complete") {
-    queueAutoCapture();
-  } else {
-    window.addEventListener("load", queueAutoCapture);
-  }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "FORCE_CAPTURE") {
+      if (extractInFlight) {
+        sendResponse({ success: false, error: "Extraction already in progress." });
+        return true;
+      }
       extractInFlight = true;
       extractCapturePayload(true)
         .then((result) => {
@@ -202,24 +136,16 @@ function initContentScript(): void {
     }
   });
 
-  // YouTube is a SPA: watch for in-app navigation between videos. Both the
-  // yt-navigate-finish event and the URL poll can fire for one navigation, so
-  // auto-capture at most once per video ID.
+  // YouTube is a SPA: track navigation between videos without automatic background captures.
   if (isYoutubeHost()) {
     let lastVideoId = parseYoutubeVideoUrl(window.location.href)?.videoId ?? null;
     const onYoutubeNavigation = () => {
       const videoId = parseYoutubeVideoUrl(window.location.href)?.videoId ?? null;
       if (!videoId || videoId === lastVideoId) return;
       lastVideoId = videoId;
-      setTimeout(() => {
-        if (parseYoutubeVideoUrl(window.location.href)?.videoId === videoId) {
-          void runAutoCapturePipeline();
-        }
-      }, 1500);
     };
     window.addEventListener("yt-navigate-finish", onYoutubeNavigation);
     window.addEventListener("popstate", onYoutubeNavigation);
-    setInterval(onYoutubeNavigation, 2500);
   }
 
   // Exact origin match: any other page could otherwise plant its own tokens and

@@ -53,21 +53,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("content script auto-capture", () => {
-  it("sends nothing but the session check while signed out", async () => {
-    await loadContentScript();
-    expect(sentMessages.map((m) => m.type)).toEqual(["GET_SESSION_STATE"]);
-  });
-
-  it("captures the page once signed in", async () => {
+describe("content script capture policy", () => {
+  it("does not automatically capture pages in the background", async () => {
     signedIn = true;
     await loadContentScript();
-    expect(captureMessages().map((m) => m.type)).toEqual(["CAPTURE_WEBPAGE"]);
+    expect(captureMessages()).toEqual([]);
   });
 
-  it("skips a site the user blocked before sending any capture", async () => {
-    signedIn = true;
-    userDomains = [window.location.hostname];
+  it("sends nothing while signed out", async () => {
+    signedIn = false;
     await loadContentScript();
     expect(captureMessages()).toEqual([]);
   });

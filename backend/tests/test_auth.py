@@ -54,6 +54,17 @@ def test_auth_flow(clean_db) -> None:
     assert resp.json()["success"] is False
     assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
+    # 3b. Untrusted email provider check
+    untrusted_reg_payload = {
+        "email": "test_untrusted@disposablemail12345.xyz",
+        "password": "Password123!",
+        "full_name": "Untrusted User",
+    }
+    resp = client.post("/api/v1/auth/register", json=untrusted_reg_payload)
+    assert resp.status_code == 422
+    assert resp.json()["success"] is False
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
+
     # 4. Login
     login_payload = {"email": "test_auth_user@example.com", "password": "Password123!"}
     resp = client.post("/api/v1/auth/login", json=login_payload)

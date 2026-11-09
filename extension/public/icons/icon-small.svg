@@ -1,5 +1,6 @@
-<!-- Sentiora icon, small sizes (16 and 32 px): the coral dot alone, so it stays crisp. -->
+<!-- Sentiora extension icon, small sizes: crisp "S" with coral dot. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <rect width="128" height="128" rx="26" fill="#111111"/>
-  <circle cx="64" cy="64" r="34" fill="#FF5A3C"/>
+  <path d="M 88 44 C 88 33 78 26 64 26 C 49 26 40 34 40 46 C 40 58 50 63 64 66.5 C 79 70 88 75 88 86 C 88 97 78 102 64 102 C 48 102 38 94 38 82" fill="none" stroke="#F4F4F3" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="88" cy="28" r="8" fill="#FF5A3C"/>
 </svg>

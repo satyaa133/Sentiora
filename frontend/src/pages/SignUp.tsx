@@ -5,6 +5,7 @@ import AuthLayout from "../components/AuthLayout";
 import PasswordField from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
 import { getApiErrorMessage } from "../services/apiClient";
+import { isTrustedEmail } from "../utils/trustedEmail";
 
 export default function SignUp() {
   const { register, login } = useAuth();
@@ -48,6 +49,9 @@ export default function SignUp() {
       errs.email = "Email address is required.";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       errs.email = "Please enter a valid email.";
+    } else if (!isTrustedEmail(email)) {
+      errs.email =
+        "Please use an email from a trusted provider (e.g. Gmail, Outlook, Yahoo, iCloud, Proton) or educational institution.";
     }
     if (!password || password.length < 10) {
       errs.password = "Password must be at least 10 characters.";

@@ -5,6 +5,52 @@ from uuid import UUID
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
 
+TRUSTED_EMAIL_DOMAINS = {
+    "gmail.com",
+    "googlemail.com",
+    "outlook.com",
+    "hotmail.com",
+    "live.com",
+    "msn.com",
+    "yahoo.com",
+    "ymail.com",
+    "rocketmail.com",
+    "icloud.com",
+    "me.com",
+    "mac.com",
+    "proton.me",
+    "protonmail.com",
+    "fastmail.com",
+    "zoho.com",
+    "zohomail.com",
+    "aol.com",
+    "gmx.com",
+    "mail.com",
+    "example.com",
+    "example.dev",
+}
+
+EDU_DOMAIN_SUFFIXES = (
+    ".edu",
+    ".ac.uk",
+    ".edu.in",
+    ".edu.au",
+)
+
+
+def _check_trusted_email(v: EmailStr) -> EmailStr:
+    email_str = str(v).strip().lower()
+    domain = email_str.split("@")[-1]
+    if domain in TRUSTED_EMAIL_DOMAINS or domain.endswith(EDU_DOMAIN_SUFFIXES):
+        return v
+    raise ValueError(
+        "Please register with an email from a trusted provider (e.g. Gmail, Outlook, Yahoo, iCloud, Proton) or educational institution."
+    )
+
+
+TrustedEmail = Annotated[EmailStr, AfterValidator(_check_trusted_email)]
+
+
 def _check_password_strength(v: str) -> str:
     if not re.search(r"[A-Z]", v):
         raise ValueError("Must contain at least one uppercase letter.")
@@ -17,7 +63,7 @@ StrongPassword = Annotated[str, Field(min_length=10), AfterValidator(_check_pass
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: TrustedEmail
     password: StrongPassword
     full_name: str = Field(min_length=2, max_length=80)
 

@@ -1,9 +1,6 @@
-import { useState } from "react";
-
 import { IconArrowRight, buttonClasses } from "@shared/ui";
 
 import AddToChromeButton from "./AddToChromeButton";
-import FloatingCards from "./demo/FloatingCards";
 import LiveDemo from "./demo/LiveDemo";
 import WordSwap from "./hero/WordSwap";
 import "./landing.css";
@@ -16,8 +13,6 @@ const TRUST = [
 
 /** Landing hero (DESIGN.md §9.1). `id="hero"` drives the header's button colour. */
 export default function Hero() {
-  const [answers, setAnswers] = useState(0);
-
   return (
     <section id="hero" aria-labelledby="hero-heading" className="pb-16 pt-10 sm:pt-16 lg:pb-24">
       <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-4 sm:px-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-14">
@@ -54,10 +49,8 @@ export default function Hero() {
         </div>
 
         <div className="relative">
-          <div aria-hidden="true" className="hero-dots pointer-events-none absolute -inset-10" />
-          <FloatingCards flyKey={answers} />
           <div className="relative">
-            <LiveDemo onAnswered={() => setAnswers((count) => count + 1)} />
+            <LiveDemo />
           </div>
         </div>
       </div>

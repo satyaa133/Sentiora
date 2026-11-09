@@ -5,7 +5,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import CommandPalette from "../components/CommandPalette";
 import HomeView from "../components/views/HomeView";
@@ -45,6 +45,11 @@ function item(
     ...extra,
   } as MemoryItem;
 }
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(NOW);
+});
 
 afterEach(() => {
   cleanup();

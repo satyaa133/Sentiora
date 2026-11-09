@@ -1,6 +1,6 @@
-<!-- Sentiora icon (DESIGN.md §13): dotless ı with the coral dot, on graphite. Also the web favicon. -->
+<!-- Sentiora icon: "S" with the coral dot, on graphite. Web favicon. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
   <rect width="128" height="128" rx="28" fill="#111111"/>
-  <circle cx="64" cy="38" r="15" fill="#FF5A3C"/>
-  <rect x="53" y="59" width="22" height="44" rx="4" fill="#F4F4F3"/>
+  <path d="M 86 45 C 86 35 77 28 64 28 C 51 28 42 36 42 46 C 42 57 50 62 64 65.5 C 78 69 86 74 86 84 C 86 94 77 100 64 100 C 50 100 42 92 42 82" fill="none" stroke="#F4F4F3" stroke-width="15" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="88" cy="30" r="7" fill="#FF5A3C"/>
 </svg>
