@@ -51,7 +51,7 @@ export default function SignUp() {
       errs.email = "Please enter a valid email.";
     } else if (!isTrustedEmail(email)) {
       errs.email =
-        "Please use an email from a trusted provider (e.g. Gmail, Outlook, Yahoo, iCloud, Proton) or educational institution.";
+        "Please use a valid email address.";
     }
     if (!password || password.length < 10) {
       errs.password = "Password must be at least 10 characters.";

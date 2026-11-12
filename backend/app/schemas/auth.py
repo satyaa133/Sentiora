@@ -44,7 +44,7 @@ def _check_trusted_email(v: EmailStr) -> EmailStr:
     if domain in TRUSTED_EMAIL_DOMAINS or domain.endswith(EDU_DOMAIN_SUFFIXES):
         return v
     raise ValueError(
-        "Please register with an email from a trusted provider (e.g. Gmail, Outlook, Yahoo, iCloud, Proton) or educational institution."
+        "Please use a valid email address."
     )
 
 

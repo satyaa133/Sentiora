@@ -26,7 +26,7 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
     if (mode === "register") {
       if (!isTrustedEmail(email)) {
         setError(
-          "Please use an email from a trusted provider (e.g. Gmail, Outlook, Yahoo, iCloud, Proton) or educational institution.",
+          "Please use a valid email address.",
         );
         return;
       }
