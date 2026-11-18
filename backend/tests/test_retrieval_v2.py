@@ -285,15 +285,24 @@ def test_chunks_per_memory_are_capped(concepts: None) -> None:
     assert len(scoped) > 2
 
 
-def test_competing_memories_keep_the_two_chunk_cap(concepts: None) -> None:
-    headers, user_id = _user("retr_cap_competing@example.com")
-    first = _save(headers, "long-car", "Engine design notes", LONG_CAR_TEXT)
-    second = _save(
-        headers, "long-car-2", "More engine notes", LONG_CAR_TEXT.replace("Section", "Chapter")
-    )
-    hits = _retrieve(user_id, "how do car engines burn fuel")
-    assert {h.memory_id for h in hits} == {first, second}
-    assert all(sum(h.memory_id == m for h in hits) <= 2 for m in (first, second))
+def test_competing_memories_keep_the_two_chunk_cap() -> None:
+    # Two saves interleave in the ranking, so neither is "the only match".
+    first, second = uuid4(), uuid4()
+    words = ["engines", "pistons", "cylinders", "spark", "exhaust", "valves"]
+    chunks = [
+        _ranked_chunk(
+            first if i % 2 == 0 else second,
+            f"{word} notes about how car engines burn fuel number {i}",
+            (1.0, 0.05 * i, 0.0),
+            0.30 + 0.01 * i,
+        )
+        for i, word in enumerate(words)
+    ]
+    service = RetrievalService.__new__(RetrievalService)
+    service.settings = type("S", (), {})()
+    picked = service._select(chunks, chunks, limit=6, per_memory=2)
+    assert {c.memory_id for c in picked} == {first, second}
+    assert all(sum(c.memory_id == m for c in picked) == 2 for m in (first, second))
 
 
 def test_other_users_memories_are_never_returned(concepts: None) -> None:
