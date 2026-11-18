@@ -30,10 +30,21 @@ export function browserTimeZone(): string {
   }
 }
 
-export async function fetchStatistics(): Promise<DashboardStatistics> {
-  const resp = await apiClient.get<APIEnvelope<DashboardStatistics>>(
-    "/dashboard/statistics",
-    { params: { tz: browserTimeZone() } },
-  );
-  return resp.data.data;
+let inFlight: Promise<DashboardStatistics> | null = null;
+
+/**
+ * Home, Timeline, Intelligence and the corner Echo all mount at once and each
+ * ask for statistics; callers that overlap share one request. Nothing is
+ * cached after it settles, so a later refresh always gets fresh numbers.
+ */
+export function fetchStatistics(): Promise<DashboardStatistics> {
+  inFlight ??= apiClient
+    .get<APIEnvelope<DashboardStatistics>>("/dashboard/statistics", {
+      params: { tz: browserTimeZone() },
+    })
+    .then((resp) => resp.data.data)
+    .finally(() => {
+      inFlight = null;
+    });
+  return inFlight;
 }
