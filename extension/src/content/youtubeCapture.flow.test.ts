@@ -274,6 +274,23 @@ describe("helpers", () => {
     expect(readTranscriptPanel(emptyDoc())).toBeNull();
   });
 
+  it("drops the spoken timestamp label the newer panel puts before each line", () => {
+    const doc = emptyDoc();
+    for (const [stamp, label, words] of [
+      ["0:04", "4 seconds", "This is a 3."],
+      ["1:14", "1 minute, 14 seconds", "10 seconds later it was gone."],
+    ]) {
+      const seg = doc.createElement("transcript-segment-view-model");
+      seg.innerHTML = `<div class="ytwTranscriptSegmentViewModelTimestamp">${stamp}</div><span>${label}</span><span>${words}</span>`;
+      doc.body.appendChild(seg);
+    }
+    expect(readTranscriptPanel(doc, 90)?.map((s) => s.text)).toEqual([
+      "This is a 3.",
+      // Only the label for this line's own time is removed, not ordinary speech.
+      "10 seconds later it was gone.",
+    ]);
+  });
+
   it("prefers manual English, then other manual, then auto-generated tracks", () => {
     const ranked = pickCaptionTracks([
       { baseUrl: "a", languageCode: "en", kind: "asr" },

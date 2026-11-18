@@ -226,6 +226,24 @@ export function parseTimestamp(value: string): number | null {
   return (h ? parseInt(h, 10) * 3600 : 0) + parseInt(m as string, 10) * 60 + parseInt(s as string, 10);
 }
 
+/**
+ * Matches YouTube's spoken form of one timestamp at the start of a line, e.g.
+ * 74 -> "1 minute, 14 seconds". Built from the line's own time, so ordinary
+ * speech such as "10 seconds later" on another line is never removed.
+ */
+export function spokenTimestampLabel(totalSeconds: number): RegExp {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const part = (n: number, unit: string) => `${n}\\s*${unit}s?`;
+  const parts = [
+    hours ? part(hours, "hour") : null,
+    minutes ? part(minutes, "minute") : null,
+    seconds || (!hours && !minutes) ? part(seconds, "second") : null,
+  ].filter(Boolean);
+  return new RegExp(`^${parts.join("[,\\s]*")}`, "i");
+}
+
 /** Read YouTube's own transcript panel if it is rendered. */
 export function readTranscriptPanel(
   root: Document | Element = document,
@@ -243,6 +261,9 @@ export function readTranscriptPanel(
     let text = (textEl?.textContent ?? el.textContent ?? "").replace(/\s+/g, " ").trim();
     if (!textEl && stampText && text.startsWith(stampText)) {
       text = text.slice(stampText.length).trim();
+      // The newer panel also renders a screen-reader label for the timestamp
+      // ("1 minute, 14 seconds") right before the words; drop it too.
+      text = text.replace(spokenTimestampLabel(start), "").trim();
     }
     if (text) raw.push({ start, text });
   }
