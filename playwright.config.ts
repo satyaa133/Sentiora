@@ -38,7 +38,8 @@ export default defineConfig({
       url: FRONTEND_URL,
       reuseExistingServer: false,
       timeout: 120_000,
-      env: { VITE_API_BASE_URL: API_URL },
+      // The e2e specs sign up with reserved example.com addresses.
+      env: { VITE_API_BASE_URL: API_URL, VITE_ALLOW_TEST_EMAIL_DOMAINS: "true" },
     },
   ],
 });

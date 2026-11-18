@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     app_name: str = "Sentiora Backend"
     app_environment: str = "development"
     app_version: str = "0.1.0"
+    # Accept the reserved example.com / example.dev sign-up domains. On only
+    # in the test suite and the e2e stack; never in a real deployment.
+    allow_test_email_domains: bool = False
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://127.0.0.1:6379/0"

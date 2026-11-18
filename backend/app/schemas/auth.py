@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
+from app.core.config import get_settings
+
 
 TRUSTED_EMAIL_DOMAINS = {
     "gmail.com",
@@ -26,9 +28,11 @@ TRUSTED_EMAIL_DOMAINS = {
     "aol.com",
     "gmx.com",
     "mail.com",
-    "example.com",
-    "example.dev",
 }
+
+# Reserved example domains: accepted only when ALLOW_TEST_EMAIL_DOMAINS is on
+# (the test suite and the e2e stack), never in a normal deployment.
+TEST_EMAIL_DOMAINS = {"example.com", "example.dev"}
 
 EDU_DOMAIN_SUFFIXES = (
     ".edu",
@@ -42,6 +46,8 @@ def _check_trusted_email(v: EmailStr) -> EmailStr:
     email_str = str(v).strip().lower()
     domain = email_str.split("@")[-1]
     if domain in TRUSTED_EMAIL_DOMAINS or domain.endswith(EDU_DOMAIN_SUFFIXES):
+        return v
+    if domain in TEST_EMAIL_DOMAINS and get_settings().allow_test_email_domains:
         return v
     raise ValueError(
         "Please use a valid email address."
