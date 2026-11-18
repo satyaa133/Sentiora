@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import zlib
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.main import app
+from app.models.memory_item import SourceType
 from app.schemas.ask import AskTurn
 from app.services.rag_service import RagService
 from app.services.retrieval import selection
@@ -19,7 +21,7 @@ from app.services.retrieval.query_rewriter import (
     heuristic_query,
     rewrite_query,
 )
-from app.services.retrieval_service import RetrievalService
+from app.services.retrieval_service import RetrievalService, RetrievedChunk
 from app.workers.jobs.process_capture import process_capture
 
 client = TestClient(app)
@@ -53,6 +55,69 @@ def test_mmr_caps_items_per_group_and_prefers_diversity() -> None:
         per_group=2,
     )
     assert [item[1] for item in picked] == ["a", "d", "b"]
+
+
+def _ranked_chunk(
+    memory_id: UUID, content: str, vector: tuple[float, ...], distance: float
+) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=uuid4(),
+        memory_id=memory_id,
+        title="Deadlock (computer science)",
+        url="https://en.wikipedia.org/wiki/Deadlock_(computer_science)",
+        source_type=SourceType.webpage,
+        content=content,
+        domain="en.wikipedia.org",
+        heading=None,
+        page_number=None,
+        captured_at=datetime.now(UTC),
+        distance=distance,
+        vector=vector,
+    )
+
+
+def _select_three(memories: tuple[UUID, UUID, UUID]) -> tuple[list[UUID], list[UUID]]:
+    """Overview ranks first; the answer is the best vector match but sits right
+    next to the overview in vector space; an aside is unrelated in both."""
+    overview = _ranked_chunk(
+        memories[0],
+        "deadlock overview where processes each wait on one another forever",
+        (1.0, 0.0, 0.0),
+        0.34,
+    )
+    answer = _ranked_chunk(
+        memories[1],
+        "the four coffman conditions are mutual exclusion hold and wait",
+        (0.99, 0.1, 0.0),
+        0.31,
+    )
+    aside = _ranked_chunk(
+        memories[2],
+        "the term livelock was coined later in an unrelated paper",
+        (0.0, 0.0, 1.0),
+        0.38,
+    )
+    service = RetrievalService.__new__(RetrievalService)
+    service.settings = type("S", (), {})()
+    picked = service._select(
+        [answer, overview, aside], [overview, aside, answer], limit=2, per_memory=2
+    )
+    ids = [overview.chunk_id, answer.chunk_id, aside.chunk_id]
+    return [c.chunk_id for c in picked], ids
+
+
+def test_mmr_keeps_a_same_page_section_whose_vector_is_close_but_text_differs() -> None:
+    page = uuid4()
+    picked, (overview, answer, _aside) = _select_three((page, page, page))
+    # Same-page sections are judged by text overlap, so the answer section is
+    # not discarded as a "duplicate" of the overview.
+    assert picked == [overview, answer]
+
+
+def test_mmr_still_spreads_across_memories_with_close_vectors() -> None:
+    picked, (overview, _answer, aside) = _select_three((uuid4(), uuid4(), uuid4()))
+    # Across different saves, near-identical vectors still count as redundant.
+    assert picked == [overview, aside]
 
 
 # --- query rewriting -------------------------------------------------------------

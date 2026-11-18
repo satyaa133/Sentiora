@@ -270,6 +270,12 @@ class RetrievalService:
             return shingle_cache[chunk.chunk_id]
 
         def similarity(a: RetrievedChunk, b: RetrievedChunk) -> float:
+            # Sections of one page share its topic, so their vectors are close
+            # even when their text says different things; judging them by
+            # vector made MMR drop the section that held the answer. Within a
+            # memory, redundancy is text overlap; across memories, vectors.
+            if a.memory_id == b.memory_id:
+                return selection.jaccard(shingles(a), shingles(b))
             cos = selection.cosine(a.vector, b.vector)
             return cos if cos is not None else selection.jaccard(shingles(a), shingles(b))
 
