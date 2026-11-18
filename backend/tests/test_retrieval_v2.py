@@ -371,3 +371,23 @@ def test_long_referential_follow_up_is_rewritten() -> None:
     query = rewrite_query("give me another example of that pattern please", HISTORY, complete)
     assert query == "another sliding window example"
     assert len(calls) == 1
+
+
+def test_one_save_leading_every_slot_drops_stragglers_and_uses_more_chunks() -> None:
+    page, other = uuid4(), uuid4()
+    texts = [
+        "tcp connection establishment uses a three way handshake",
+        "the client sends syn and the server answers syn ack",
+        "tcp fast open skips a round trip on repeat connections",
+        "syn flood attacks abuse half open connections",
+    ]
+    tcp = [
+        _ranked_chunk(page, text, (1.0, 0.1 * i, 0.0), 0.3 + 0.01 * i)
+        for i, text in enumerate(texts)
+    ]
+    stray = _ranked_chunk(other, "neurons in a network pass signals", (0.0, 1.0, 0.0), 0.7)
+    service = RetrievalService.__new__(RetrievalService)
+    service.settings = type("S", (), {})()
+    picked = service._select([*tcp, stray], tcp[:2], limit=4, per_memory=2)
+    # Every top candidate is from one save: up to 4 of its chunks, no stray.
+    assert {c.chunk_id for c in picked} == {c.chunk_id for c in tcp}
