@@ -278,10 +278,22 @@ def test_chunks_per_memory_are_capped(concepts: None) -> None:
     headers, user_id = _user("retr_cap@example.com")
     long_car = _save(headers, "long-car", "Engine design notes", LONG_CAR_TEXT)
     hits = _retrieve(user_id, "how do car engines burn fuel")
-    assert 0 < sum(h.memory_id == long_car for h in hits) <= 2
+    # The only matching save may give up to rag_single_memory_chunks (4).
+    assert 2 < sum(h.memory_id == long_car for h in hits) <= 4
     # Scoped to that memory, the cap no longer applies.
     scoped = _retrieve(user_id, "how do car engines burn fuel", memory_id=long_car)
     assert len(scoped) > 2
+
+
+def test_competing_memories_keep_the_two_chunk_cap(concepts: None) -> None:
+    headers, user_id = _user("retr_cap_competing@example.com")
+    first = _save(headers, "long-car", "Engine design notes", LONG_CAR_TEXT)
+    second = _save(
+        headers, "long-car-2", "More engine notes", LONG_CAR_TEXT.replace("Section", "Chapter")
+    )
+    hits = _retrieve(user_id, "how do car engines burn fuel")
+    assert {h.memory_id for h in hits} == {first, second}
+    assert all(sum(h.memory_id == m for h in hits) <= 2 for m in (first, second))
 
 
 def test_other_users_memories_are_never_returned(concepts: None) -> None:

@@ -230,6 +230,9 @@ class RetrievalService:
             if memory_id is not None or document
             else int(self._setting("rag_max_chunks_per_memory", 2))
         )
+        if len({c.memory_id for c in (*semantic, *fulltext)}) == 1:
+            # One save is the only match: the cap would only starve the answer.
+            per_memory = max(per_memory, int(self._setting("rag_single_memory_chunks", 4)))
         chosen = self._select(semantic, fulltext, limit=limit, per_memory=per_memory)
         if document and chosen:
             chosen = self._expand_primary_memory(user_id, chosen, limit=limit, scope=scope)[:limit]

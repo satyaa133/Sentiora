@@ -102,6 +102,8 @@ class Settings(BaseSettings):
     # At most this many chunks from one memory, unless the question is scoped
     # to that memory or asks for a summary.
     rag_max_chunks_per_memory: int = 2
+    # When only one memory matches, up to this many of its chunks are used.
+    rag_single_memory_chunks: int = 4
     # "Which sources mention X" answers: a meaning-only hit must be at least
     # this close (cosine distance) to be listed as mentioning X.
     rag_strong_distance: float = 0.4
