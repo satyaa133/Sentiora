@@ -110,3 +110,12 @@ class AuthTokenData(BaseModel):
     refresh_token: str
     access_token_expires_in: int = 900
     user: AuthUserInfo | None = None
+
+
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class ResendOtpRequest(BaseModel):
+    email: EmailStr

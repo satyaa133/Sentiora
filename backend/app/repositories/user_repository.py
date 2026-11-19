@@ -60,6 +60,10 @@ class UserRepository:
         user.password_hash = password_hash
         self.db.commit()
 
+    def mark_email_verified(self, user: User) -> None:
+        user.is_email_verified = True
+        self.db.commit()
+
     def commit_profile(self, profile: UserProfile) -> None:
         self.db.commit()
         self.db.refresh(profile)

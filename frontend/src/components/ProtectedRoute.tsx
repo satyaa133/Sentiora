@@ -18,6 +18,10 @@ export default function ProtectedRoute({ children }: ProtectedRouteProps) {
     return <Navigate to="/login" replace />;
   }
 
+  if (user && !user.is_email_verified) {
+    return <Navigate to="/verify-email" replace />;
+  }
+
   if (user && !user.onboarding_completed) {
     return <Navigate to="/onboarding" replace />;
   }
