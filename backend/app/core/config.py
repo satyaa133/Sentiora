@@ -38,7 +38,8 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://127.0.0.1:6379/0"
-    # SMTP / email (OTP verification)
+    # Email Delivery (Resend API or SMTP)
+    resend_api_key: str | None = None
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
