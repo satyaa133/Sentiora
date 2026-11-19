@@ -49,6 +49,7 @@ class AuthService:
         self.db = db
         self.user_repo = UserRepository(db)
         self.auth_repo = AuthRepository(db)
+        self.settings = get_settings()
 
     def register(self, req: RegisterRequest) -> RegisterResponseData:
         existing_user = self.user_repo.get_by_email(req.email)
@@ -115,7 +116,7 @@ class AuthService:
                 },
             )
 
-        if settings.require_email_verification and not user.is_email_verified:
+        if self.settings.require_email_verification and not user.is_email_verified:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={

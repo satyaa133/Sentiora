@@ -28,6 +28,7 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # Never call live embedding providers from tests (index or query time), even if
 # real keys exist in the local .env files.
 os.environ["EMBEDDING_PROVIDER"] = "none"
+os.environ["REQUIRE_EMAIL_VERIFICATION"] = "false"
 for _key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"):
     os.environ[_key] = ""
 
