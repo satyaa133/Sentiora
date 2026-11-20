@@ -11,12 +11,22 @@ per call. Keys are never logged.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
+
+from redis import Redis
 
 from app.core.config import openrouter_keys
+from app.core.redis_client import (
+    KEY_PREFIX,
+    RedisUnavailableError,
+    SharedRedis,
+    shared_redis,
+)
 
 # Statuses that mean "this key will keep failing for a while".
 COOLDOWN_STATUSES = frozenset({401, 402, 403, 429})
@@ -89,10 +99,23 @@ def build_backends(settings: Any) -> list[LLMBackend]:
     return backends
 
 
-class KeyPool:
-    """Process-wide rotation and cooldown state, shared by every request."""
+def _redis_keys(backend: LLMBackend) -> tuple[str, str]:
+    """Redis keys for a backend's cooldown and failure count (a hash, never the key)."""
+    digest = hashlib.sha256(backend.api_key.encode("utf-8")).hexdigest()[:24]
+    return f"{KEY_PREFIX}llm:cooldown:{digest}", f"{KEY_PREFIX}llm:failures:{digest}"
 
-    def __init__(self) -> None:
+
+class KeyPool:
+    """Rotation and cooldown state, shared by every request.
+
+    Cooldowns and failure counts are mirrored in Redis, so a key that fails in
+    one API process or worker is skipped by all of them (a circuit breaker per
+    key). Rotation stays per process. Without Redis, each process keeps its own
+    state, as before.
+    """
+
+    def __init__(self, redis: SharedRedis = shared_redis) -> None:
+        self._redis = redis
         self._lock = threading.Lock()
         # One round-robin turn per backend list, so embedding calls rotating
         # their keys do not shift which chat backend answers first.
@@ -112,6 +135,7 @@ class KeyPool:
         """
         if not backends:
             return []
+        shared = self._shared_remaining(backends)
         now = time.monotonic()
         with self._lock:
             group = tuple(b.name for b in backends)
@@ -120,13 +144,18 @@ class KeyPool:
             if rotate:
                 self._turns[group] = turn + 1
             rotated = backends[start:] + backends[:start]
-            healthy = [
-                b for b in rotated if self._cooling_until.get(b.api_key, 0.0) <= now
-            ]
-            cooling = sorted(
-                (b for b in rotated if self._cooling_until.get(b.api_key, 0.0) > now),
-                key=lambda b: self._cooling_until[b.api_key],
-            )
+            remaining = {
+                b.api_key: max(
+                    self._cooling_until.get(b.api_key, 0.0) - now,
+                    shared.get(b.api_key, 0.0),
+                )
+                for b in rotated
+            }
+        healthy = [b for b in rotated if remaining[b.api_key] <= 0]
+        cooling = sorted(
+            (b for b in rotated if remaining[b.api_key] > 0),
+            key=lambda b: remaining[b.api_key],
+        )
         return healthy + cooling
 
     def mark_failed(
@@ -152,25 +181,75 @@ class KeyPool:
             base = min(TRANSIENT_COOLDOWN_SECONDS, cooldown_seconds)
         else:
             return False
+        cap = max(max_cooldown_seconds, base)
+        shared_failures = self._shared_failure(backend, cap)
         with self._lock:
-            failures = self._failures.get(backend.api_key, 0) + 1
+            failures = max(self._failures.get(backend.api_key, 0) + 1, shared_failures)
             self._failures[backend.api_key] = failures
-            seconds = min(base * 2 ** (failures - 1), max(max_cooldown_seconds, base))
+            seconds = min(base * 2 ** (failures - 1), cap)
             if retry_after is not None and retry_after > seconds:
-                seconds = min(retry_after, max(max_cooldown_seconds, base))
+                seconds = min(retry_after, cap)
             self._cooling_until[backend.api_key] = time.monotonic() + seconds
+        self._shared_cool(backend, seconds)
         return True
 
     def cooldown_remaining(self, backend: LLMBackend) -> float:
+        shared = self._shared_remaining([backend]).get(backend.api_key, 0.0)
         with self._lock:
-            return max(
-                0.0, self._cooling_until.get(backend.api_key, 0.0) - time.monotonic()
-            )
+            local = self._cooling_until.get(backend.api_key, 0.0) - time.monotonic()
+        return max(0.0, local, shared)
 
     def mark_ok(self, backend: LLMBackend) -> None:
         with self._lock:
             self._cooling_until.pop(backend.api_key, None)
             self._failures.pop(backend.api_key, None)
+        cool_key, fail_key = _redis_keys(backend)
+        with contextlib.suppress(RedisUnavailableError):
+            self._redis.run(lambda client: client.delete(cool_key, fail_key))
+
+    # -- shared state (Redis); every helper degrades to "nothing shared" -----
+
+    def _shared_remaining(self, backends: list[LLMBackend]) -> dict[str, float]:
+        """Seconds each backend still cools down according to Redis."""
+
+        def read(client: Redis) -> list[int]:
+            pipe = client.pipeline(transaction=False)
+            for backend in backends:
+                pipe.pttl(_redis_keys(backend)[0])
+            return cast(list[int], pipe.execute())
+
+        try:
+            ttls = self._redis.run(read)
+        except RedisUnavailableError:
+            return {}
+        return {
+            backend.api_key: ttl / 1000
+            for backend, ttl in zip(backends, ttls, strict=True)
+            if ttl and ttl > 0
+        }
+
+    def _shared_failure(self, backend: LLMBackend, cap: float) -> int:
+        """Count one more failure in Redis; 0 when Redis is unavailable."""
+        fail_key = _redis_keys(backend)[1]
+
+        def count(client: Redis) -> int:
+            pipe = client.pipeline(transaction=True)
+            pipe.incr(fail_key)
+            # The count resets once the key has been quiet for the longest cooldown.
+            pipe.expire(fail_key, int(cap) * 2)
+            return int(pipe.execute()[0])
+
+        try:
+            return self._redis.run(count)
+        except RedisUnavailableError:
+            return 0
+
+    def _shared_cool(self, backend: LLMBackend, seconds: float) -> None:
+        cool_key = _redis_keys(backend)[0]
+        with contextlib.suppress(RedisUnavailableError):
+            self._redis.run(
+                lambda client: client.set(cool_key, "1", px=max(1, int(seconds * 1000)))
+            )
 
     def reset(self) -> None:
         with self._lock:
