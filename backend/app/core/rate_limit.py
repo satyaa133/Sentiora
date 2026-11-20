@@ -1,20 +1,28 @@
-"""In-memory rate limiting for FastAPI routes.
+"""Rate limiting for FastAPI routes, shared across processes through Redis.
 
 Limits are configured in Settings so they are not hardcoded at call sites.
+Counts live in Redis so N API processes allow the limit once, not N times;
+when Redis is down, each process falls back to its own in-memory window.
 """
 
 from __future__ import annotations
 
 import threading
 import time
+import uuid
 from collections import defaultdict, deque
+from typing import cast
 
 from fastapi import HTTPException, Request, status
+from redis import Redis
 
 from app.core.config import Settings, get_settings
+from app.core.redis_client import KEY_PREFIX, RedisUnavailableError, SharedRedis, shared_redis
 
 
 class SlidingWindowLimiter:
+    """In-process sliding window: the fallback when Redis is unavailable."""
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._hits: dict[str, deque[float]] = defaultdict(deque)
@@ -37,7 +45,51 @@ class SlidingWindowLimiter:
             self._hits.clear()
 
 
-limiter = SlidingWindowLimiter()
+def _redis_allow(
+    client: Redis, key: str, limit: int, window_seconds: int
+) -> tuple[bool, int]:
+    """Sliding window in a sorted set: one member per allowed request."""
+    redis_key = f"{KEY_PREFIX}ratelimit:{key}"
+    now_ms = int(time.time() * 1000)
+    window_ms = window_seconds * 1000
+    member = f"{now_ms}:{uuid.uuid4().hex}"
+    pipe = client.pipeline(transaction=True)
+    pipe.zremrangebyscore(redis_key, 0, now_ms - window_ms)
+    pipe.zadd(redis_key, {member: now_ms})
+    pipe.zcard(redis_key)
+    pipe.pexpire(redis_key, window_ms)
+    _, _, count, _ = pipe.execute()
+    if int(count) <= limit:
+        return True, 0
+    # Over the limit: this request doesn't count. Retry when the oldest expires.
+    client.zrem(redis_key, member)
+    # Sync client: the stubs type replies as "Awaitable | Any".
+    oldest = cast(
+        list[tuple[bytes, float]], client.zrange(redis_key, 0, 0, withscores=True)
+    )
+    oldest_ms = float(oldest[0][1]) if oldest else float(now_ms)
+    retry_after = max(1, int((oldest_ms + window_ms - now_ms) / 1000))
+    return False, retry_after
+
+
+class SharedRateLimiter:
+    def __init__(self, redis: SharedRedis) -> None:
+        self._redis = redis
+        self._fallback = SlidingWindowLimiter()
+
+    def allow(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
+        try:
+            return self._redis.run(
+                lambda client: _redis_allow(client, key, limit, window_seconds)
+            )
+        except RedisUnavailableError:
+            return self._fallback.allow(key, limit, window_seconds)
+
+    def reset(self) -> None:
+        self._fallback.reset()
+
+
+limiter = SharedRateLimiter(shared_redis)
 
 
 def client_ip(request: Request, settings: Settings | None = None) -> str:
