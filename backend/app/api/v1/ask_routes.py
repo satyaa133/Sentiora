@@ -150,6 +150,10 @@ def ask_memories_stream(
         )
     except Exception as exc:
         raise _ask_error(exc) from None
+    # Every database step is done. The request's session (shared with the auth
+    # dependency) would otherwise hold its pooled connection until the stream
+    # ends, which caps concurrent answers at the pool size.
+    db.close()
 
     def events() -> Iterator[str]:
         try:
