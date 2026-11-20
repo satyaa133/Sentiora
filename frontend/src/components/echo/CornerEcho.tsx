@@ -158,7 +158,11 @@ export default function CornerEcho() {
           case "answer":
             if (event.status === "ready") {
               play([{ face: "happy", ms: BUBBLE_MS }]);
-              say(event.cited ? "Answer ready, with sources" : "Answer ready");
+              // On the Ask page the answer is already on screen, and the
+              // bubble would sit over its follow-up buttons.
+              if (!document.querySelector("[data-echo-dock]")) {
+                say(event.cited ? "Answer ready, with sources" : "Answer ready");
+              }
             } else if (event.status === "not_found") {
               play([{ face: "idle", ms: BUBBLE_MS }]);
               say("Not in your memory yet");

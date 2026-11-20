@@ -158,3 +158,20 @@ def test_refresh_rejected_for_disabled_account(clean_db) -> None:
     resp = client.post("/api/v1/auth/refresh-token", json={"refresh_token": refresh_token})
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "AUTH_FORBIDDEN"
+
+
+@pytest.mark.parametrize("email", ["someone@example.com", "someone@example.dev"])
+def test_example_domains_are_rejected_unless_allowed(
+    email: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pydantic import ValidationError
+
+    from app.core.config import get_settings
+    from app.schemas.auth import RegisterRequest
+
+    payload = {"email": email, "password": "MemoryPassword123!", "full_name": "Test User"}
+    monkeypatch.setattr(get_settings(), "allow_test_email_domains", False)
+    with pytest.raises(ValidationError, match="Please use a valid email address"):
+        RegisterRequest(**payload)
+    monkeypatch.setattr(get_settings(), "allow_test_email_domains", True)
+    assert RegisterRequest(**payload).email == email

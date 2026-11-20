@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     app_name: str = "Sentiora Backend"
     app_environment: str = "development"
     app_version: str = "0.1.0"
+    # Accept the reserved example.com / example.dev sign-up domains. On only
+    # in the test suite and the e2e stack; never in a real deployment.
+    allow_test_email_domains: bool = False
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://127.0.0.1:6379/0"
@@ -99,6 +102,8 @@ class Settings(BaseSettings):
     # At most this many chunks from one memory, unless the question is scoped
     # to that memory or asks for a summary.
     rag_max_chunks_per_memory: int = 2
+    # When only one memory matches, up to this many of its chunks are used.
+    rag_single_memory_chunks: int = 4
     # "Which sources mention X" answers: a meaning-only hit must be at least
     # this close (cosine distance) to be listed as mentioning X.
     rag_strong_distance: float = 0.4

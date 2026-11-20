@@ -141,6 +141,20 @@ describe("corner Echo", () => {
     expect(screen.getByText("Keeping watch")).toBeInTheDocument();
   });
 
+  it("does not cover the Ask page's answer with an 'Answer ready' bubble", () => {
+    const dock = document.createElement("div");
+    dock.setAttribute("data-echo-dock", "");
+    document.body.appendChild(dock);
+    try {
+      const { container } = render(<CornerEcho />);
+      act(() => emitEcho({ type: "answer", status: "ready", cited: true }));
+      expect(screen.queryByText("Answer ready, with sources")).not.toBeInTheDocument();
+      expect(container.querySelector("[data-echo-state]")).toHaveAttribute("data-echo-state", "happy");
+    } finally {
+      dock.remove();
+    }
+  });
+
   it("falls asleep after 20 seconds without input and wakes on input", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.spyOn(Math, "random").mockReturnValue(0.99);

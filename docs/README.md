@@ -1,5 +1,7 @@
 # Sentiora Documentation
 
+> **Current work: [REBUILD_PLAN.md](REBUILD_PLAN.md).** For anything it covers (Ask, retrieval, embeddings, capture processing, reliability, deployment) it overrides the documents below. Its section 12 lists which documents are current and which are superseded.
+
 Every document in this folder is a canonical engineering document and must be treated as the source of truth during implementation.
 
 1. [01_PRD_v2.1_FINAL.pdf](01_PRD_v2.1_FINAL.pdf) - Product Requirements Document (PRD)

@@ -19,6 +19,15 @@ AI agents MUST read the documentation in the docs folder before implementing any
 - TASKS.md
 - PROMPT_GUIDE.md
 
+## Rebuild v3 (current work)
+
+The current work is the rebuild described in `docs/REBUILD_PLAN.md`. Before any rebuild task:
+
+- Read `docs/REBUILD_PLAN.md` and the "Rebuild v3" section of `docs/TASKS.md`.
+- Work on the current stage only (S0–S10, in order); stages replace the phase sequence below for rebuild work, and the rest of Phase 9 is stage S10.
+- For anything the plan covers, it overrides `docs/RAG_v2_ADDENDUM.md` and the PDFs. Its section 12 lists which PDFs are superseded.
+- New endpoints, fields, tables, columns and settings are only those in the plan's sections 7–9. Propose a plan change instead of inventing one.
+
 ## Development Rules
 
 AI agents must:

@@ -24,7 +24,11 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
     }
 
     if (mode === "register") {
-      if (!isTrustedEmail(email)) {
+      if (
+        !isTrustedEmail(email, {
+          allowTestDomains: import.meta.env.VITE_ALLOW_TEST_EMAIL_DOMAINS === "true",
+        })
+      ) {
         setError(
           "Please use a valid email address.",
         );

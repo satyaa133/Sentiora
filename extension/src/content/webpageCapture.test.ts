@@ -234,6 +234,17 @@ describe("stripNonContentNodes — noise removal", () => {
     expect(text).not.toContain("Menu");
     expect(text).not.toContain("Related");
   });
+
+  it("removes wiki [edit] section links", () => {
+    const root = createBody(`
+      <h2>Necessary conditions<span class="mw-editsection"><span>[</span><a href="#">edit</a><span>]</span></span></h2>
+      <p>Mutual exclusion, hold and wait, no preemption and circular wait.</p>
+    `);
+    stripNonContentNodes(root);
+    const text = extractSemanticText(root);
+    expect(text).toContain("Necessary conditions");
+    expect(text).not.toContain("edit");
+  });
 });
 
 // ──────────────────────────────────────────────

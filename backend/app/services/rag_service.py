@@ -1051,16 +1051,41 @@ class RagService:
 
         # Thinking tokens count against max_output_tokens on Gemini 2.5+/3.x and
         # cut answers off before the cited memory part; grounded answers don't
-        # need them, and skipping them roughly halves latency.
+        # need them, and keeping them low roughly halves latency.
         try:
-            response = generate(types.ThinkingConfig(thinking_budget=0))
+            response = generate(gemini_thinking_config(backend.model))
         except Exception as exc:
-            # Some models (e.g. 2.5 Pro) refuse to switch thinking off; any other
-            # 400 (a bad key, a bad request) would only fail again.
-            if getattr(exc, "code", None) != 400 or "thinking" not in str(exc).lower():
+            # Some models refuse a thinking setting (2.5 Pro cannot switch it off,
+            # 3.x lite rejects a zero budget); any other 400 (a bad key, a bad
+            # request) would only fail again.
+            if getattr(exc, "code", None) != 400 or not _rejects_thinking(exc):
                 raise
             response = generate(None)
         return _gemini_response_text(response)
+
+
+_GEMINI_MAJOR_RE = re.compile(r"gemini-(\d+)")
+
+
+def gemini_thinking_config(model: str) -> Any:
+    """Least thinking the model accepts.
+
+    Gemini 3.x (and the ``-latest`` aliases, which point at 3.x) take
+    ``thinking_level``; a zero ``thinking_budget`` makes some of them hang or
+    reject the request. ``low`` is the lowest level every 3.x model accepts.
+    Gemini 2.x switches thinking off with ``thinking_budget=0``.
+    """
+    from google.genai import types
+
+    match = _GEMINI_MAJOR_RE.search(model)
+    if (match and int(match.group(1)) >= 3) or model.endswith("-latest"):
+        return types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+    return types.ThinkingConfig(thinking_budget=0)
+
+
+def _rejects_thinking(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "thinking" in text or "invalid argument" in text
 
 
 def _gemini_response_text(response: object) -> str:
