@@ -11,7 +11,9 @@ vi.mock("../services/memoryService", async (importOriginal) => {
   const actual = await importOriginal<typeof MemoryService>();
   return { ...actual, createMemoryItem: vi.fn() };
 });
+vi.mock("../services/feedbackService", () => ({ sendAnswerFeedback: vi.fn() }));
 import { askStream } from "../services/askStream";
+import { sendAnswerFeedback } from "../services/feedbackService";
 import { createMemoryItem } from "../services/memoryService";
 import type * as MemoryService from "../services/memoryService";
 
@@ -348,6 +350,41 @@ describe("Ask Sentiora controls", () => {
     expect(payload?.url).toMatch(/^https:\/\/sentiora\.app\/notes\/\d+$/);
     expect(payload?.title).toBe("Note: How do I keep images small?");
     expect(payload?.content).toContain("[2] Docker image size guide (https://example.dev/size)");
+  });
+
+  it("sends a rating with the cited chunks and shows it was received", async () => {
+    vi.mocked(sendAnswerFeedback).mockResolvedValueOnce();
+    streams(final());
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+    await screen.findByText(/Use multi-stage builds/);
+
+    const group = screen.getByRole("group", { name: "Rate this answer" });
+    fireEvent.click(within(group).getByRole("button", { name: "Not helpful" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Thanks");
+    expect(sendAnswerFeedback).toHaveBeenCalledWith({
+      question: "How do I keep images small?",
+      answerMode: "memory",
+      rating: -1,
+      sourceChunkIds: ["c1", "c2"],
+    });
+    const notHelpful = within(group).getByRole("button", { name: "Not helpful" });
+    expect(notHelpful).toHaveAttribute("aria-pressed", "true");
+    expect(notHelpful).toBeDisabled();
+    expect(within(group).getByRole("button", { name: "Helpful" })).toBeDisabled();
+  });
+
+  it("lets the user try again when a rating fails", async () => {
+    vi.mocked(sendAnswerFeedback).mockRejectedValueOnce(new Error("offline"));
+    streams(final());
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+    await screen.findByText(/Use multi-stage builds/);
+
+    fireEvent.click(screen.getByRole("button", { name: "Helpful" }));
+    expect(await screen.findByText("Could not send your rating. Try again.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Helpful" })).toBeEnabled();
   });
 
   it("keeps conversations in this browser and reopens them from history", async () => {

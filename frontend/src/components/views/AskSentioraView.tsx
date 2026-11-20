@@ -19,6 +19,8 @@ import {
   IconNote,
   IconPlus,
   IconRefresh,
+  IconThumbDown,
+  IconThumbUp,
   Kbd,
   Skeleton,
 } from "@shared/ui";
@@ -38,6 +40,7 @@ import {
   type StoredConversation,
 } from "../../services/askHistory";
 import { getStoredSession } from "../../services/authStorage";
+import { sendAnswerFeedback, type FeedbackRating } from "../../services/feedbackService";
 import { browserTimeZone } from "../../services/dashboardService";
 import { createMemoryItem } from "../../services/memoryService";
 import { emitEcho } from "../echo/echoEvents";
@@ -93,6 +96,10 @@ export default function AskSentioraView({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // Save as note (DESIGN.md §5.5): per answer, saving / saved / failed.
   const [noteState, setNoteState] = useState<Record<string, "saving" | "saved" | "failed">>({});
+  // 👍/👎 per answer (REBUILD_PLAN S2): the rating sent and its state.
+  const [feedback, setFeedback] = useState<
+    Record<string, { rating: FeedbackRating; state: "sending" | "sent" | "failed" }>
+  >({});
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   // Effects can run twice (StrictMode); act on each launch only once.
@@ -318,6 +325,25 @@ export default function AskSentioraView({
     }
   }
 
+  async function handleFeedback(message: AiMessage, rating: FeedbackRating) {
+    const current = feedback[message.id];
+    if (current && current.state !== "failed") return;
+    setFeedback((prev) => ({ ...prev, [message.id]: { rating, state: "sending" } }));
+    try {
+      await sendAnswerFeedback({
+        question: message.question,
+        answerMode: message.mode ?? "memory",
+        rating,
+        sourceChunkIds: usedSourceList(message)
+          .map((source) => source.chunk_id)
+          .filter((id): id is string => Boolean(id)),
+      });
+      setFeedback((prev) => ({ ...prev, [message.id]: { rating, state: "sent" } }));
+    } catch {
+      setFeedback((prev) => ({ ...prev, [message.id]: { rating, state: "failed" } }));
+    }
+  }
+
   function handleCopy(message: AiMessage) {
     void navigator.clipboard?.writeText(plainAnswer(message));
     setCopiedId(message.id);
@@ -484,9 +510,43 @@ export default function AskSentioraView({
                   {noteState[msg.id] === "saved" ? "Saved as note" : "Save as note"}
                 </Button>
               ) : null}
+              {msg.status === "done" && msg.question ? (
+                <div role="group" aria-label="Rate this answer" className="flex gap-2">
+                  {([1, -1] as const).map((rating) => {
+                    const rated = feedback[msg.id];
+                    const chosen = rated?.rating === rating && rated.state !== "failed";
+                    return (
+                      <Button
+                        key={rating}
+                        variant="secondary"
+                        size="sm"
+                        aria-pressed={chosen}
+                        leadingIcon={
+                          rating === 1 ? <IconThumbUp size={16} /> : <IconThumbDown size={16} />
+                        }
+                        loading={chosen && rated?.state === "sending"}
+                        disabled={rated !== undefined && rated.state !== "failed"}
+                        onClick={() => void handleFeedback(msg, rating)}
+                      >
+                        {rating === 1 ? "Helpful" : "Not helpful"}
+                      </Button>
+                    );
+                  })}
+                </div>
+              ) : null}
               {noteState[msg.id] === "failed" ? (
                 <p role="alert" className="w-full text-[15px] text-link">
                   Could not save this note. Try again.
+                </p>
+              ) : null}
+              {feedback[msg.id]?.state === "sent" ? (
+                <p role="status" className="w-full text-[15px] text-muted">
+                  Thanks, that helps improve answers.
+                </p>
+              ) : null}
+              {feedback[msg.id]?.state === "failed" ? (
+                <p role="alert" className="w-full text-[15px] text-link">
+                  Could not send your rating. Try again.
                 </p>
               ) : null}
             </div>
