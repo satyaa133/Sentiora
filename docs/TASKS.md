@@ -48,6 +48,25 @@
 | R7: Ask page UX | ✅ Completed | Streaming with Stop/Regenerate, `[S#]` citation chips with previews and video timestamps, collapsible sources, mode badge, model follow-ups, scope picker, local history, keyboard shortcuts |
 | R8: Evaluation | ✅ Completed | `npm run eval:rag` (hit@k, MRR, noise, reject, threshold sweep); dev baseline hit@6 1.00, MRR 0.96, reject 1.00; `RAG_MIN_SIMILARITY` kept at 0.25 |
 
+### Rebuild v3 (docs/REBUILD_PLAN.md)
+
+Approved direction 2026-11-20: instant answers from the user's saves with no external AI call at question time, AI on an "Explain with AI" button, local embeddings and reranker, lazy background enrichment, observability and a 500-user load test. Runs before the rest of Phase 9, which becomes S10. Plans and payments (L1) come after.
+
+| Stage | Status | Notes |
+| ----- | ------ | ----- |
+| S0: Documentation reset | 🟡 In Progress | REBUILD_PLAN.md written; pointers in AGENTS.md and docs/README.md. Pending: API.md + openapi.json, DATABASE.md, PROMPT_GUIDE/CONTRIBUTING updates, archive of superseded docs |
+| S1: Reliability fixes | ⏳ Pending | DB session not held while streaming, pgvector iterative scan, configurable timeouts, circuit breaker, Redis rate limits, automatic embedding retry, more workers |
+| S2: Observability baseline | ⏳ Pending | Structured logs, Sentry, `/metrics`, `llm_usage`, answer feedback, baseline numbers |
+| S3: Local embeddings | ⏳ Pending | `EMBEDDING_PROVIDER=local`, `embedding_local` column + HNSW, backfill, bge-small vs nomic eval |
+| S4: Local reranker | ⏳ Pending | Cross-encoder rerank of top 30, long-page eval cases |
+| S5: Save pipeline v3 | ⏳ Pending | Chunk merge fix, PDF title fallback, capture/enrich queues, lazy enrichment, question bank, contextual chunks |
+| S6: Ask v3 | ⏳ Pending | Question-bank leg, instant extractive answer, `answer_mode`, one-call AI answer, AI semaphore (`AI_BUSY`), answer cache |
+| S7: Web app and extension | ⏳ Pending | Instant answer + Explain with AI, feedback, summaries, Save now enrichment, title edit, one dashboard request, privacy notice at sign-up |
+| S8: Quality, security, privacy | ⏳ Pending | Eval in CI, answer eval, isolation and injection tests, full account deletion, YouTube in real Chrome |
+| S9: Load test | ⏳ Pending | k6, 500 users, instant p95 < 1 s, zero 5xx |
+| S10: Launch readiness | ⏳ Pending | Remaining Phase 9: hosting, backups, PgBouncer, HTTPS, Anthropic API (Claude Haiku 5.5) + Batch enrichment, privacy policy, store submission |
+| L1: Plans and payments | 💤 Later | Free 15 AI answers/day, Student (college email + ID), Plus, Pro; Razorpay |
+
 
 ---
 
