@@ -11,6 +11,7 @@ from rq.job import Job
 from rq.scheduler import RQScheduler
 from rq.timeouts import TimerDeathPenalty
 
+from app.core.error_tracking import init_error_tracking
 from app.core.logging import configure_logging, request_id_var
 from app.workers.queue import create_queues, create_redis_connection
 
@@ -136,6 +137,7 @@ def run_until_stopped(
 
 def main() -> None:
     configure_logging()
+    init_error_tracking("worker")
     run_until_stopped()
 
 

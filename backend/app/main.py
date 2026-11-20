@@ -14,11 +14,13 @@ from app.api.v1.health_routes import router as health_router
 from app.api.v1.memory_routes import router as memory_router
 from app.api.v1.user_routes import router as user_router
 from app.core.config import get_settings
+from app.core.error_tracking import init_error_tracking
 from app.core.logging import configure_logging, request_id_var
 from app.models import MemoryChunk, MemoryItem  # noqa: F401
 from app.schemas.envelope import response_meta
 
 configure_logging()
+init_error_tracking("api")
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
