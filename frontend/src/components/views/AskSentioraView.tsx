@@ -522,7 +522,13 @@ export default function AskSentioraView({
                         size="sm"
                         aria-pressed={chosen}
                         leadingIcon={
-                          rating === 1 ? <IconThumbUp size={16} /> : <IconThumbDown size={16} />
+                          chosen && rated?.state === "sent" ? (
+                            <IconCheck size={16} />
+                          ) : rating === 1 ? (
+                            <IconThumbUp size={16} />
+                          ) : (
+                            <IconThumbDown size={16} />
+                          )
                         }
                         loading={chosen && rated?.state === "sending"}
                         disabled={rated !== undefined && rated.state !== "failed"}
