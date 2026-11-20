@@ -410,6 +410,9 @@ class RetrievalService:
             return []
         # Below this cosine similarity a vector neighbour is not relevant.
         max_distance = 1.0 - float(self._setting("rag_min_similarity", 0.25))
+        # Iterative HNSW scans (relaxed_order, see app/core/db.py) may return
+        # rows slightly out of order; rank by the exact distance.
+        rows.sort(key=lambda row: float("inf") if row[2] is None else float(row[2]))
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
             if dist is None or float(dist) > max_distance:
