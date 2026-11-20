@@ -36,7 +36,8 @@ def main() -> int:
     schema = render()
     if args.check:
         current = OUTPUT.read_text(encoding="utf-8") if OUTPUT.exists() else ""
-        if current != schema:
+        # A Windows checkout may have CRLF line endings; compare content only.
+        if current.replace("\r\n", "\n") != schema:
             print(f"{OUTPUT} is out of date. Run: npm run docs:api", file=sys.stderr)
             return 1
         print(f"{OUTPUT} is up to date.")
