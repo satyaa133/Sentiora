@@ -23,6 +23,7 @@ from app.services.ingest.transcript_normalizer import (
     clean_transcript_nodes,
     clean_transcript_text,
 )
+from app.services.usage import usage_for
 from app.workers.queue import create_queues
 
 logger = logging.getLogger(__name__)
@@ -298,7 +299,8 @@ def process_capture(memory_item_id_str: str) -> None:
         chunks = build_chunk_rows(item, drafts)
         ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
         try:
-            adapter = embed_chunks(chunks, memory_item_id_str)
+            with usage_for(item.user_id):
+                adapter = embed_chunks(chunks, memory_item_id_str)
         except CaptureProcessingError as embed_exc:
             # The memory is still searchable by full text; the embedding
             # backfill (scripts.reprocess_memories --embed) fills it in later.
@@ -429,7 +431,8 @@ def retry_embedding(memory_item_id_str: str, attempt: int) -> None:
         if not chunks:
             return
         try:
-            adapter = embed_chunks(chunks, memory_item_id_str)
+            with usage_for(item.user_id):
+                adapter = embed_chunks(chunks, memory_item_id_str)
         except CaptureProcessingError as exc:
             db.rollback()
             logger.warning(

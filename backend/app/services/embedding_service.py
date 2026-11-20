@@ -10,6 +10,7 @@ fails, callers fall back to full-text search.
 from __future__ import annotations
 
 import logging
+import time
 
 import openai
 from openai import OpenAI
@@ -22,6 +23,7 @@ from app.services.llm_pool import (
     max_attempts,
     retry_after_seconds,
 )
+from app.services.usage import UsageReport, record_usage, report_from_openai
 
 logger = logging.getLogger(__name__)
 
@@ -97,9 +99,16 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
                 timeout=self._timeout,
                 max_retries=0,
             )
+            started = time.perf_counter()
             try:
-                response = client.embeddings.create(model=self._model, input=batch)
+                response = client.embeddings.create(
+                    model=self._model,
+                    input=batch,
+                    # OpenRouter usage accounting: the response reports the cost.
+                    extra_body={"usage": {"include": True}},
+                )
             except openai.APIStatusError as exc:
+                _record_embedding("openrouter", self._model, started, error=exc)
                 last_error = exc
                 key_pool.mark_failed(
                     backend,
@@ -114,6 +123,7 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
                 )
                 continue
             except (openai.APITimeoutError, openai.APIConnectionError) as exc:
+                _record_embedding("openrouter", self._model, started, error=exc)
                 last_error = exc
                 key_pool.mark_failed(
                     backend,
@@ -128,6 +138,12 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
                     type(exc).__name__,
                 )
                 continue
+            _record_embedding(
+                "openrouter",
+                self._model,
+                started,
+                report=report_from_openai(getattr(response, "usage", None)),
+            )
             key_pool.mark_ok(backend)
             ordered = sorted(response.data or [], key=lambda item: item.index)
             vectors = [list(item.embedding) for item in ordered]
@@ -138,6 +154,25 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
             _check_dimensions(vectors, self._dimensions, "OpenRouter")
             return vectors
         raise RuntimeError(f"Every OpenRouter key failed to embed: {last_error}")
+
+
+def _record_embedding(
+    provider: str,
+    model: str,
+    started: float,
+    *,
+    report: UsageReport | None = None,
+    error: BaseException | None = None,
+) -> None:
+    """One llm_usage row per embedding request (the user comes from usage_for)."""
+    record_usage(
+        purpose="embed",
+        provider=provider,
+        model=model,
+        started=started,
+        report=report,
+        error=error,
+    )
 
 
 class OpenAIEmbeddingAdapter(EmbeddingPort):
@@ -156,8 +191,19 @@ class OpenAIEmbeddingAdapter(EmbeddingPort):
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        response = self._client.embeddings.create(
-            model=self._model, input=[_clip(t) for t in texts]
+        started = time.perf_counter()
+        try:
+            response = self._client.embeddings.create(
+                model=self._model, input=[_clip(t) for t in texts]
+            )
+        except Exception as exc:
+            _record_embedding("openai", self._model, started, error=exc)
+            raise
+        _record_embedding(
+            "openai",
+            self._model,
+            started,
+            report=report_from_openai(getattr(response, "usage", None)),
         )
         ordered = sorted(response.data, key=lambda item: item.index)
         vectors = [list(item.embedding) for item in ordered]
@@ -192,11 +238,17 @@ class GeminiEmbeddingAdapter(EmbeddingPort):
         dim = get_settings().embedding_dimensions
         vectors: list[list[float]] = []
         for text in texts:
-            response = self._client.models.embed_content(
-                model=self._model,
-                contents=_clip(text),
-                config=types.EmbedContentConfig(output_dimensionality=dim),
-            )
+            started = time.perf_counter()
+            try:
+                response = self._client.models.embed_content(
+                    model=self._model,
+                    contents=_clip(text),
+                    config=types.EmbedContentConfig(output_dimensionality=dim),
+                )
+            except Exception as exc:
+                _record_embedding("gemini", self._model, started, error=exc)
+                raise
+            _record_embedding("gemini", self._model, started)
             embeddings = response.embeddings or []
             if not embeddings or embeddings[0].values is None:
                 raise RuntimeError("Gemini returned no embedding values.")

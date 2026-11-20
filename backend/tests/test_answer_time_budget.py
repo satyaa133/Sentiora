@@ -136,7 +136,7 @@ def test_openrouter_embeddings_use_the_embedding_timeout(
             captured.update(kwargs)
             self.embeddings = SimpleNamespace(create=self.create)
 
-        def create(self, model: str, input: list[str]) -> Any:
+        def create(self, model: str, input: list[str], **kwargs: Any) -> Any:
             return SimpleNamespace(
                 data=[SimpleNamespace(index=0, embedding=[0.0] * 1536)]
             )

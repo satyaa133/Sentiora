@@ -24,6 +24,7 @@ from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.services.embedding_service import get_embedding_adapter
 from app.services.retrieval import selection
+from app.services.usage import usage_for
 
 _TSQUERY_SAFE = re.compile(r"[^a-z0-9]")
 
@@ -210,6 +211,22 @@ class RetrievalService:
         Returns [] when nothing clears the relevance bar (the question is not
         covered by the user's memory).
         """
+        # Embedding calls made for this search count against this user.
+        with usage_for(user_id):
+            return self._retrieve(
+                user_id, query, top_k, source_type, memory_id, date_from, date_to
+            )
+
+    def _retrieve(
+        self,
+        user_id: UUID,
+        query: str,
+        top_k: int | None,
+        source_type: SourceType | None,
+        memory_id: UUID | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> list[RetrievedChunk]:
         scope = _Scope(source_type, memory_id, date_from, date_to)
         self._vector_ready = False
         document = needs_document_context(query)

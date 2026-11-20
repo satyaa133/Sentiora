@@ -49,7 +49,9 @@ class _FakeOpenAI:
         self.api_key = api_key
         self.embeddings = SimpleNamespace(create=self._create)
 
-    def _create(self, *, model: str, input: list[str]) -> SimpleNamespace:  # noqa: A002
+    def _create(
+        self, *, model: str, input: list[str], **kwargs: object  # noqa: A002
+    ) -> SimpleNamespace:
         _FakeOpenAI.calls.append((self.api_key, len(input)))
         if self.api_key in _FakeOpenAI.failing:
             raise _status_error(_FakeOpenAI.failing[self.api_key])
