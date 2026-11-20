@@ -66,6 +66,8 @@ def disable_rq_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("rq disabled in tests")
 
     monkeypatch.setattr("app.services.memory_service.create_queues", _unavailable)
+    # Embedding retries are scheduled from the capture job; never on a live queue.
+    monkeypatch.setattr("app.workers.jobs.process_capture.create_queues", _unavailable)
 
 
 @pytest.fixture(autouse=True)
