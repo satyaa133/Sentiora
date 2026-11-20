@@ -22,6 +22,7 @@ from typing import Any, cast
 from redis import Redis
 
 from app.core.config import openrouter_keys
+from app.core.metrics import AI_PROVIDER_ERRORS, provider_error_reason
 from app.core.redis_client import (
     KEY_PREFIX,
     RedisUnavailableError,
@@ -182,6 +183,10 @@ class KeyPool:
         key doubles the wait, capped at ``max_cooldown_seconds``. A provider's
         ``Retry-After`` is used when it asks for longer.
         """
+        AI_PROVIDER_ERRORS.labels(
+            provider=backend.provider,
+            reason=provider_error_reason(status, timed_out=timed_out),
+        ).inc()
         if status is not None and status in COOLDOWN_STATUSES:
             base = cooldown_seconds
         elif timed_out or (status is not None and status >= 500):

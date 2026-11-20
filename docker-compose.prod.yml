@@ -16,6 +16,8 @@ x-backend-env: &backend-env
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentiora}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-sentiora}
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required (32+ chars)}
+  # Error tracking for the API and worker; off when empty.
+  SENTRY_DSN: ${SENTRY_DSN:-}
   CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required, e.g. ["https://app.example.com"]}
   # The web container's fixed address on the internal network (see below).
   TRUSTED_PROXY_IPS: '["172.30.0.10"]'
@@ -90,7 +92,12 @@ services:
     image: sentiora-backend:prod
     restart: unless-stopped
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${API_WORKERS:-2}"]
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      # One /metrics scrape covers every uvicorn worker (fresh on each start).
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+    tmpfs:
+      - /tmp/prometheus:mode=1777
     networks: [internal]
     depends_on:
       migrate:

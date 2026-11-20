@@ -19,6 +19,7 @@ from sqlalchemy import Select, case, func, literal, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
+from app.core.metrics import observe_stage
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.services.embedding_service import get_embedding_adapter
@@ -382,7 +383,8 @@ class RetrievalService:
             return []
 
         try:
-            vectors = adapter.embed_texts([query])
+            with observe_stage("embed"):
+                vectors = adapter.embed_texts([query])
         except Exception:
             return []
         if not vectors:
@@ -404,7 +406,10 @@ class RetrievalService:
                 .order_by(distance)
                 .limit(top_k)
             )
-            rows = cast(list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all())
+            with observe_stage("vector_search"):
+                rows = cast(
+                    list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all()
+                )
         except Exception:
             logger.exception("Semantic retrieval failed; continuing with lexical search")
             return []
@@ -458,9 +463,10 @@ class RetrievalService:
             .limit(top_k)
         )
         try:
-            rows = cast(
-                list[tuple[MemoryChunk, MemoryItem, float, int]], self.db.execute(stmt).all()
-            )
+            with observe_stage("fulltext_search"):
+                rows = cast(
+                    list[tuple[MemoryChunk, MemoryItem, float, int]], self.db.execute(stmt).all()
+                )
         except Exception:
             logger.exception("Full-text retrieval failed")
             self.db.rollback()

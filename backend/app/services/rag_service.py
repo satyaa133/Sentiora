@@ -24,6 +24,7 @@ from openai import OpenAI
 from openai.types.shared_params import ResponseFormatJSONSchema
 
 from app.core.config import get_settings, openrouter_fallback_list
+from app.core.metrics import ASK_STAGE_SECONDS, observe_stage
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.repositories.memory_repository import MemoryFilters, MemoryRepository
 from app.schemas.ask import AnswerMode, AskCitation, AskResponse, AskTurn
@@ -508,9 +509,11 @@ class RagService:
             effective_top_k = max(top_k or configured, min(8, configured))
 
         llm = self._llm_configured()
-        query = intent.mention_topic or rewrite_query(
-            question, history, self._complete_raw if llm else None
-        )
+        if intent.mention_topic:
+            query = intent.mention_topic
+        else:
+            with observe_stage("rewrite"):
+                query = rewrite_query(question, history, self._complete_raw if llm else None)
         # Date filters only apply to questions about the user's own saves.
         window = intent.date_window if intent.kind != "open" else None
         chunks = self.retrieval.retrieve_relevant_memories(
@@ -808,9 +811,10 @@ class RagService:
         history: Sequence[AskTurn],
     ) -> str:
         try:
-            answer = self._complete(
-                question, chunks, system_prompt=system_prompt, history=history
-            )
+            with observe_stage("answer_total"):
+                answer = self._complete(
+                    question, chunks, system_prompt=system_prompt, history=history
+                )
         except LLMProviderError:
             raise
         except Exception as exc:
@@ -896,11 +900,16 @@ class RagService:
         )
         system_prompt = self._system_prompt(prepared)
         last_error: Exception | None = None
+        began = time.perf_counter()
         for backend in self._attempts(backends):
             started = False
             try:
                 for piece in self._stream_backend(backend, prompt, system_prompt):
                     if piece:
+                        if not started:
+                            ASK_STAGE_SECONDS.labels(stage="answer").observe(
+                                time.perf_counter() - began
+                            )
                         started = True
                         yield piece
             except Exception as exc:
@@ -918,6 +927,9 @@ class RagService:
                 )
                 continue
             key_pool.mark_ok(backend)
+            ASK_STAGE_SECONDS.labels(stage="answer_total").observe(
+                time.perf_counter() - began
+            )
             return
         status = _status_of(last_error) if isinstance(last_error, Exception) else None
         if isinstance(last_error, LLMProviderError):

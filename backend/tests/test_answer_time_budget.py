@@ -20,6 +20,9 @@ class _Clock:
     def monotonic(self) -> float:
         return self.now
 
+    def perf_counter(self) -> float:  # stage timings (app/core/metrics.py)
+        return self.now
+
 
 class _TimeoutError(Exception):
     """Name contains "timeout", which the key pool treats as a timeout."""

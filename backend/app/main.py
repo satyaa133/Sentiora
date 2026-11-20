@@ -1,11 +1,12 @@
 import logging
+import time
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from app.api.v1.ask_routes import router as ask_router
 from app.api.v1.auth_routes import router as auth_router
@@ -16,6 +17,7 @@ from app.api.v1.user_routes import router as user_router
 from app.core.config import get_settings
 from app.core.error_tracking import init_error_tracking
 from app.core.logging import configure_logging, request_id_var
+from app.core.metrics import HTTP_REQUEST_SECONDS, render_metrics
 from app.models import MemoryChunk, MemoryItem  # noqa: F401
 from app.schemas.envelope import response_meta
 
@@ -40,10 +42,34 @@ async def attach_request_id(request: Request, call_next):  # type: ignore[no-unt
     request.state.request_id = f"req_{uuid.uuid4().hex[:8]}"
     # Every log line written while handling the request carries its ID.
     token = request_id_var.set(request.state.request_id)
+    started = time.perf_counter()
+    status_code = 500
     try:
-        return await _secure_response(request, call_next)
+        response = await _secure_response(request, call_next)
+        status_code = response.status_code
+        return response
     finally:
         request_id_var.reset(token)
+        if settings.metrics_enabled:
+            HTTP_REQUEST_SECONDS.labels(
+                method=request.method,
+                route=_route_template(request),
+                status=f"{status_code // 100}xx",
+            ).observe(time.perf_counter() - started)
+
+
+def _route_template(request: Request) -> str:
+    """The matched route's template (/api/v1/memory-items/{item_id}), never the
+    raw path, so metrics don't get one series per ID."""
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    if not template:
+        return "unmatched"
+    # Routes of included routers only know their own prefix.
+    prefix = settings.api_v1_prefix
+    if request.url.path.startswith(prefix + "/") and not template.startswith(prefix):
+        template = prefix + template
+    return str(template)
 
 
 async def _secure_response(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -170,3 +196,13 @@ app.include_router(user_router, prefix=settings.api_v1_prefix)
 app.include_router(memory_router, prefix=settings.api_v1_prefix)
 app.include_router(ask_router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard_router, prefix=settings.api_v1_prefix)
+
+
+if settings.metrics_enabled:
+
+    def metrics() -> Response:
+        """Prometheus metrics. Not under /api/, so nginx doesn't expose it."""
+        body, content_type = render_metrics()
+        return Response(content=body, media_type=content_type)
+
+    app.add_api_route("/metrics", metrics, methods=["GET"], include_in_schema=False)
