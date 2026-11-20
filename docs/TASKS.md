@@ -56,7 +56,7 @@ Approved direction 2026-11-20: instant answers from the user's saves with no ext
 | ----- | ------ | ----- |
 | S0: Documentation reset | ✅ Completed | REBUILD_PLAN.md; `docs/API.md` + generated `docs/api/openapi.json` (`npm run docs:api`, `--check`); `docs/DATABASE.md` (6 tables, head `006_rag_v2_chunks`); AGENTS, PROMPT_GUIDE, CONTRIBUTING, README and docs index updated; superseded PDFs and the 2026-10-25 QA reports moved to `docs/archive/`; TEAM_SETUP.md moved to `docs/` |
 | S1: Reliability fixes | 🟡 In Review | Branch `fix/s1-reliability`. Done: DB connection released before streaming (1 → 0 held per stream); `LLM_CHAT_TIMEOUT_SECONDS` (10) as one budget per answer, `LLM_META_TIMEOUT_SECONDS` (8), `EMBEDDING_TIMEOUT_SECONDS` (10); rate limits and AI key cooldowns shared through Redis with in-memory fallback (`app/core/redis_client.py`); `hnsw.iterative_scan = relaxed_order` on every connection (reproduction: 0 → 5 of a user's chunks found); capture embedding retried after 1, 5, 30 min, with due jobs moved by a worker thread (RQ's scheduler process fails on Windows); `WORKER_COUNT` (2) in production. Gemini is now a true backup: only `LLM_PROVIDER` keys rotate, other providers are tried after them (D9). Backend tests 294 pass (271 before S1). Eval (dev data, 21 questions): hit@6 1.00, MRR 0.94, noise 0.45, reject 1.00. Live outage check (providers unreachable): AI call fails after 11.1 s (was up to 25 s per key). Owner actions (OpenRouter no-training setting, Gemini billing) open |
-| S2: Observability baseline | ⏳ Pending | Structured logs, Sentry, `/metrics`, `llm_usage`, answer feedback, baseline numbers |
+| S2: Observability baseline | 🟡 In Progress | Structured logs, Sentry, `/metrics`, `llm_usage`, answer feedback, baseline numbers |
 | S3: Local embeddings | ⏳ Pending | `EMBEDDING_PROVIDER=local`, `embedding_local` column + HNSW, backfill, bge-small vs nomic eval |
 | S4: Local reranker | ⏳ Pending | Cross-encoder rerank of top 30, long-page eval cases |
 | S5: Save pipeline v3 | ⏳ Pending | Chunk merge fix, PDF title fallback, capture/enrich queues, lazy enrichment, question bank, contextual chunks |
@@ -64,7 +64,7 @@ Approved direction 2026-11-20: instant answers from the user's saves with no ext
 | S7: Web app and extension | ⏳ Pending | Instant answer + Explain with AI, feedback, summaries, Save now enrichment, title edit, one dashboard request, privacy notice at sign-up |
 | S8: Quality, security, privacy | ⏳ Pending | Eval in CI, answer eval, isolation and injection tests, full account deletion, YouTube in real Chrome |
 | S9: Load test | ⏳ Pending | k6, 500 users, instant p95 < 1 s, zero 5xx |
-| S10: Launch readiness | ⏳ Pending | Remaining Phase 9: hosting, backups, PgBouncer, HTTPS, Anthropic API (Claude Haiku 5.5) + Batch enrichment, privacy policy, store submission |
+| S10: Launch readiness | ⏳ Pending | Remaining Phase 9: hosting, backups, PgBouncer, HTTPS, browser error tracking (Sentry, CSP), Anthropic API (Claude Haiku 5.5) + Batch enrichment, privacy policy, store submission |
 | L1: Plans and payments | 💤 Later | Free 15 AI answers/day, Student (college email + ID), Plus, Pro; Razorpay |
 
 

@@ -324,17 +324,30 @@ instead of hanging.
 **Goal:** measure before changing the pipeline, so every later stage can prove
 it helped.
 
-- [ ] Structured JSON logs with `request_id` (already in the envelope meta) on
-      API and workers.
-- [ ] **Sentry** (or an equivalent) for API, worker, frontend and extension
-      errors; DSN from env, off when unset.
-- [ ] Metrics endpoint (`/metrics`, Prometheus format, not public) with: request
-      latency per route, Ask stage timings (embed, search, rerank, answer),
-      queue lengths, cache hit rate, provider errors.
+- [ ] Structured logs with `request_id` (already in the envelope meta) on API
+      and workers: JSON when `LOG_FORMAT=json` (production default), readable
+      text in development.
+- [ ] **Sentry** (or an equivalent) for API and worker errors; `SENTRY_DSN`
+      from env, off when unset; no personal data sent (`send_default_pii`
+      off, request bodies not attached). The web app and extension follow in
+      S10: the browser needs a Content-Security-Policy change for the Sentry
+      host and the privacy policy must name Sentry before it is turned on.
+- [ ] Metrics endpoint `/metrics` (Prometheus format) when `METRICS_ENABLED`.
+      It sits outside `/api/`, which is all nginx forwards, so it isn't public
+      in production. With several uvicorn workers set `PROMETHEUS_MULTIPROC_DIR`
+      so one scrape covers every process. Metrics: request latency per route,
+      Ask stage timings (embed, search, answer; rerank from S4), queue lengths,
+      AI provider errors. Cache hit rate is added in S6 with the cache.
 - [ ] **`llm_usage` table** (section 7): one row per external AI call (user,
-      purpose, provider, model, tokens in/out, cost estimate, latency, success).
-      Needed for cost tracking now and for plan limits in L1.
-- [ ] **Answer feedback:** 👍/👎 on answers, stored in `answer_feedback`.
+      purpose, provider, model, tokens in/out, cost, latency, success). Tokens
+      come from the provider's usage report; `cost_usd` is stored when the
+      provider reports it (OpenRouter usage accounting) and left null
+      otherwise. The answer-metadata call counts as `answer`. Needed for cost
+      tracking now and for plan limits in L1.
+- [ ] **Answer feedback:** `POST /answers/feedback` stores 👍/👎 in
+      `answer_feedback` (a hash of the question, not its text); the Ask page
+      gets 👍/👎 on today's answers now, and S7 extends it to both answer
+      modes.
 - [ ] Baseline numbers recorded in TASKS.md (current p50/p95 Ask time,
       provider error rate).
 
@@ -500,6 +513,9 @@ security tests pass.
 
 - [ ] Decide O1; provision server, managed Postgres (pgvector) with daily
       backups, managed Redis, PgBouncer, CDN for the frontend, HTTPS.
+- [ ] **Error tracking in the browser:** Sentry for the web app and extension
+      (`VITE_SENTRY_DSN`, off when unset), the nginx Content-Security-Policy
+      allowing the Sentry ingest host, and Sentry named in the privacy policy.
 - [ ] Production env and secrets; `npm run check:secrets` clean.
 - [ ] **Production AI providers (D9):** Anthropic adapter using the official
       `anthropic` Python SDK (`LLM_PROVIDER=anthropic`, `ANTHROPIC_API_KEY`,
@@ -591,8 +607,11 @@ that adds them.
 | `LLM_META_TIMEOUT_SECONDS` | 8 | S1 |
 | `EMBEDDING_TIMEOUT_SECONDS` | 10 | S1 |
 | `WORKER_COUNT` (compose) | 2 | S1 |
+| `LOG_FORMAT` | `text` in development, `json` otherwise | S2 |
 | `SENTRY_DSN` | unset (off) | S2 |
+| `SENTRY_TRACES_SAMPLE_RATE` | 0 (errors only) | S2 |
 | `METRICS_ENABLED` | true | S2 |
+| `PROMETHEUS_MULTIPROC_DIR` (env, read by `prometheus_client`) | unset | S2 |
 | `EMBEDDING_PROVIDER` | gains `local` | S3 |
 | `LOCAL_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | S3 |
 | `MODEL_CACHE_DIR` | `backend/.models` | S3 |
@@ -604,6 +623,7 @@ that adds them.
 | `RAG_EXTRACT_MIN_SCORE` | set by eval | S6 |
 | `LLM_MAX_CONCURRENT` | 10 | S6 |
 | `ANSWER_CACHE_TTL_SECONDS` | 86400 | S6 |
+| `VITE_SENTRY_DSN` (root `.env`, build time) | unset (off) | S10 |
 | `PRIVACY_NOTICE_VERSION` | `2026-11-20` | S7 |
 | `LLM_PROVIDER` | gains `anthropic` | S10 |
 | `ANTHROPIC_API_KEY` | unset | S10 |
