@@ -6,10 +6,12 @@ import time
 from collections.abc import Callable
 
 import redis
-from rq import SimpleWorker, Worker
+from rq import Queue, SimpleWorker, Worker
+from rq.job import Job
 from rq.scheduler import RQScheduler
 from rq.timeouts import TimerDeathPenalty
 
+from app.core.logging import configure_logging, request_id_var
 from app.workers.queue import create_queues, create_redis_connection
 
 logger = logging.getLogger(__name__)
@@ -19,15 +21,34 @@ RECONNECT_DELAY_SECONDS = 5
 SCHEDULE_CHECK_SECONDS = 5
 
 
+class _JobContextMixin:
+    """Tag every log line written during a job with ``job_<id>``."""
+
+    def perform_job(self, job: Job, queue: Queue) -> bool:
+        token = request_id_var.set(f"job_{job.id}")
+        try:
+            return bool(super().perform_job(job, queue))  # type: ignore[misc]
+        finally:
+            request_id_var.reset(token)
+
+
+class SentioraWorker(_JobContextMixin, Worker):
+    pass
+
+
+class SentioraSimpleWorker(_JobContextMixin, SimpleWorker):
+    pass
+
+
 def _build_worker() -> Worker:
     connection = create_redis_connection()
     queues = create_queues(connection)
     # RQ's default Worker uses os.fork() and SIGALRM, which Windows does not support.
     if os.name == "nt":
-        worker: Worker = SimpleWorker(queues, connection=connection)
+        worker: Worker = SentioraSimpleWorker(queues, connection=connection)
         worker.death_penalty_class = TimerDeathPenalty  # type: ignore[assignment] # Unavoidable RQ typeshed limitation
         return worker
-    return Worker(queues, connection=connection)
+    return SentioraWorker(queues, connection=connection)
 
 
 def _recover_stale_captures() -> None:
@@ -114,6 +135,7 @@ def run_until_stopped(
 
 
 def main() -> None:
+    configure_logging()
     run_until_stopped()
 
 

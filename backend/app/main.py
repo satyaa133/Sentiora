@@ -14,7 +14,7 @@ from app.api.v1.health_routes import router as health_router
 from app.api.v1.memory_routes import router as memory_router
 from app.api.v1.user_routes import router as user_router
 from app.core.config import get_settings
-from app.core.logging import configure_logging
+from app.core.logging import configure_logging, request_id_var
 from app.models import MemoryChunk, MemoryItem  # noqa: F401
 from app.schemas.envelope import response_meta
 
@@ -36,7 +36,15 @@ _DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
 @app.middleware("http")
 async def attach_request_id(request: Request, call_next):  # type: ignore[no-untyped-def]
     request.state.request_id = f"req_{uuid.uuid4().hex[:8]}"
+    # Every log line written while handling the request carries its ID.
+    token = request_id_var.set(request.state.request_id)
+    try:
+        return await _secure_response(request, call_next)
+    finally:
+        request_id_var.reset(token)
 
+
+async def _secure_response(request: Request, call_next):  # type: ignore[no-untyped-def]
     # Refuse oversized bodies before they are read and parsed.
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > settings.max_request_body_bytes:

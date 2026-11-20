@@ -4,7 +4,7 @@ import re
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from dotenv import dotenv_values
 from pydantic import Field, ValidationError, field_validator, model_validator
@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     app_name: str = "Sentiora Backend"
     app_environment: str = "development"
     app_version: str = "0.1.0"
+    # "json" (one object per line) or "text". Unset: text in development,
+    # json everywhere else.
+    log_format: Literal["json", "text"] | None = None
+    # Error tracking (Sentry) for the API and worker; off when unset.
+    sentry_dsn: str | None = None
+    # Share of requests traced for performance (0 = errors only).
+    sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Serve Prometheus metrics at /metrics (outside /api/, not proxied by nginx).
+    metrics_enabled: bool = True
     # Accept the reserved example.com / example.dev sign-up domains. On only
     # in the test suite and the e2e stack; never in a real deployment.
     allow_test_email_domains: bool = False
@@ -181,6 +190,12 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError("; ".join(problems))
         return self
+
+    @property
+    def effective_log_format(self) -> str:
+        if self.log_format:
+            return self.log_format
+        return "text" if self.app_environment == "development" else "json"
 
     @model_validator(mode="after")
     def validate_non_development_secrets(self) -> Self:
