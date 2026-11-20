@@ -198,7 +198,11 @@ In a separate terminal, start the background worker to process captures:
 npm run dev:worker
 ```
 
-The worker reconnects on its own if Redis restarts, and re-queues captures left pending.
+The worker reconnects on its own if Redis restarts, and re-queues captures left pending. When a capture's embedding call fails, the worker retries it 1, 5 and 30 minutes later; until then the save is searchable by keyword.
+
+To process captures in parallel (for example when testing many saves at once), run `npm run dev:worker` in a second terminal as well; workers share the queue and only one of them queues the scheduled retries. Production runs `WORKER_COUNT` workers (default 2, `docker-compose.prod.yml`).
+
+If the API won't start because port 8000 is in use, check for the containerised backend with `docker ps` and stop it with `docker compose --profile app stop backend worker`.
 
 ### Load the Chrome Extension
 

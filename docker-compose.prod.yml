@@ -102,6 +102,9 @@ services:
     image: sentiora-backend:prod
     restart: unless-stopped
     command: ["python", "-m", "app.workers.worker"]
+    # Captures and embedding retries are processed in parallel across workers.
+    deploy:
+      replicas: ${WORKER_COUNT:-2}
     environment: *backend-env
     networks: [internal]
     depends_on:
