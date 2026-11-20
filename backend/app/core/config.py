@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     llm_cooldown_max_seconds: int = Field(default=3600, ge=1)
     # At most this many backends (keys) are tried for one model call.
     llm_max_attempts: int = Field(default=4, ge=1, le=20)
+    # Most an answer waits for its first token, across every key it tries.
+    # One-piece responses (Gemini, POST /chat, the follow-up rewrite) must finish
+    # within it; Gemini's SDK also sends it as the server-side deadline.
+    llm_chat_timeout_seconds: float = Field(default=10, gt=0, le=120)
+    # Per-key limit for the structured answer-metadata call.
+    llm_meta_timeout_seconds: float = Field(default=8, gt=0, le=120)
+    # Per-request limit for embedding calls (capture and question embeddings).
+    embedding_timeout_seconds: float = Field(default=10, gt=0, le=120)
     # RAG retrieval tuning
     rag_top_k: int = 15
     # Chunks handed to the model per question (summary questions take up to 8).

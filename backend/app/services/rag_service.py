@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import tzinfo
@@ -93,10 +94,11 @@ class LLMNotConfiguredError(RuntimeError):
     """Raised when the LLM API key is not set and no retrieved memory is available."""
 
 
-# Per-key limit for one answer. Answers take a few seconds; a key that hangs
-# this long is treated as down so the next key (or the memory answer) is used.
-CHAT_TIMEOUT_SECONDS = 25
-META_TIMEOUT_SECONDS = 15
+# Defaults when settings lack the values (tests pass partial settings objects).
+DEFAULT_CHAT_TIMEOUT_SECONDS = 10.0
+DEFAULT_META_TIMEOUT_SECONDS = 8.0
+# A key is not tried with less time than this left in the answer's budget.
+MIN_ATTEMPT_SECONDS = 1.0
 
 
 class LLMProviderError(RuntimeError):
@@ -415,9 +417,41 @@ def _format_listing(
 
 
 class RagService:
+    # Time limit for the key being tried now (see _attempts).
+    _attempt_timeout: float = DEFAULT_CHAT_TIMEOUT_SECONDS
+
     def __init__(self, retrieval: RetrievalService) -> None:
         self.retrieval = retrieval
         self.settings = get_settings()
+        self._attempt_timeout = self._chat_timeout()
+
+    def _chat_timeout(self) -> float:
+        value = getattr(self.settings, "llm_chat_timeout_seconds", None)
+        return float(value) if value else DEFAULT_CHAT_TIMEOUT_SECONDS
+
+    def _meta_timeout(self) -> float:
+        value = getattr(self.settings, "llm_meta_timeout_seconds", None)
+        return float(value) if value else DEFAULT_META_TIMEOUT_SECONDS
+
+    def _attempts(self, backends: list[LLMBackend]) -> Iterator[LLMBackend]:
+        """Backends to try within one budget of ``llm_chat_timeout_seconds``.
+
+        Each attempt gets the time that is left, so a hung provider costs the
+        budget once instead of once per key. A key that fails fast (bad key,
+        connection refused) leaves time for the next one.
+        """
+        deadline = time.monotonic() + self._chat_timeout()
+        for index, backend in enumerate(
+            key_pool.order(backends)[: max_attempts(self.settings)]
+        ):
+            remaining = deadline - time.monotonic()
+            if index > 0 and remaining < MIN_ATTEMPT_SECONDS:
+                logger.warning(
+                    "Answer time budget used up; not trying backend %s", backend.name
+                )
+                return
+            self._attempt_timeout = max(remaining, MIN_ATTEMPT_SECONDS)
+            yield backend
 
     def _llm_configured(self) -> bool:
         return bool(build_backends(self.settings))
@@ -837,7 +871,7 @@ class RagService:
         last_error: Exception | None = None
         # Rotate across keys; a key that fails is skipped for a while and the
         # next one answers. Only when every key fails does the error surface.
-        for backend in key_pool.order(backends)[: max_attempts(self.settings)]:
+        for backend in self._attempts(backends):
             try:
                 answer = self._call_backend(backend, prompt, system_prompt)
             except Exception as exc:
@@ -862,7 +896,7 @@ class RagService:
         )
         system_prompt = self._system_prompt(prepared)
         last_error: Exception | None = None
-        for backend in key_pool.order(backends)[: max_attempts(self.settings)]:
+        for backend in self._attempts(backends):
             started = False
             try:
                 for piece in self._stream_backend(backend, prompt, system_prompt):
@@ -934,7 +968,7 @@ class RagService:
             # One piece: the answer still reaches the client through the same events.
             yield self._complete_gemini(prompt, system_prompt, backend)
             return
-        client, extra = self._openai_client(backend, CHAT_TIMEOUT_SECONDS)
+        client, extra = self._openai_client(backend, self._attempt_timeout)
         stream = client.chat.completions.create(
             model=backend.model,
             temperature=0.2,
@@ -958,7 +992,7 @@ class RagService:
         self, backend: LLMBackend, prompt: str, system_prompt: str
     ) -> str:
         client, extra = self._openai_client(
-            backend, META_TIMEOUT_SECONDS, structured=True
+            backend, self._meta_timeout(), structured=True
         )
         completion = client.chat.completions.create(
             model=backend.model,
@@ -1007,7 +1041,7 @@ class RagService:
     def _complete_openai(
         self, prompt: str, system_prompt: str, backend: LLMBackend
     ) -> str:
-        client, extra = self._openai_client(backend, CHAT_TIMEOUT_SECONDS)
+        client, extra = self._openai_client(backend, self._attempt_timeout)
         completion = client.chat.completions.create(
             model=backend.model,
             temperature=0.2,
@@ -1034,7 +1068,7 @@ class RagService:
 
         client = genai.Client(
             api_key=backend.api_key,
-            http_options=types.HttpOptions(timeout=CHAT_TIMEOUT_SECONDS * 1000),  # ms
+            http_options=types.HttpOptions(timeout=int(self._attempt_timeout * 1000)),  # ms
         )
 
         def generate(thinking: types.ThinkingConfig | None) -> object:
