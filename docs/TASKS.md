@@ -42,11 +42,30 @@
 | R1: Ingestion cleanup | ✅ Completed | Rolling-caption normalizer, title kept out of chunk text, `scripts.reprocess_memories --reclean` |
 | R2: Chunking | ✅ Completed | Recursive 400–600 token chunks with 15% overlap, 60–90s transcript windows, migration 006 (`start_sec`, `end_sec`, `embedding_model`, tsvector GIN indexes) |
 | R3: Embeddings | ✅ Completed | OpenRouter embeddings (pluggable), per-chunk `embedding_model`, same-model queries only, non-fatal capture embedding, `--embed` backfill |
-| R4: Retrieval | ✅ Completed | LLM query rewrite, pgvector + Postgres full-text fused with RRF, `RAG_MIN_SIMILARITY` 0.25, near-dup removal, MMR, 2 chunks per memory, top 6 |
+| R4: Retrieval | ✅ Completed | LLM query rewrite, pgvector + Postgres full-text fused with RRF, `RAG_MIN_SIMILARITY` 0.25, near-dup removal, MMR (same-memory redundancy by text overlap), 2 chunks per memory or up to 4 when one save leads every top slot, top 6 |
 | R5: Generation | ✅ Completed | Unified `[S#]` prompt, SSE `POST /chat/stream`, strict json_schema metadata (mode, usedSources, followUps), `OPENROUTER_FALLBACK_MODELS`, `/chat` shape kept |
 | R6: Env and keys | ✅ Completed | `OPENROUTER_API_KEY_1..N` auto-detected, exponential cooldown with Retry-After, `LLM_MAX_ATTEMPTS`, readable startup validation, `npm run check:secrets` in CI |
 | R7: Ask page UX | ✅ Completed | Streaming with Stop/Regenerate, `[S#]` citation chips with previews and video timestamps, collapsible sources, mode badge, model follow-ups, scope picker, local history, keyboard shortcuts |
 | R8: Evaluation | ✅ Completed | `npm run eval:rag` (hit@k, MRR, noise, reject, threshold sweep); dev baseline hit@6 1.00, MRR 0.96, reject 1.00; `RAG_MIN_SIMILARITY` kept at 0.25 |
+
+### Rebuild v3 (docs/REBUILD_PLAN.md)
+
+Approved direction 2026-11-20: instant answers from the user's saves with no external AI call at question time, AI on an "Explain with AI" button, local embeddings and reranker, lazy background enrichment, observability and a 500-user load test. Runs before the rest of Phase 9, which becomes S10. Plans and payments (L1) come after.
+
+| Stage | Status | Notes |
+| ----- | ------ | ----- |
+| S0: Documentation reset | ✅ Completed | REBUILD_PLAN.md; `docs/API.md` + generated `docs/api/openapi.json` (`npm run docs:api`, `--check`); `docs/DATABASE.md` (6 tables, head `006_rag_v2_chunks`); AGENTS, PROMPT_GUIDE, CONTRIBUTING, README and docs index updated; superseded PDFs and the 2026-10-25 QA reports moved to `docs/archive/`; TEAM_SETUP.md moved to `docs/` |
+| S1: Reliability fixes | 🟡 In Review | Branch `fix/s1-reliability`. Done: DB connection released before streaming (1 → 0 held per stream); `LLM_CHAT_TIMEOUT_SECONDS` (10) as one budget per answer, `LLM_META_TIMEOUT_SECONDS` (8), `EMBEDDING_TIMEOUT_SECONDS` (10); rate limits and AI key cooldowns shared through Redis with in-memory fallback (`app/core/redis_client.py`); `hnsw.iterative_scan = relaxed_order` on every connection (reproduction: 0 → 5 of a user's chunks found); capture embedding retried after 1, 5, 30 min, with due jobs moved by a worker thread (RQ's scheduler process fails on Windows); `WORKER_COUNT` (2) in production. Gemini is now a true backup: only `LLM_PROVIDER` keys rotate, other providers are tried after them (D9). Backend tests 294 pass (271 before S1). Eval (dev data, 21 questions): hit@6 1.00, MRR 0.94, noise 0.45, reject 1.00. Live outage check (providers unreachable): AI call fails after 11.1 s (was up to 25 s per key). Owner actions (OpenRouter no-training setting, Gemini billing) open |
+| S2: Observability baseline | ⏳ Pending | Structured logs, Sentry, `/metrics`, `llm_usage`, answer feedback, baseline numbers |
+| S3: Local embeddings | ⏳ Pending | `EMBEDDING_PROVIDER=local`, `embedding_local` column + HNSW, backfill, bge-small vs nomic eval |
+| S4: Local reranker | ⏳ Pending | Cross-encoder rerank of top 30, long-page eval cases |
+| S5: Save pipeline v3 | ⏳ Pending | Chunk merge fix, PDF title fallback, capture/enrich queues, lazy enrichment, question bank, contextual chunks |
+| S6: Ask v3 | ⏳ Pending | Question-bank leg, instant extractive answer, `answer_mode`, one-call AI answer, AI semaphore (`AI_BUSY`), answer cache |
+| S7: Web app and extension | ⏳ Pending | Instant answer + Explain with AI, feedback, summaries, Save now enrichment, title edit, one dashboard request, privacy notice at sign-up |
+| S8: Quality, security, privacy | ⏳ Pending | Eval in CI, answer eval, isolation and injection tests, full account deletion, YouTube in real Chrome |
+| S9: Load test | ⏳ Pending | k6, 500 users, instant p95 < 1 s, zero 5xx |
+| S10: Launch readiness | ⏳ Pending | Remaining Phase 9: hosting, backups, PgBouncer, HTTPS, Anthropic API (Claude Haiku 5.5) + Batch enrichment, privacy policy, store submission |
+| L1: Plans and payments | 💤 Later | Free 15 AI answers/day, Student (college email + ID), Plus, Pro; Razorpay |
 
 
 ---
@@ -92,6 +111,17 @@
 * Security: trusted-proxy-only `X-Forwarded-For`, security headers, request body cap, no wildcard extension CORS, stricter production config, script-URL rejection; npm audit 17 → 3 (remaining: Tailwind v3 build-time parser)
 * Release: non-root multi-stage images, `docker-compose.prod.yml`, nginx same-origin proxy, `scripts/package-extension.mjs`, `docs/RELEASE.md`
 
+**Jury-readiness fixes (2026-11-18, branch `vansh`, PR #11)**
+Found by a full end-to-end test (web app in a real browser, the extension on real pages, live AI models):
+* Gemini backup answers again: Gemini 3.x gets `thinking_level=low` (a zero thinking budget made it hang); `GEMINI_CHAT_MODEL=gemini-3.1-flash-lite` locally
+* Retrieval: same-memory MMR redundancy is text overlap, not vector closeness (long pages no longer lose the section with the answer); `RAG_SINGLE_MEMORY_CHUNKS` (default 4) when one save leads every top slot, with stragglers from other saves dropped
+* Answer prompt: cited sentences may not add reasons the sources do not give
+* Sign-up: `example.com` / `example.dev` accepted only with `ALLOW_TEST_EMAIL_DOMAINS` / `VITE_ALLOW_TEST_EMAIL_DOMAINS` (test suite, e2e stack, Playwright)
+* Extension: popup text names the Save now button; Wikipedia `[edit]` links stripped; YouTube spoken timestamp labels ("4 seconds") no longer glued into transcript text
+* Web app: no "Answer ready" bubble over the Ask page's follow-ups; overlapping dashboard statistics requests share one call
+* `scripts.reprocess_memories --retry-failed-embedding` re-runs captures that failed only on embedding; all local memories are embedded
+* Live-verified: webpage, PDF and YouTube capture through the extension; demo questions answered with correct citations
+
 **Chrome Extension (Manifest V3)**
 * Manifest V3 setup with active permissions (`tabs`, `storage`, `activeTab`)
 * DOM content extractor powered by `@mozilla/readability`
@@ -111,8 +141,8 @@
   * Pytest coverage for capture, search, and Ask/RAG (including grounded fallback, multi-memory retrieval, and insufficient-context cases)
   * Vitest suites for dashboard, extension capture utilities, and shared packages
   * GitHub Actions CI running lint, typecheck, test, and build on pull requests
-* **Current blockers**: YouTube blocks caption downloads outside its player and its transcript panel fails in automated/signed-out browsers, so live transcript capture is unverified in a real signed-in profile. Brand icons, store assets and privacy policy need owner decisions. Semantic search needs `OPENAI_API_KEY` or `GEMINI_API_KEY` (OpenRouter is chat-only); the local `.env` has a Gemini key. The local OpenRouter key is out of credits, so Ask answers through the next configured key until it is topped up or `OPENROUTER_API_KEY_2` is set.
-* **Current branch**: `feat/echo-intelligence`
+* **Current blockers**: YouTube transcript capture worked through the extension in automated Chromium on 2026-11-18 but is still unverified in a real signed-in Chrome profile. Store assets, privacy policy and the deployment host need owner decisions. Only one OpenRouter key is configured locally; if its credits run out, answers fall back to Gemini (slower, no follow-up suggestions).
+* **Current branch**: `vansh` (PR #11 to `main`)
 
 ---
 
@@ -125,7 +155,12 @@
 | P1 | Brand icons, store screenshots, privacy policy, final data disclosures | Medium | Phase 9 | Store listing assets |
 | P2 | Submit extension (`npm run package:extension`) | Low | Store assets | Published extension |
 | P2 | Tailwind v4 migration (clears remaining moderate npm audit findings) | Medium | — | Clean `npm audit` |
-| P3 | Re-embed existing memories after enabling an embedding provider | Low | Embedding key | Semantic search over older captures |
+| P2 | PDF title fallback: use the first heading when the PDF has no metadata title (arXiv PDFs show as `1706.03762`) | Low | — | Readable PDF titles |
+| P2 | Edit a memory's title (no endpoint today) | Low | API spec update | Rename from the detail drawer |
+| P2 | Long-page retrieval: questions worded unlike the page can miss the best passage ("TCP three-way handshake" vs "How does TCP establish a connection?") | Medium | `npm run eval:rag` cases | Higher hit rate on long saves |
+| P2 | Second OpenRouter key and a low-credit warning | Low | Key | No silent fallback to Gemini |
+| P3 | `npm run dev:backend` dies on auto-reload on Windows ("Terminate batch job"); run uvicorn without `--reload` meanwhile | Low | — | Stable reload on Windows |
+| P3 | Dashboard still sends 3 sequential statistics requests per load | Low | — | One request per load |
 
 ### Later (redesign follow-ups, not in the current redesign)
 

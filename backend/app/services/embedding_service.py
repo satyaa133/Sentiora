@@ -74,6 +74,7 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
         self._max_cooldown = settings.llm_cooldown_max_seconds
         self._attempts = max_attempts(settings)
         self._dimensions = settings.embedding_dimensions
+        self._timeout = settings.embedding_timeout_seconds
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         vectors: list[list[float]] = []
@@ -93,7 +94,7 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
             client = OpenAI(
                 api_key=backend.api_key,
                 base_url=OPENROUTER_BASE_URL,
-                timeout=30.0,
+                timeout=self._timeout,
                 max_retries=0,
             )
             try:
@@ -144,7 +145,10 @@ class OpenAIEmbeddingAdapter(EmbeddingPort):
         settings = get_settings()
         if not settings.openai_api_key:
             raise EmbeddingNotConfiguredError("OPENAI_API_KEY is not configured.")
-        self._client = OpenAI(api_key=settings.openai_api_key, timeout=30.0)
+        self._client = OpenAI(
+            api_key=settings.openai_api_key,
+            timeout=settings.embedding_timeout_seconds,
+        )
         self._model = settings.embedding_model or settings.openai_embedding_model
         self.model_id = f"openai:{self._model}"
         self._dimensions = settings.embedding_dimensions
@@ -171,7 +175,10 @@ class GeminiEmbeddingAdapter(EmbeddingPort):
             raise EmbeddingNotConfiguredError("GEMINI_API_KEY is not configured.")
         self._client = genai.Client(
             api_key=settings.gemini_api_key,
-            http_options=types.HttpOptions(timeout=30_000),  # ms; matches OpenAI
+            # Milliseconds; Gemini also sends it as the server-side deadline.
+            http_options=types.HttpOptions(
+                timeout=int(settings.embedding_timeout_seconds * 1000)
+            ),
         )
         self._model = settings.embedding_model or settings.gemini_embedding_model
         self.model_id = f"gemini:{self._model}"

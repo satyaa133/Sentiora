@@ -28,12 +28,15 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # Never call live embedding providers from tests (index or query time), even if
 # real keys exist in the local .env files.
 os.environ["EMBEDDING_PROVIDER"] = "none"
+# Tests register accounts on the reserved example.com / example.dev domains.
+os.environ["ALLOW_TEST_EMAIL_DOMAINS"] = "true"
 for _key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"):
     os.environ[_key] = ""
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.login_backoff import login_backoff  # noqa: E402
 from app.core.rate_limit import limiter  # noqa: E402
+from app.core.redis_client import shared_redis  # noqa: E402
 from app.services.llm_pool import key_pool  # noqa: E402
 
 # OPENROUTER_API_KEY_<n> from local .env files must not reach tests either.
@@ -63,6 +66,8 @@ def disable_rq_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("rq disabled in tests")
 
     monkeypatch.setattr("app.services.memory_service.create_queues", _unavailable)
+    # Embedding retries are scheduled from the capture job; never on a live queue.
+    monkeypatch.setattr("app.workers.jobs.process_capture.create_queues", _unavailable)
 
 
 @pytest.fixture(autouse=True)
@@ -76,6 +81,8 @@ def disable_live_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def reset_security_limiters(monkeypatch: pytest.MonkeyPatch) -> None:
+    # In-process state only, unless a test plugs in a fake Redis itself.
+    shared_redis.use(None)
     limiter.reset()
     login_backoff.reset()
     key_pool.reset()

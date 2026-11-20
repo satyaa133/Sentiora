@@ -1,47 +1,44 @@
 # Sentiora Documentation
 
-Every document in this folder is a canonical engineering document and must be treated as the source of truth during implementation.
+**Current work: [REBUILD_PLAN.md](REBUILD_PLAN.md).** For anything it covers (Ask, retrieval, embeddings, capture processing, reliability, deployment) it overrides the other documents. Its section 12 lists which documents are current.
 
-1. [01_PRD_v2.1_FINAL.pdf](01_PRD_v2.1_FINAL.pdf) - Product Requirements Document (PRD)
-Defines product vision, business goals, MVP scope, user personas, and product requirements.
+## Read first
 
-2. [02_SRS_v1.0.pdf](02_SRS_v1.0.pdf) - Software Requirements Specification (SRS)
-Functional requirements, non-functional requirements, system behavior, constraints, and acceptance criteria.
+1. [REBUILD_PLAN.md](REBUILD_PLAN.md) - Rebuild plan (v3)
+The stages S0–S10, decisions, target architecture, and every planned table, endpoint and setting.
 
-3. [03_Backend_Technical_Specification_v1.2.pdf](03_Backend_Technical_Specification_v1.2.pdf) - Backend Technical Specification
-Backend architecture, services, APIs, processing pipeline, authentication, storage, and implementation guidance.
+2. [TASKS.md](TASKS.md) - Project Tasks & Progress Tracker
+Single source of truth for progress: which stage is current and what is done.
 
-4. [04_Technical_Specification_v1.2.pdf](04_Technical_Specification_v1.2.pdf) - Technical Specification
-Overall system architecture, technology stack, high-level design, and engineering decisions.
+3. [API.md](API.md) - API reference
+Conventions, envelope, auth, rate limits, endpoints and error codes. Exact schemas in [api/openapi.json](api/openapi.json), generated from the code with `npm run docs:api`.
 
-5. [05_API_Specification_v1.0.pdf](05_API_Specification_v1.0.pdf) - API Specification
-REST API contracts, request/response formats, endpoints, validation, and status codes.
+4. [DATABASE.md](DATABASE.md) - Database schema
+Tables, columns, indexes and migrations at the current Alembic head.
 
-6. [06_Database_Schema_Design_v1.2.pdf](06_Database_Schema_Design_v1.2.pdf) - Database Schema Design
-Collections, relationships, indexes, database architecture, and storage strategy.
+## Reference
 
-7. [07_Development_Implementation_Plan.pdf](07_Development_Implementation_Plan.pdf) - Development & Implementation Plan
-Defines the official implementation roadmap. Development MUST always follow this phase sequence.
+5. [RAG_v2_ADDENDUM.md](RAG_v2_ADDENDUM.md) - Current Ask and retrieval design
+Ingestion cleanup, chunking, embeddings, hybrid retrieval, generation and the Ask page as built. REBUILD_PLAN overrides it where they differ.
 
-8. [08_UIUX_Specification_v1.0_FINAL.pdf](08_UIUX_Specification_v1.0_FINAL.pdf) - UI/UX Specification
-Design system, layouts, components, user flows, spacing, typography, and visual guidelines.
-
-9. [TASKS.md](TASKS.md) - Project Tasks & Progress Tracker
-Single source of truth for engineering progress, completed phases, and upcoming work.
-
-10. [PROMPT_GUIDE.md](PROMPT_GUIDE.md) - AI Prompt Guide
-Guide and instructions for AI agents on how to read docs, write code, and verify tasks.
-
-11. [DESIGN.md](DESIGN.md) - Design System and Redesign Handoff
+6. [DESIGN.md](DESIGN.md) - Design System and Redesign Handoff
 Tokens, components and screen layouts for the web app, extension popup and shared UI. Reference screenshots are in [design/](design/).
 
-12. [RELEASE.md](RELEASE.md) - Release Guide
+7. [PROMPT_GUIDE.md](PROMPT_GUIDE.md) - AI Prompt Guide
+How AI agents read the docs, write code and verify tasks.
+
+8. [TEAM_SETUP.md](TEAM_SETUP.md) - Team setup and troubleshooting
+Clean-machine setup walkthrough and fixes for common problems.
+
+9. [RELEASE.md](RELEASE.md) - Release Guide
 Production Docker Compose deployment, Chrome Web Store packaging, and YouTube capture limits.
 
-13. [Capture_Module_v2_Technical_Design.pdf](Capture_Module_v2_Technical_Design.pdf) - Capture Module v2 Technical Design
-Technical design for version 2 of the capture module (extension capture and the capture API).
+10. [Capture_Module_v2_Technical_Design.pdf](Capture_Module_v2_Technical_Design.pdf) - Capture Module v2 Technical Design
+Extension capture and the capture API.
 
-14. [qa-audit/](qa-audit/) - QA Audit and Team Setup
-[TEAM_SETUP.md](qa-audit/TEAM_SETUP.md) (setup walkthrough and troubleshooting), cross-machine checklist, bug register, and test results.
+11. [01_PRD_v2.1_FINAL.pdf](01_PRD_v2.1_FINAL.pdf) - Product Requirements Document
+Product vision and personas. Its scope is superseded: the Footprint and Shield modules were not built; the product is Memory + Ask (REBUILD_PLAN).
 
-The documents in this directory are the canonical source of truth for the Sentiora project. If conflicts arise between implementation and documentation, the documentation should be reviewed before making engineering decisions.
+## Archive
+
+[archive/](archive/) holds superseded documents (the SRS, backend and technical specifications, API and database PDFs, the implementation plan, the UI/UX PDF, and the 2026-10-25 QA reports). Kept for history; don't follow them when writing code. [archive/README.md](archive/README.md) says what replaced each one.

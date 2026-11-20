@@ -261,6 +261,13 @@ class RetrievalService:
             )
         ranked = sorted(by_id.values(), key=lambda c: -scores[c.chunk_id])
         ranked = selection.drop_near_duplicates(ranked, lambda c: c.content)
+        leaders = {c.memory_id for c in ranked[:limit]}
+        if len(leaders) == 1 and per_memory < limit:
+            # One save holds every top candidate: it is the match. Use more of
+            # it, and drop weak stragglers from other saves instead of padding
+            # the answer with them.
+            ranked = [c for c in ranked if c.memory_id in leaders]
+            per_memory = max(per_memory, int(self._setting("rag_single_memory_chunks", 4)))
         top = max(scores.values())
         shingle_cache: dict[UUID, frozenset[str]] = {}
 
@@ -270,6 +277,12 @@ class RetrievalService:
             return shingle_cache[chunk.chunk_id]
 
         def similarity(a: RetrievedChunk, b: RetrievedChunk) -> float:
+            # Sections of one page share its topic, so their vectors are close
+            # even when their text says different things; judging them by
+            # vector made MMR drop the section that held the answer. Within a
+            # memory, redundancy is text overlap; across memories, vectors.
+            if a.memory_id == b.memory_id:
+                return selection.jaccard(shingles(a), shingles(b))
             cos = selection.cosine(a.vector, b.vector)
             return cos if cos is not None else selection.jaccard(shingles(a), shingles(b))
 
@@ -397,6 +410,9 @@ class RetrievalService:
             return []
         # Below this cosine similarity a vector neighbour is not relevant.
         max_distance = 1.0 - float(self._setting("rag_min_similarity", 0.25))
+        # Iterative HNSW scans (relaxed_order, see app/core/db.py) may return
+        # rows slightly out of order; rank by the exact distance.
+        rows.sort(key=lambda row: float("inf") if row[2] is None else float(row[2]))
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
             if dist is None or float(dist) > max_distance:

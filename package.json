@@ -51,7 +51,8 @@
     "compose:up": "docker compose up -d postgres redis",
     "compose:down": "docker compose down",
     "check:secrets": "node scripts/check-client-secrets.mjs",
-    "eval:rag": "node scripts/run-python.mjs -m scripts.eval_rag"
+    "eval:rag": "node scripts/run-python.mjs -m scripts.eval_rag",
+    "docs:api": "node scripts/run-python.mjs -m scripts.export_openapi"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",

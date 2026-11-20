@@ -24,6 +24,9 @@ Only use markers that exist in the supplied sources.
 - Synthesize and paraphrase. Never paste raw source text, transcript lines or whole chunks; \
 quote at most a short phrase.
 - Ignore sources that are not about the question.
+- A cited sentence states only what its sources say. Do not add reasons, causes, motives or \
+conclusions they do not state (no "likely", "probably" or "presumably" about them); if the \
+sources don't say why, say that they don't.
 
 When memory does not cover the question
 - If no source covers it (or there are no sources), answer from general knowledge and say so \

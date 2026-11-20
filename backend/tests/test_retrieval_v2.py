@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import zlib
-from uuid import UUID
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.main import app
+from app.models.memory_item import SourceType
 from app.schemas.ask import AskTurn
 from app.services.rag_service import RagService
 from app.services.retrieval import selection
@@ -19,7 +21,7 @@ from app.services.retrieval.query_rewriter import (
     heuristic_query,
     rewrite_query,
 )
-from app.services.retrieval_service import RetrievalService
+from app.services.retrieval_service import RetrievalService, RetrievedChunk
 from app.workers.jobs.process_capture import process_capture
 
 client = TestClient(app)
@@ -53,6 +55,69 @@ def test_mmr_caps_items_per_group_and_prefers_diversity() -> None:
         per_group=2,
     )
     assert [item[1] for item in picked] == ["a", "d", "b"]
+
+
+def _ranked_chunk(
+    memory_id: UUID, content: str, vector: tuple[float, ...], distance: float
+) -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id=uuid4(),
+        memory_id=memory_id,
+        title="Deadlock (computer science)",
+        url="https://en.wikipedia.org/wiki/Deadlock_(computer_science)",
+        source_type=SourceType.webpage,
+        content=content,
+        domain="en.wikipedia.org",
+        heading=None,
+        page_number=None,
+        captured_at=datetime.now(UTC),
+        distance=distance,
+        vector=vector,
+    )
+
+
+def _select_three(memories: tuple[UUID, UUID, UUID]) -> tuple[list[UUID], list[UUID]]:
+    """Overview ranks first; the answer is the best vector match but sits right
+    next to the overview in vector space; an aside is unrelated in both."""
+    overview = _ranked_chunk(
+        memories[0],
+        "deadlock overview where processes each wait on one another forever",
+        (1.0, 0.0, 0.0),
+        0.34,
+    )
+    answer = _ranked_chunk(
+        memories[1],
+        "the four coffman conditions are mutual exclusion hold and wait",
+        (0.99, 0.1, 0.0),
+        0.31,
+    )
+    aside = _ranked_chunk(
+        memories[2],
+        "the term livelock was coined later in an unrelated paper",
+        (0.0, 0.0, 1.0),
+        0.38,
+    )
+    service = RetrievalService.__new__(RetrievalService)
+    service.settings = type("S", (), {})()
+    picked = service._select(
+        [answer, overview, aside], [overview, aside, answer], limit=2, per_memory=2
+    )
+    ids = [overview.chunk_id, answer.chunk_id, aside.chunk_id]
+    return [c.chunk_id for c in picked], ids
+
+
+def test_mmr_keeps_a_same_page_section_whose_vector_is_close_but_text_differs() -> None:
+    page = uuid4()
+    picked, (overview, answer, _aside) = _select_three((page, page, page))
+    # Same-page sections are judged by text overlap, so the answer section is
+    # not discarded as a "duplicate" of the overview.
+    assert picked == [overview, answer]
+
+
+def test_mmr_still_spreads_across_memories_with_close_vectors() -> None:
+    picked, (overview, _answer, aside) = _select_three((uuid4(), uuid4(), uuid4()))
+    # Across different saves, near-identical vectors still count as redundant.
+    assert picked == [overview, aside]
 
 
 # --- query rewriting -------------------------------------------------------------
@@ -213,10 +278,31 @@ def test_chunks_per_memory_are_capped(concepts: None) -> None:
     headers, user_id = _user("retr_cap@example.com")
     long_car = _save(headers, "long-car", "Engine design notes", LONG_CAR_TEXT)
     hits = _retrieve(user_id, "how do car engines burn fuel")
-    assert 0 < sum(h.memory_id == long_car for h in hits) <= 2
+    # The only matching save may give up to rag_single_memory_chunks (4).
+    assert 2 < sum(h.memory_id == long_car for h in hits) <= 4
     # Scoped to that memory, the cap no longer applies.
     scoped = _retrieve(user_id, "how do car engines burn fuel", memory_id=long_car)
     assert len(scoped) > 2
+
+
+def test_competing_memories_keep_the_two_chunk_cap() -> None:
+    # Two saves interleave in the ranking, so neither is "the only match".
+    first, second = uuid4(), uuid4()
+    words = ["engines", "pistons", "cylinders", "spark", "exhaust", "valves"]
+    chunks = [
+        _ranked_chunk(
+            first if i % 2 == 0 else second,
+            f"{word} notes about how car engines burn fuel number {i}",
+            (1.0, 0.05 * i, 0.0),
+            0.30 + 0.01 * i,
+        )
+        for i, word in enumerate(words)
+    ]
+    service = RetrievalService.__new__(RetrievalService)
+    service.settings = type("S", (), {})()
+    picked = service._select(chunks, chunks, limit=6, per_memory=2)
+    assert {c.memory_id for c in picked} == {first, second}
+    assert all(sum(c.memory_id == m for c in picked) == 2 for m in (first, second))
 
 
 def test_other_users_memories_are_never_returned(concepts: None) -> None:
@@ -294,3 +380,23 @@ def test_long_referential_follow_up_is_rewritten() -> None:
     query = rewrite_query("give me another example of that pattern please", HISTORY, complete)
     assert query == "another sliding window example"
     assert len(calls) == 1
+
+
+def test_one_save_leading_every_slot_drops_stragglers_and_uses_more_chunks() -> None:
+    page, other = uuid4(), uuid4()
+    texts = [
+        "tcp connection establishment uses a three way handshake",
+        "the client sends syn and the server answers syn ack",
+        "tcp fast open skips a round trip on repeat connections",
+        "syn flood attacks abuse half open connections",
+    ]
+    tcp = [
+        _ranked_chunk(page, text, (1.0, 0.1 * i, 0.0), 0.3 + 0.01 * i)
+        for i, text in enumerate(texts)
+    ]
+    stray = _ranked_chunk(other, "neurons in a network pass signals", (0.0, 1.0, 0.0), 0.7)
+    service = RetrievalService.__new__(RetrievalService)
+    service.settings = type("S", (), {})()
+    picked = service._select([*tcp, stray], tcp[:2], limit=4, per_memory=2)
+    # Every top candidate is from one save: up to 4 of its chunks, no stray.
+    assert {c.chunk_id for c in picked} == {c.chunk_id for c in tcp}

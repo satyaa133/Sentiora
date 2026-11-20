@@ -5,11 +5,11 @@
 * **Product Vision**: A private, intelligent, and context-aware second brain.
 * **Architecture**: Clean Architecture, modular services, message-passing Chrome Extension, and background RQ workers.
 * **Tech Stack**:
-  * **Backend**: Python 3.12+, FastAPI, PostgreSQL (pgvector), SQLAlchemy, Alembic, RQ, Redis, OpenAI SDK.
+  * **Backend**: Python 3.12+, FastAPI, PostgreSQL (pgvector + full-text search), SQLAlchemy, Alembic, RQ, Redis. AI calls go through the `openai` SDK (OpenRouter, OpenAI) and `google-genai` (Gemini); no LangChain.
   * **Frontend**: React, Vite, TypeScript, Tailwind CSS, React Router.
   * **Extension**: Chrome Extension (Manifest V3), React, TypeScript.
 * **Repository Structure**: Monorepo split into `backend/`, `frontend/`, `extension/`, and `shared/` directories.
-* **Current Phase**: Refer to `TASKS.md` for the latest active development phase.
+* **Current Work**: the v3 rebuild in `docs/REBUILD_PLAN.md`; the current stage is in `docs/TASKS.md` ("Rebuild v3").
 
 ---
 
@@ -18,8 +18,8 @@ When writing or reviewing code for Sentiora, AI agents **must**:
 1. **Read documentation before coding**: Never skip canonical documents in the `docs/` folder.
 2. **Treat documentation as the source of truth**: If in doubt, refer back to the specifications.
 3. **Never invent architecture**: Follow established patterns (e.g., repository pattern, dependency injection).
-4. **Never change APIs without checking docs**: Ensure all endpoints align with the locked API Specification.
-5. **Never modify database schema unless required**: Migrations must follow the Database Schema Design document strictly.
+4. **Never change APIs without checking docs**: Endpoints follow `docs/API.md`; new ones come only from `docs/REBUILD_PLAN.md` section 8. Regenerate `docs/api/openapi.json` (`npm run docs:api`) with every API change.
+5. **Never modify database schema unless required**: The schema is `docs/DATABASE.md`; changes come only from `docs/REBUILD_PLAN.md` section 7, through an Alembic migration, with `DATABASE.md` updated in the same commit.
 6. **Maintain consistency**: Conform to existing naming conventions and style guides.
 7. **Never break existing code**: Preserve backwards compatibility unless a breaking change is explicitly instructed and reviewed.
 8. **Avoid duplicate implementations**: Reuse existing components, hooks, utilities, and services.
@@ -34,12 +34,12 @@ When writing or reviewing code for Sentiora, AI agents **must**:
 ## Required Reading Before Coding
 Before generating any implementation code, inspect the following resources:
 * `README.md`
-* `docs/01_PRD_v2.1_FINAL.pdf` (PRD)
-* `docs/02_SRS_v1.0.pdf` (SRS)
-* `docs/04_Technical_Specification_v1.2.pdf` (Technical Specification)
-* `docs/07_Development_Implementation_Plan.pdf` (Implementation Plan)
-* `docs/08_UIUX_Specification_v1.0_FINAL.pdf` (UI/UX Specification)
+* `docs/REBUILD_PLAN.md` (current work: stages, decisions, planned changes)
 * `docs/TASKS.md` (Current Progress)
+* `docs/API.md` and `docs/DATABASE.md` (API and schema contracts)
+* `docs/RAG_v2_ADDENDUM.md` (current Ask and retrieval design)
+* `docs/DESIGN.md` (UI design system), for UI work
+* Not `docs/archive/`: those documents are superseded
 * Existing backend (`backend/app/`)
 * Existing frontend (`frontend/src/`)
 * Database models (`backend/app/models/`)
@@ -121,7 +121,7 @@ Copy and paste this snippet at the beginning of your prompt when assigning a new
 > Before writing any code:
 > 1. Read all relevant documentation.
 > 2. Understand the current implementation.
-> 3. Review `docs/TASKS.md` to know the current progress.
+> 3. Read `docs/REBUILD_PLAN.md` and the "Rebuild v3" section of `docs/TASKS.md`; work only on the stage and task named below.
 > 4. Verify the architecture.
 > 5. Check Figma before implementing UI.
 > 6. Reuse existing components.
