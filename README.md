@@ -204,6 +204,18 @@ To process captures in parallel (for example when testing many saves at once), r
 
 If the API won't start because port 8000 is in use, check for the containerised backend with `docker ps` and stop it with `docker compose --profile app stop backend worker`.
 
+### See What the App Is Doing
+
+- **Logs:** every line carries the request ID (`req_…`, also in the `X-Request-ID` header) or `job_<id>` in the worker. Set `LOG_FORMAT=json` for one JSON object per line.
+- **Metrics:** http://localhost:8000/metrics (Prometheus format): request latency per route, time per Ask stage (`sentiora_ask_stage_seconds`), AI provider errors, capture queue lengths. In production it isn't exposed through nginx.
+- **AI cost:** every AI call is a row in `llm_usage` (tokens, cost reported by OpenRouter, latency, success). For example, spend per day:
+  ```sql
+  SELECT date_trunc('day', created_at) AS day, purpose, count(*), sum(cost_usd)
+  FROM llm_usage GROUP BY 1, 2 ORDER BY 1 DESC;
+  ```
+- **Answer ratings:** Helpful / Not helpful clicks land in `answer_feedback` (question stored as a hash).
+- **Errors:** set `SENTRY_DSN` in `backend/.env` to report API and worker errors to Sentry (no request bodies, auth headers or local variables are sent).
+
 ### Load the Chrome Extension
 
 1. Build the extension bundle first: `npm run build:extension` (it bakes in `VITE_API_BASE_URL`/`VITE_APP_URL` from the root `.env`; rebuild after changing them).
