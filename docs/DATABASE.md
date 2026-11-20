@@ -5,7 +5,7 @@ PostgreSQL 16 with the `pgvector` extension (image
 SQLAlchemy models in `backend/app/models/` and changed only through Alembic
 migrations in `backend/alembic/versions/`.
 
-This file describes the schema at migration head **`006_rag_v2_chunks`**
+This file describes the schema at migration head **`007_usage_and_feedback`**
 (checked against a live database on 2026-11-20). It replaces
 `06_Database_Schema_Design_v1.2.pdf` (archived), which designed many tables
 that were never built. Planned changes are in `REBUILD_PLAN.md` section 7.
@@ -19,14 +19,16 @@ users ─┬─< sessions ─<┐
        ├─< refresh_tokens (session_id → sessions, SET NULL)
        ├── user_profiles (1:1)
        ├─< memory_items ─< memory_chunks
-       └─<──────────────────┘ (memory_chunks.user_id)
+       ├─<──────────────────┘ (memory_chunks.user_id)
+       ├─< llm_usage
+       └─< answer_feedback
 ```
 
 Every user-owned table references `users(id) ON DELETE CASCADE`, so deleting a
 user row deletes all their data. `memory_chunks` also cascades from
 `memory_items`.
 
-Six tables (plus `alembic_version`):
+Eight tables (plus `alembic_version`):
 
 | Table | Holds |
 | ----- | ----- |
@@ -36,6 +38,8 @@ Six tables (plus `alembic_version`):
 | `user_profiles` | Display settings, onboarding, capture source preferences |
 | `memory_items` | One row per save (page, PDF, YouTube video) |
 | `memory_chunks` | The searchable pieces of each save, with vectors and full-text |
+| `llm_usage` | One row per call to an external AI provider (tokens, cost, latency) |
+| `answer_feedback` | 👍/👎 on Ask answers |
 
 ### Enums
 
@@ -171,6 +175,42 @@ Indexes: `memory_id`; `user_id`; `(user_id, memory_id)`; unique
 `(memory_id, chunk_index)`; **HNSW** `embedding vector_cosine_ops`; GIN
 `content_tsv`.
 
+### `llm_usage`
+
+One row per call to an external AI provider: answers, follow-up rewrites,
+embeddings (and enrichment from S5). Written by `app/services/usage.py`.
+
+| Column | Type | Null | Default / notes |
+| ------ | ---- | ---- | --------------- |
+| `id` | uuid | no | PK |
+| `user_id` | uuid | yes | FK `users`, cascade; null for calls not made for one user |
+| `purpose` | varchar(16) | no | `answer` \| `enrich` \| `rewrite` \| `embed` (check constraint); the answer-metadata call counts as `answer` |
+| `provider` | varchar(32) | no | `openrouter`, `gemini`, `openai` |
+| `model` | varchar(128) | no | |
+| `tokens_in`, `tokens_out` | integer | yes | from the provider's usage report |
+| `cost_usd` | numeric(12,6) | yes | as reported by the provider (OpenRouter); null otherwise |
+| `latency_ms` | integer | no | |
+| `success` | boolean | no | |
+| `error_code` | varchar(64) | yes | HTTP status or exception type when it failed |
+| `created_at` | timestamptz | no | `now()` |
+
+Indexes: `(user_id, created_at)`; `created_at`.
+
+### `answer_feedback`
+
+| Column | Type | Null | Default / notes |
+| ------ | ---- | ---- | --------------- |
+| `id` | uuid | no | PK |
+| `user_id` | uuid | no | FK `users`, cascade |
+| `question_hash` | varchar(64) | no | SHA-256 of the normalised question; the text isn't stored |
+| `answer_mode` | varchar(16) | no | the answer's mode (`memory`, `general`, `mixed`; `instant`/`ai` from S6) |
+| `rating` | smallint | no | `1` or `-1` (check constraint) |
+| `comment` | text | yes | at most 1000 characters (check constraint) |
+| `source_chunk_ids` | uuid[] | no | `{}`; cited chunks, no foreign key (a deleted memory keeps the rating) |
+| `created_at` | timestamptz | no | `now()` |
+
+Indexes: `(user_id, created_at)`.
+
 ---
 
 ## Migrations
@@ -185,7 +225,8 @@ Applied in this order (`down_revision` chain):
 | `004_memory_chunks` | `004_memory_chunks.py` | `memory_chunks` |
 | `005_chunk_embeddings` | `005_chunk_embeddings.py` | `embedding vector(1536)` + HNSW index |
 | `cbb1d84cf989` | `20260814_cbb1d84cf989_capture_v2_schema_enhancements.py` | Capture v2 fields on `memory_items` |
-| `006_rag_v2_chunks` | `006_rag_v2_chunks.py` | `start_sec`, `end_sec`, `embedding_model`, generated tsvectors + GIN indexes (**head**) |
+| `006_rag_v2_chunks` | `006_rag_v2_chunks.py` | `start_sec`, `end_sec`, `embedding_model`, generated tsvectors + GIN indexes |
+| `007_usage_and_feedback` | `007_usage_and_feedback.py` | `llm_usage`, `answer_feedback` (**head**) |
 
 Commands (from the repo root):
 
