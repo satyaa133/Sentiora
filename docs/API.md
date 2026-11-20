@@ -94,8 +94,9 @@ Sliding windows of 60 seconds. Exceeding one returns `429 RATE_LIMITED` with a
 | `GET /search` | user | 30 / min | `RATE_LIMIT_SEARCH_PER_USER_PER_MINUTE` |
 
 Repeated failed logins also back off per account (`429 AUTH_LOGIN_THROTTLED`).
-Limits are kept in each API process's memory today; REBUILD_PLAN S1 moves them
-to Redis.
+Limits are counted in Redis, so they hold across every API process. If Redis
+is unreachable, each process falls back to its own in-memory count. The
+per-account login back-off is still kept per process.
 
 ---
 
