@@ -55,7 +55,7 @@ Approved direction 2026-11-20: instant answers from the user's saves with no ext
 | Stage | Status | Notes |
 | ----- | ------ | ----- |
 | S0: Documentation reset | ✅ Completed | REBUILD_PLAN.md; `docs/API.md` + generated `docs/api/openapi.json` (`npm run docs:api`, `--check`); `docs/DATABASE.md` (6 tables, head `006_rag_v2_chunks`); AGENTS, PROMPT_GUIDE, CONTRIBUTING, README and docs index updated; superseded PDFs and the 2026-10-25 QA reports moved to `docs/archive/`; TEAM_SETUP.md moved to `docs/` |
-| S1: Reliability fixes | ⏳ Pending | DB session not held while streaming, pgvector iterative scan, configurable timeouts, circuit breaker, Redis rate limits, automatic embedding retry, more workers |
+| S1: Reliability fixes | 🟡 In Progress | ✅ DB session released before streaming. Pending: configurable timeouts with a first-token budget, shared key cooldowns (circuit breaker) and rate limits in Redis, pgvector iterative scan, automatic embedding retry, more workers |
 | S2: Observability baseline | ⏳ Pending | Structured logs, Sentry, `/metrics`, `llm_usage`, answer feedback, baseline numbers |
 | S3: Local embeddings | ⏳ Pending | `EMBEDDING_PROVIDER=local`, `embedding_local` column + HNSW, backfill, bge-small vs nomic eval |
 | S4: Local reranker | ⏳ Pending | Cross-encoder rerank of top 30, long-page eval cases |

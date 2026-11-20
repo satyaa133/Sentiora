@@ -287,10 +287,23 @@ DATABASE.md without opening an archived PDF.
 - [ ] **Configurable, shorter timeouts.** `LLM_CHAT_TIMEOUT_SECONDS` (10),
       `LLM_META_TIMEOUT_SECONDS` (8), `EMBEDDING_TIMEOUT_SECONDS` (10) replace
       the constants in `rag_service.py` and `embedding_service.py`.
-- [ ] **Circuit breaker** per provider in `llm_pool.py`: after 5 failures in
-      60 s, skip that provider for 60 s (state in Redis).
+      `LLM_CHAT_TIMEOUT_SECONDS` is the most an answer waits for its first
+      token **across every key it tries** (each attempt gets the time left), so
+      an outage fails in about that long. Streamed answers are not cut off after
+      the first token. One-piece responses (the Gemini backup, `POST /chat`, the
+      follow-up rewrite) must finish within it: Gemini's SDK also sends it as
+      the server-side deadline.
+- [ ] **Circuit breaker, shared.** `llm_pool.py` already cools a failing key
+      down (30 s for a timeout or 5xx, 5 min for auth, credit or rate-limit
+      errors, doubling on repeats). Today that state is per process. Share it
+      through Redis so every API process and worker skips a failing key at once
+      (keys stored as a hash, never the key itself), falling back to the
+      in-process state when Redis is down. No separate breaker thresholds.
 - [ ] **Redis rate limits.** `app/core/rate_limit.py` sliding window moves to
       Redis (same keys and limits); in-memory fallback if Redis is down.
+      Shared Redis access lives in `app/core/redis_client.py` (short socket
+      timeouts; after a failure, Redis is skipped for 30 s so a Redis outage
+      doesn't slow every request). Tests use `fakeredis` (dev dependency).
 - [ ] **Automatic embedding retry.** A capture whose embedding fails enqueues
       a retry at 1, 5 and 30 minutes (RQ scheduled jobs; the worker runs with
       the scheduler).
@@ -577,7 +590,6 @@ that adds them.
 | `LLM_CHAT_TIMEOUT_SECONDS` | 10 | S1 |
 | `LLM_META_TIMEOUT_SECONDS` | 8 | S1 |
 | `EMBEDDING_TIMEOUT_SECONDS` | 10 | S1 |
-| `CIRCUIT_BREAKER_FAILURES` / `CIRCUIT_BREAKER_WINDOW_SECONDS` / `CIRCUIT_BREAKER_OPEN_SECONDS` | 5 / 60 / 60 | S1 |
 | `WORKER_COUNT` (compose) | 2 | S1 |
 | `SENTRY_DSN` | unset (off) | S2 |
 | `METRICS_ENABLED` | true | S2 |
