@@ -2,8 +2,9 @@
 
 Every configured chat key becomes a backend: the LLM_PROVIDER keys first
 (for OpenRouter: OPENROUTER_API_KEY, then OPENROUTER_API_KEY_1..N), then any
-other provider whose key is set. Calls rotate the starting backend to spread
-load; a backend that fails with an exhausted, revoked or rate-limited key (or
+other provider whose key is set. Calls rotate among the LLM_PROVIDER keys to
+spread load; other providers are backups, tried in order only after every
+primary key has failed or is cooling down. A backend that fails with an exhausted, revoked or rate-limited key (or
 an overload/timeout) cools down with exponential backoff and is skipped, so an
 answer never waits on a dead key. At most LLM_MAX_ATTEMPTS backends are tried
 per call. Keys are never logged.
@@ -126,8 +127,11 @@ class KeyPool:
     def order(
         self, backends: list[LLMBackend], *, rotate: bool = True
     ) -> list[LLMBackend]:
-        """Backends to try, healthy ones first in rotated order.
+        """Backends to try, healthy ones first.
 
+        The keys of the first backend's provider (the primary, LLM_PROVIDER)
+        rotate round-robin; backends of other providers follow in the given
+        order, so a backup provider answers only when the primary keys can't.
         Cooling backends go last (soonest to recover first) rather than being
         dropped, so a request still has a chance when every key is cooling.
         ``rotate=False`` keeps the current turn, for secondary calls (such as
@@ -135,15 +139,18 @@ class KeyPool:
         """
         if not backends:
             return []
+        primary_provider = backends[0].provider
+        primary = [b for b in backends if b.provider == primary_provider]
+        backups = [b for b in backends if b.provider != primary_provider]
         shared = self._shared_remaining(backends)
         now = time.monotonic()
         with self._lock:
-            group = tuple(b.name for b in backends)
+            group = tuple(b.name for b in primary)
             turn = self._turns.get(group, 0)
-            start = turn % len(backends)
+            start = turn % len(primary)
             if rotate:
                 self._turns[group] = turn + 1
-            rotated = backends[start:] + backends[:start]
+            rotated = primary[start:] + primary[:start] + backups
             remaining = {
                 b.api_key: max(
                     self._cooling_until.get(b.api_key, 0.0) - now,
