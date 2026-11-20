@@ -646,31 +646,34 @@ numbers where it has targets), and the owner has seen it.
 
 ## 12. Document status
 
-Reviewed 2026-11-20 against the code. "Archive" means move to `docs/archive/`
-(kept for history, no longer followed). Nothing is deleted.
+Reviewed 2026-11-20 against the code; applied in S0 the same day. Archived
+documents are in `docs/archive/` (kept for history, no longer followed; see
+`docs/archive/README.md`). Nothing was deleted.
 
 | Document | Status | Why |
 | -------- | ------ | --- |
 | `REBUILD_PLAN.md` (this) | **Current** | Rebuild source of truth |
 | `TASKS.md` | **Current** | Progress tracker |
+| `API.md` + `api/openapi.json` | **Current** (S0) | API contract; `openapi.json` generated with `npm run docs:api` |
+| `DATABASE.md` | **Current** (S0) | Schema contract at the current Alembic head |
 | `DESIGN.md` + `design/` | **Current** | Design system used by the code |
 | `RAG_v2_ADDENDUM.md` | **Current** until S6 | Describes today's retrieval and Ask; this plan overrides it where they differ |
 | `RELEASE.md` | **Current**, update in S10 | Deployment and packaging |
-| `README.md` (docs index) | **Update in S0** | Calls every PDF canonical |
-| `PROMPT_GUIDE.md` | **Update in S0** | Says "OpenAI SDK" and "locked API Specification" PDF |
-| `qa-audit/TEAM_SETUP.md` | **Current**, move next to README in S0 | Setup and troubleshooting |
-| `01_PRD_v2.1_FINAL.pdf` | **Keep as product vision**, superseded in scope | Footprint and Shield modules (not built) and the original MVP scope; product scope is now Memory + Ask (this plan) |
-| `02_SRS_v1.0.pdf` | **Archive** | Requirements for modules and integrations that don't exist; useful NFRs are in section 2 |
-| `03_Backend_Technical_Specification_v1.2.pdf` | **Archive** | Describes Celery and S3; the code uses RQ and no object storage |
-| `04_Technical_Specification_v1.2.pdf` | **Archive** | August four-person roadmap and day-one guide; historical |
-| `05_API_Specification_v1.0.pdf` | **Archive** after `API.md` exists | ~90 endpoints specified (collections, admin, favorites, uploads…); 23 exist, several with different paths (`/memory-items`, `/chat`) |
-| `06_Database_Schema_Design_v1.2.pdf` | **Archive** after `DATABASE.md` exists | Many designed tables (collections, embeddings, integrations…); 6 exist (`users`, `sessions`, `refresh_tokens`, `user_profiles`, `memory_items`, `memory_chunks`); mentions MongoDB and Pinecone options |
-| `07_Development_Implementation_Plan.pdf` | **Archive** | Phases 0–8 done; Phase 9 continues as S10 here |
-| `08_UIUX_Specification_v1.0_FINAL.pdf` | **Archive** | Replaced by `DESIGN.md` (redesign) |
-| `Capture_Module_v2_Technical_Design.pdf` | **Keep** | Short; matches the capture code |
+| `README.md` (docs index) | **Current** (rewritten in S0) | |
+| `PROMPT_GUIDE.md` | **Current** (updated in S0) | |
+| `TEAM_SETUP.md` | **Current** (moved from `qa-audit/` in S0) | Setup and troubleshooting |
+| Root `CONTRIBUTING.md`, `AGENTS.md` | **Current** (updated in S0) | |
+| `Capture_Module_v2_Technical_Design.pdf` | **Current** | Short; matches the capture code |
+| `01_PRD_v2.1_FINAL.pdf` | **Kept as product vision**, superseded in scope | Footprint and Shield modules (not built) and the original MVP scope; product scope is now Memory + Ask (this plan) |
+| `archive/02_SRS_v1.0.pdf` | **Archived** | Requirements for modules and integrations that don't exist; useful NFRs are in section 2 |
+| `archive/03_Backend_Technical_Specification_v1.2.pdf` | **Archived** | Describes Celery and S3; the code uses RQ and no object storage |
+| `archive/04_Technical_Specification_v1.2.pdf` | **Archived** | August four-person roadmap and day-one guide; historical |
+| `archive/05_API_Specification_v1.0.pdf` | **Archived** | ~90 endpoints specified (collections, admin, favorites, uploads…); 23 exist, several with different paths (`/memory-items`, `/chat`). Replaced by `API.md` |
+| `archive/06_Database_Schema_Design_v1.2.pdf` | **Archived** | Many designed tables (collections, embeddings, integrations…); 6 exist. Replaced by `DATABASE.md` |
+| `archive/07_Development_Implementation_Plan.pdf` | **Archived** | Phases 0–8 done; Phase 9 continues as S10 here |
+| `archive/08_UIUX_Specification_v1.0_FINAL.pdf` | **Archived** | Replaced by `DESIGN.md` (redesign) |
+| `archive/qa-audit-2026-10-25/` | **Archived** | Audit report, test results, bug register and cross-machine checklist from the 2026-10-25 stabilization pass |
 | `RAG_v3_ADDENDUM.md` | Removed (never committed) | Draft merged into this plan |
-| `qa-audit/AUDIT_REPORT.md`, `TEST_RESULTS.md`, `BUG_REGISTER.md`, `CROSS_MACHINE_CHECKLIST.md` | **Archive** | Snapshot of the 2026-10-25 stabilization pass |
-| Root `CONTRIBUTING.md` | **Update in S0** | Names the API PDF as the contract |
 
 Files in the repo folder that are not documentation and are not tracked by git
 (clean up locally, keep out of the repo): `Sentiora_*_Report_2026-11-18.docx/.pdf`,

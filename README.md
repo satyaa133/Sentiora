@@ -378,21 +378,19 @@ General-knowledge answers go beyond PRD §15, which limits Ask to saved memory. 
 
 ## Documentation
 
-All canonical engineering specifications live in `docs/`:
+Engineering documentation lives in `docs/` (index: `docs/README.md`):
 
 | File | Description |
 |---|---|
+| `docs/REBUILD_PLAN.md` | **Current work:** the v3 rebuild plan (stages, decisions, planned changes) |
 | `docs/TASKS.md` | Live engineering progress tracker and deliverables |
-| `docs/qa-audit/TEAM_SETUP.md` | Team setup walkthrough and **troubleshooting** table |
+| `docs/API.md` | API conventions, endpoints and error codes; schemas in `docs/api/openapi.json` (`npm run docs:api`) |
+| `docs/DATABASE.md` | Database tables, indexes and migrations |
+| `docs/RAG_v2_ADDENDUM.md` | Current Ask and retrieval design |
+| `docs/TEAM_SETUP.md` | Team setup walkthrough and **troubleshooting** table |
 | `docs/DESIGN.md` | UI design system and redesign handoff (screenshots in `docs/design/`) |
 | `docs/Capture_Module_v2_Technical_Design.pdf` | Capture module v2 technical design |
 | `docs/RELEASE.md` | Production deployment, Chrome Web Store packaging, YouTube capture limits |
-| `docs/01_PRD_v2.1_FINAL.pdf` | Product Requirements Document |
-| `docs/02_SRS_v1.0.pdf` | Software Requirements Specification |
-| `docs/03_Backend_Technical_Specification_v1.2.pdf` | Backend technical architecture |
-| `docs/04_Technical_Specification_v1.2.pdf` | Full system architecture specification |
-| `docs/05_API_Specification_v1.0.pdf` | API endpoint contracts |
-| `docs/06_Database_Schema_Design_v1.2.pdf` | Database schema design |
-| `docs/07_Development_Implementation_Plan.pdf` | Implementation phase breakdown |
-| `docs/08_UIUX_Specification_v1.0_FINAL.pdf` | UI/UX design specifications |
+| `docs/01_PRD_v2.1_FINAL.pdf` | Product vision (scope superseded by the rebuild plan) |
+| `docs/archive/` | Superseded specifications (SRS, backend/technical specs, API and database PDFs, implementation plan, UI/UX PDF, Oct 2026 QA reports) |
 
