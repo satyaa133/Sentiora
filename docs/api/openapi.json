@@ -1050,10 +1050,76 @@
           }
         }
       }
+    },
+    "/api/v1/answers/feedback": {
+      "post": {
+        "tags": [
+          "Answer Feedback"
+        ],
+        "summary": "Rate an Ask answer 👍 (1) or 👎 (-1)",
+        "operationId": "create_answer_feedback_api_v1_answers_feedback_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerFeedbackCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_AnswerFeedbackResponse_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
     "schemas": {
+      "APIResponse_AnswerFeedbackResponse_": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success",
+            "default": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/AnswerFeedbackResponse"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "APIResponse[AnswerFeedbackResponse]"
+      },
       "APIResponse_AskResponse_": {
         "properties": {
           "success": {
@@ -1197,6 +1263,89 @@
           "data"
         ],
         "title": "APIResponse[list[SearchHit]]"
+      },
+      "AnswerFeedbackCreate": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 2,
+            "title": "Question"
+          },
+          "answer_mode": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "general",
+              "mixed",
+              "combined",
+              "instant",
+              "ai"
+            ],
+            "title": "Answer Mode"
+          },
+          "rating": {
+            "type": "integer",
+            "enum": [
+              1,
+              -1
+            ],
+            "title": "Rating"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "source_chunk_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Source Chunk Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question",
+          "answer_mode",
+          "rating"
+        ],
+        "title": "AnswerFeedbackCreate"
+      },
+      "AnswerFeedbackResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "rating": {
+            "type": "integer",
+            "title": "Rating"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "rating",
+          "created_at"
+        ],
+        "title": "AnswerFeedbackResponse"
       },
       "AskCitation": {
         "properties": {

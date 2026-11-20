@@ -102,7 +102,9 @@ per-account login back-off is still kept per process.
 
 ## Endpoints
 
-23 endpoints. Request and response models are in `api/openapi.json`.
+24 endpoints. Request and response models are in `api/openapi.json`.
+Prometheus metrics are served at `GET /metrics` (outside `/api/`, not in the
+OpenAPI schema; nginx doesn't forward it).
 
 ### Health
 
@@ -174,6 +176,17 @@ Ask request: `question` (2–2000 chars), optional `source_type`, `memory_id`,
 Validation, auth and retrieval errors on `/chat/stream` are normal HTTP errors
 before the stream starts; model failures after it starts arrive as `error`
 events.
+
+### Answer feedback (`/api/v1/answers`)
+
+| Method | Path | Auth | Purpose |
+| ------ | ---- | ---- | ------- |
+| POST | `/feedback` | Bearer | Rate an Ask answer 👍/👎 (201) |
+
+Body: `question` (2–2000 chars; stored only as a SHA-256 hash), `answer_mode`
+(`memory`, `general`, `mixed`, `combined`; `instant`/`ai` from S6), `rating`
+(`1` or `-1`), optional `comment` (≤ 1000 chars), `source_chunk_ids` (≤ 20
+UUIDs). Returns `{id, rating, created_at}`.
 
 ### Dashboard (`/api/v1/dashboard`)
 

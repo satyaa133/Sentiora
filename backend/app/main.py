@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from app.api.v1.ask_routes import router as ask_router
 from app.api.v1.auth_routes import router as auth_router
 from app.api.v1.dashboard_routes import router as dashboard_router
+from app.api.v1.feedback_routes import router as feedback_router
 from app.api.v1.health_routes import router as health_router
 from app.api.v1.memory_routes import router as memory_router
 from app.api.v1.user_routes import router as user_router
@@ -196,6 +197,7 @@ app.include_router(user_router, prefix=settings.api_v1_prefix)
 app.include_router(memory_router, prefix=settings.api_v1_prefix)
 app.include_router(ask_router, prefix=settings.api_v1_prefix)
 app.include_router(dashboard_router, prefix=settings.api_v1_prefix)
+app.include_router(feedback_router, prefix=settings.api_v1_prefix)
 
 
 if settings.metrics_enabled:
