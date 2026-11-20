@@ -50,7 +50,7 @@ class LLMUsage(Base):
     tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # As reported by the provider (OpenRouter usage accounting); null otherwise.
-    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(16, 10), nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)

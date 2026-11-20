@@ -188,7 +188,7 @@ embeddings (and enrichment from S5). Written by `app/services/usage.py`.
 | `provider` | varchar(32) | no | `openrouter`, `gemini`, `openai` |
 | `model` | varchar(128) | no | |
 | `tokens_in`, `tokens_out` | integer | yes | from the provider's usage report |
-| `cost_usd` | numeric(12,6) | yes | as reported by the provider (OpenRouter); null otherwise |
+| `cost_usd` | numeric(16,10) | yes | as reported by the provider (OpenRouter); null otherwise |
 | `latency_ms` | integer | no | |
 | `success` | boolean | no | |
 | `error_code` | varchar(64) | yes | HTTP status or exception type when it failed |

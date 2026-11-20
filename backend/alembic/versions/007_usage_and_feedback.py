@@ -32,7 +32,7 @@ def upgrade() -> None:
         sa.Column("model", sa.String(length=128), nullable=False),
         sa.Column("tokens_in", sa.Integer(), nullable=True),
         sa.Column("tokens_out", sa.Integer(), nullable=True),
-        sa.Column("cost_usd", sa.Numeric(12, 6), nullable=True),
+        sa.Column("cost_usd", sa.Numeric(16, 10), nullable=True),
         sa.Column("latency_ms", sa.Integer(), nullable=False),
         sa.Column("success", sa.Boolean(), nullable=False),
         sa.Column("error_code", sa.String(length=64), nullable=True),
