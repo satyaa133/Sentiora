@@ -5,7 +5,7 @@ PostgreSQL 16 with the `pgvector` extension (image
 SQLAlchemy models in `backend/app/models/` and changed only through Alembic
 migrations in `backend/alembic/versions/`.
 
-This file describes the schema at migration head **`008_local_embeddings`**
+This file describes the schema at migration head **`009_enrichment`**
 (checked against a live database on 2026-11-20). It replaces
 `06_Database_Schema_Design_v1.2.pdf` (archived), which designed many tables
 that were never built. Planned changes are in `REBUILD_PLAN.md` section 7.
@@ -129,7 +129,7 @@ worker (`backend/app/workers/jobs/process_capture.py`).
 | `title` | text | no | metadata only, never part of chunk text |
 | `content` | text | yes | cleaned full text |
 | `structured_content` | jsonb | yes | sections / timed transcript nodes from the extension |
-| `summary` | text | yes | **unused today**; REBUILD_PLAN S5 fills it |
+| `summary` | text | yes | 2–4 sentences written by enrichment (S5) |
 | `author`, `favicon_url`, `thumbnail_url` | text | yes | |
 | `domain`, `language` | varchar | yes | |
 | `word_count`, `reading_time_seconds` | integer | no | `0` |
@@ -140,6 +140,11 @@ worker (`backend/app/workers/jobs/process_capture.py`).
 | `extraction_quality_reasons` | jsonb | yes | |
 | `status` | itemstatus | no | `pending` → `processing` → `ready` / `failed` |
 | `processing_error` | text | yes | why it failed |
+| `key_points` | jsonb | yes | enrichment: up to 8 short points |
+| `enrichment_status` | varchar(16) | no | `'none'`; `none` \| `queued` \| `ready` \| `failed` (check constraint) |
+| `enrich_requested_at` | timestamptz | yes | last enrichment request; counts toward `ENRICH_DAILY_LIMIT` |
+| `enriched_at` | timestamptz | yes | when the current enrichment was stored |
+| `enrichment_model` | varchar(128) | yes | `provider:model` that wrote it |
 | `captured_at` | timestamptz | no | `now()`; when the user saw it |
 | `received_at` | timestamptz | no | `now()`; when the API received it |
 | `created_at`, `updated_at` | timestamptz | no | `now()` |
@@ -147,7 +152,11 @@ worker (`backend/app/workers/jobs/process_capture.py`).
 | `title_tsv` | tsvector | — | generated: `to_tsvector('english', coalesce(title, ''))` |
 
 Indexes: `user_id`; `status`; `source_type`; `captured_at`; `deleted_at`;
-`content_hash`; GIN `title_tsv`.
+`content_hash`; `(user_id, enrich_requested_at)`; GIN `title_tsv`.
+
+Enrichment (REBUILD_PLAN S5) runs only for saves that matter (Save now, opened in
+the app, a source of an Ask answer). Re-chunking a save (`--reclean`) or deleting
+it clears its enrichment and questions.
 
 ### `memory_chunks`
 
@@ -169,6 +178,7 @@ YouTube transcripts.
 | `embedding` | vector(1536) | yes | null when embedding failed (full-text still works) |
 | `embedding_model` | varchar | yes | `provider:model` that produced `embedding`; queries only match the active model |
 | `embedding_local` | vector(768) | yes | vector from the local model (`EMBEDDING_PROVIDER=local`, `LOCAL_EMBEDDING_MODEL`, default `nomic-ai/nomic-embed-text-v1.5-Q`); null until embedded. `embedding_model` does not describe it: it always holds `LOCAL_EMBEDDING_MODEL` vectors |
+| `context` | text | yes | enrichment: one line placing the chunk in its document; the chunk is embedded as `context` + blank line + `content` (contextual retrieval) |
 | `content_tsv` | tsvector | — | generated: `setweight(to_tsvector('english', coalesce(heading, '')), 'B') \|\| setweight(to_tsvector('english', content), 'A')` |
 | `created_at` | timestamptz | no | `now()` |
 
@@ -181,6 +191,23 @@ Search reads the column of the active provider: `embedding_local` for
 matches. Each provider writes only its own column, so switching back is a
 setting plus `scripts.reprocess_memories --embed` for saves made meanwhile.
 `embedding` is dropped in S10.
+
+### `memory_questions`
+
+Questions a save answers, written by enrichment (S5) and matched against the
+user's question by the question-bank retrieval leg (S6).
+
+| Column | Type | Null | Default / notes |
+| ------ | ---- | ---- | --------------- |
+| `id` | uuid | no | PK |
+| `memory_id` | uuid | no | FK `memory_items`, cascade; rows deleted when the memory is soft-deleted or re-chunked |
+| `user_id` | uuid | no | FK `users`, cascade; every query filters on it |
+| `chunk_id` | uuid | yes | FK `memory_chunks`, `ON DELETE SET NULL`; the chunk that answers it |
+| `question` | text | no | |
+| `embedding_local` | vector(768) | yes | local model, embedded as a query |
+| `created_at` | timestamptz | no | `now()` |
+
+Indexes: `user_id`; `memory_id`; **HNSW** `embedding_local vector_cosine_ops`.
 
 ### `llm_usage`
 
@@ -234,7 +261,8 @@ Applied in this order (`down_revision` chain):
 | `cbb1d84cf989` | `20260814_cbb1d84cf989_capture_v2_schema_enhancements.py` | Capture v2 fields on `memory_items` |
 | `006_rag_v2_chunks` | `006_rag_v2_chunks.py` | `start_sec`, `end_sec`, `embedding_model`, generated tsvectors + GIN indexes |
 | `007_usage_and_feedback` | `007_usage_and_feedback.py` | `llm_usage`, `answer_feedback` |
-| `008_local_embeddings` | `008_local_embeddings.py` | `memory_chunks.embedding_local vector(768)` + HNSW cosine index (**head**) |
+| `008_local_embeddings` | `008_local_embeddings.py` | `memory_chunks.embedding_local vector(768)` + HNSW cosine index |
+| `009_enrichment` | `009_enrichment.py` | `memory_items` enrichment columns, `memory_chunks.context`, `memory_questions` (**head**) |
 
 Commands (from the repo root):
 
