@@ -35,6 +35,9 @@ COOLDOWN_STATUSES = frozenset({401, 402, 403, 429})
 DEFAULT_COOLDOWN_SECONDS = 300
 DEFAULT_MAX_COOLDOWN_SECONDS = 3600
 DEFAULT_MAX_ATTEMPTS = 4
+# Sent as OpenRouter's `provider` preferences on every request: only endpoints
+# that keep no data (zdr) and don't collect prompts for training. REBUILD_PLAN D13.
+OPENROUTER_PRIVACY: dict[str, object] = {"data_collection": "deny", "zdr": True}
 # Overloads (5xx) and timeouts are usually over within seconds.
 TRANSIENT_COOLDOWN_SECONDS = 30
 

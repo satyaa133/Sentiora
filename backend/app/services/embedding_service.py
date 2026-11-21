@@ -18,6 +18,7 @@ from openai import OpenAI
 from app.core.config import get_settings, openrouter_keys
 from app.services.embedding_port import EmbeddingPort
 from app.services.llm_pool import (
+    OPENROUTER_PRIVACY,
     LLMBackend,
     key_pool,
     max_attempts,
@@ -104,8 +105,12 @@ class OpenRouterEmbeddingAdapter(EmbeddingPort):
                 response = client.embeddings.create(
                     model=self._model,
                     input=batch,
-                    # OpenRouter usage accounting: the response reports the cost.
-                    extra_body={"usage": {"include": True}},
+                    # Usage accounting reports the cost; never route to a provider
+                    # that stores or trains on the text (REBUILD_PLAN D13).
+                    extra_body={
+                        "usage": {"include": True},
+                        "provider": dict(OPENROUTER_PRIVACY),
+                    },
                 )
             except openai.APIStatusError as exc:
                 _record_embedding("openrouter", self._model, started, error=exc)

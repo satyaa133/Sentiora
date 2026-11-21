@@ -48,6 +48,7 @@ from app.services.llm.structured import (
 from app.services.llm_pool import (
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_MAX_COOLDOWN_SECONDS,
+    OPENROUTER_PRIVACY,
     LLMBackend,
     build_backends,
     key_pool,
@@ -1104,9 +1105,12 @@ class RagService:
         if fallbacks:
             # OpenRouter tries these in order when the primary model is unavailable.
             body["models"] = [backend.model, *fallbacks]
+        # Never route to a provider that stores or trains on prompts (REBUILD_PLAN
+        # D13): zero-data-retention endpoints that don't collect data only.
+        body["provider"] = dict(OPENROUTER_PRIVACY)
         if structured:
             # Only route to providers that actually enforce response_format.
-            body["provider"] = {"require_parameters": True}
+            body["provider"]["require_parameters"] = True
         # OpenRouter usage accounting: the response reports the call's cost.
         body["usage"] = {"include": True}
         extra = _Extra(headers=OPENROUTER_HEADERS, body=body or None)
