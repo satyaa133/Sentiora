@@ -159,7 +159,11 @@ def test_embeddings_are_recorded_for_the_user_in_usage_for(
             self.embeddings = SimpleNamespace(create=self.create)
 
         def create(self, model: str, input: list[str], **kwargs: Any) -> Any:
-            assert kwargs["extra_body"] == {"usage": {"include": True}}
+            # Cost reporting, and never a provider that keeps or trains on text (D13).
+            assert kwargs["extra_body"] == {
+                "usage": {"include": True},
+                "provider": {"data_collection": "deny", "zdr": True},
+            }
             return SimpleNamespace(
                 data=[SimpleNamespace(index=i, embedding=[0.0] * 1536) for i in range(len(input))],
                 usage=SimpleNamespace(prompt_tokens=42, completion_tokens=None, cost=0.00001),

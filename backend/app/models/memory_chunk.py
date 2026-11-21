@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import ENUM, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
+from app.core.config import LOCAL_VECTOR_DIMENSIONS
 from app.core.db import Base
 from app.models.memory_item import SourceType
 
@@ -68,6 +69,13 @@ class MemoryChunk(Base):
         nullable=False,
     )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+    # Vector from the local model (EMBEDDING_PROVIDER=local, LOCAL_EMBEDDING_MODEL,
+    # default quantized nomic-embed-text-v1.5).
+    # ``embedding_model`` describes ``embedding`` only; this column always holds
+    # LOCAL_EMBEDDING_MODEL vectors (REBUILD_PLAN S3).
+    embedding_local: Mapped[list[float] | None] = mapped_column(
+        Vector(LOCAL_VECTOR_DIMENSIONS), nullable=True
+    )
     # Transcript time range in seconds; null for non-video chunks.
     start_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     end_sec: Mapped[float | None] = mapped_column(Float, nullable=True)

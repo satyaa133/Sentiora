@@ -5,7 +5,7 @@ PostgreSQL 16 with the `pgvector` extension (image
 SQLAlchemy models in `backend/app/models/` and changed only through Alembic
 migrations in `backend/alembic/versions/`.
 
-This file describes the schema at migration head **`007_usage_and_feedback`**
+This file describes the schema at migration head **`008_local_embeddings`**
 (checked against a live database on 2026-11-20). It replaces
 `06_Database_Schema_Design_v1.2.pdf` (archived), which designed many tables
 that were never built. Planned changes are in `REBUILD_PLAN.md` section 7.
@@ -168,12 +168,19 @@ YouTube transcripts.
 | `source_type` | sourcetype | no | copied from the memory |
 | `embedding` | vector(1536) | yes | null when embedding failed (full-text still works) |
 | `embedding_model` | varchar | yes | `provider:model` that produced `embedding`; queries only match the active model |
+| `embedding_local` | vector(768) | yes | vector from the local model (`EMBEDDING_PROVIDER=local`, `LOCAL_EMBEDDING_MODEL`, default `nomic-ai/nomic-embed-text-v1.5-Q`); null until embedded. `embedding_model` does not describe it: it always holds `LOCAL_EMBEDDING_MODEL` vectors |
 | `content_tsv` | tsvector | — | generated: `setweight(to_tsvector('english', coalesce(heading, '')), 'B') \|\| setweight(to_tsvector('english', content), 'A')` |
 | `created_at` | timestamptz | no | `now()` |
 
 Indexes: `memory_id`; `user_id`; `(user_id, memory_id)`; unique
-`(memory_id, chunk_index)`; **HNSW** `embedding vector_cosine_ops`; GIN
-`content_tsv`.
+`(memory_id, chunk_index)`; **HNSW** `embedding vector_cosine_ops`; **HNSW**
+`embedding_local vector_cosine_ops`; GIN `content_tsv`.
+
+Search reads the column of the active provider: `embedding_local` for
+`EMBEDDING_PROVIDER=local`, otherwise `embedding` where `embedding_model`
+matches. Each provider writes only its own column, so switching back is a
+setting plus `scripts.reprocess_memories --embed` for saves made meanwhile.
+`embedding` is dropped in S10.
 
 ### `llm_usage`
 
@@ -226,7 +233,8 @@ Applied in this order (`down_revision` chain):
 | `005_chunk_embeddings` | `005_chunk_embeddings.py` | `embedding vector(1536)` + HNSW index |
 | `cbb1d84cf989` | `20260814_cbb1d84cf989_capture_v2_schema_enhancements.py` | Capture v2 fields on `memory_items` |
 | `006_rag_v2_chunks` | `006_rag_v2_chunks.py` | `start_sec`, `end_sec`, `embedding_model`, generated tsvectors + GIN indexes |
-| `007_usage_and_feedback` | `007_usage_and_feedback.py` | `llm_usage`, `answer_feedback` (**head**) |
+| `007_usage_and_feedback` | `007_usage_and_feedback.py` | `llm_usage`, `answer_feedback` |
+| `008_local_embeddings` | `008_local_embeddings.py` | `memory_chunks.embedding_local vector(768)` + HNSW cosine index (**head**) |
 
 Commands (from the repo root):
 

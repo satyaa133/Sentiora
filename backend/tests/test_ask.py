@@ -76,6 +76,9 @@ def _index_memory(email: str, title: str, url: str, content: str) -> tuple[dict[
 
 def test_search_finds_semantically_related_chunk(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -101,6 +104,9 @@ def test_search_finds_semantically_related_chunk(monkeypatch) -> None:  # type: 
 
 def test_chat_returns_grounded_answer_and_citations(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -150,6 +156,9 @@ def test_chat_returns_grounded_answer_and_citations(monkeypatch) -> None:  # typ
 
 def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -198,6 +207,9 @@ def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  #
 
 def test_chat_is_isolated_by_authenticated_user(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -592,6 +604,9 @@ def test_chat_generic_question_uses_latest_when_vault_has_many(monkeypatch) -> N
 
 def test_chat_hybrid_retrieval_does_not_prefer_unrelated_semantic_hit(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 

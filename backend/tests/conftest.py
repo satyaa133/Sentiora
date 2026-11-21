@@ -30,7 +30,13 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 os.environ["EMBEDDING_PROVIDER"] = "none"
 # Tests register accounts on the reserved example.com / example.dev domains.
 os.environ["ALLOW_TEST_EMAIL_DOMAINS"] = "true"
-for _key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"):
+for _key in (
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_API_KEY_2",
+):
     os.environ[_key] = ""
 
 from app.core.config import get_settings  # noqa: E402

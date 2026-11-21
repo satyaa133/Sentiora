@@ -78,6 +78,9 @@ class _HashedAdapter:
     """Deterministic bag-of-words embeddings (stable across processes)."""
     model_id = "test:hashed"
 
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         vectors = []
         for text in texts:
@@ -90,6 +93,9 @@ class _HashedAdapter:
 
 
 class _FailingAdapter:
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         raise RuntimeError("provider timeout")
 

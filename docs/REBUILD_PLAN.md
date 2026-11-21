@@ -127,12 +127,15 @@ Locked unless this file is changed:
 | D1 | Rebuild first, then deploy. The rest of Phase 9 becomes stage S10. The deadline is flexible: quality first. |
 | D2 | **Default answer = instant answer** (quoted from the user's saves, no AI). **"Explain with AI"** button for a written AI answer. |
 | D3 | Embeddings and reranking run **locally on CPU** inside the API and worker processes, using `fastembed` (ONNX Runtime, no PyTorch). |
-| D4 | Embedding model: start with `BAAI/bge-small-en-v1.5` (384 dimensions); compare with `nomic-ai/nomic-embed-text-v1.5` (768) in the S3 eval and keep the better one. |
+| D4 | Embedding model: start with `BAAI/bge-small-en-v1.5` (384 dimensions); compare with `nomic-ai/nomic-embed-text-v1.5` (768) in the S3 eval and keep the better one. **Chosen 2026-11-21 (owner): quantized `nomic-ai/nomic-embed-text-v1.5-Q`** (hit@6 1.00, MRR 0.93 vs bge-small 0.95 / 0.91; 130 MB). |
 | D5 | AI work at save time (enrichment) is **lazy**: only for saves that matter (S5), never for every auto-saved page. |
 | D6 | **Plans, limits and payments come after the rebuild and its testing** (stage L1). The rebuild only records usage so limits can be added later. |
 | D7 | Future plans: Free (15 AI answers/day), Student, Plus, Pro. No Business plan for now. Student verification: college email **and** ID upload. Details in L1. |
 | D8 | Keep pgvector. Revisit a dedicated vector database only past ~20M chunks. |
 | D9 | **AI providers.** Development: OpenRouter, as today (no Anthropic API budget yet), with OpenRouter's "don't route to providers that train" setting on. Production (S10): Anthropic API directly with **Claude Haiku 5.5** (`claude-haiku-5-5`) for AI answers, and enrichment through Anthropic's **Message Batches API** (half price; enrichment can wait); Gemini **paid tier only** as backup. Pro plan's "best model" (L1): Claude Sonnet 5.5. Never a free tier or a provider that trains on user data. |
+| D11 | **Development providers (2026-11-21, owner).** Use every configured key: OpenRouter is the primary for answers and embeddings (Claude Haiku); **Groq** (`openai/gpt-oss-120b`, OpenAI-compatible) is the first chat backup, then Gemini. Groq has no embeddings API. Groq keeps no API inputs or outputs by default (abuse/error logs up to 30 days; Zero Data Retention can be turned on); whether it trains on API data is in its services agreement, not yet read. Before Groq serves real users: confirm its no-training terms, turn on ZDR, and add it to the D10 notice (new notice version). |
+| D12 | ~~OpenAI as the main provider~~ **Withdrawn 2026-11-21:** the owner won't add OpenAI credit; the key was removed. |
+| D13 | **No provider may store or train on user text (2026-11-21, owner), and as little as possible depends on paid APIs.** Development uses only: **Groq** (primary for answers; its services agreement forbids training on inputs/outputs and keeps none by default) and **OpenRouter** (backup answers and, until S3, embeddings), where every request sends `provider: {data_collection: "deny", zdr: true}` so only zero-data-retention endpoints that don't collect prompts are used (checked live). Gemini (free tier may use data) and OpenAI are removed. No credit will be added to any API, so S3 (local embeddings), S4 (local reranker) and S6 (instant answers without AI) are the priority, and the AI answer stays an optional extra. Owner action: turn on Groq's Zero Data Retention setting. |
 | D10 | **Privacy notice at sign-up.** New users see the notice below and must accept it to create an account; the accepted version and time are stored. When the notice changes, signed-in users accept the new version before using AI features. The same text goes in the privacy policy (S10). |
 
 **Approved privacy notice (D10), version `2026-11-20`:**
@@ -144,13 +147,15 @@ Locked unless this file is changed:
 > run on our own servers and send nothing to AI providers.
 
 The notice describes production (D9). During development, text goes through
-OpenRouter; only the team's own accounts use the development setup.
+Groq and OpenRouter only, with no-training routing (D13); only the team's
+own accounts use the development setup.
 
 ### Open
 
 | ID | Question | Needed by |
 | -- | -------- | --------- |
 | O1 | Hosting provider and monthly budget (server, managed Postgres, Redis, AI credits) | S10 |
+| O2 | Production AI provider: D9 (Anthropic, paid) conflicts with D13 (no paid credit). Decide before S10, and update the D10 notice to name the providers actually used | S10 |
 
 ---
 
@@ -357,17 +362,21 @@ it helped.
 
 **Goal:** search never needs the internet (fixes P1, P3).
 
-- [ ] `LocalEmbeddingAdapter` in `embedding_service.py` (`model_id`
+- [x] `LocalEmbeddingAdapter` in `embedding_service.py` (`model_id`
       `local:<model>`), `EMBEDDING_PROVIDER=local`, `LOCAL_EMBEDDING_MODEL`,
       `MODEL_CACHE_DIR`. Model loaded once per process; query/passage prefixes
       where the model needs them.
-- [ ] Migration: `memory_chunks.embedding_local vector(<dims>)` + HNSW cosine
+- [x] Migration: `memory_chunks.embedding_local vector(768)` + HNSW cosine
       index. Keep `embedding vector(1536)` until S10 so rollback is a setting.
-- [ ] `scripts.reprocess_memories --embed` fills `embedding_local`.
-- [ ] Retrieval reads the column matching the active provider.
-- [ ] Eval both D4 models on `scripts/eval-rag/questions.json`; pick one; re-run
+      `embedding_model` keeps describing `embedding` only; `embedding_local`
+      always holds `LOCAL_EMBEDDING_MODEL` vectors, so a same-size model change
+      needs `--embed --force`.
+- [x] `scripts.reprocess_memories --embed` fills `embedding_local`
+      (`--force` re-embeds every chunk).
+- [x] Retrieval reads the column matching the active provider.
+- [x] Eval both D4 models on `scripts/eval-rag/questions.json`; pick one; re-run
       the `RAG_MIN_SIMILARITY` sweep for it; record results in TASKS.md.
-- [ ] Model files baked into the Docker image; downloaded once locally.
+- [x] Model files baked into the Docker image; downloaded once locally.
 
 **Done when:** with every provider key removed, search and Ask retrieval work,
 and eval meets the section 2 target.
@@ -565,7 +574,7 @@ updated in the same PR.
 | ----- | ------ |
 | S2 | New `llm_usage`: `id`, `user_id` (nullable for system jobs, indexed), `purpose` (`answer` \| `enrich` \| `rewrite` \| `embed`), `provider`, `model`, `tokens_in`, `tokens_out`, `cost_usd` numeric, `latency_ms`, `success` bool, `error_code`, `created_at` (indexed with `user_id`) |
 | S2 | New `answer_feedback`: `id`, `user_id`, `question_hash`, `answer_mode`, `rating` (+1/−1), `comment` (nullable, ≤ 1000 chars), `source_chunk_ids` uuid[], `created_at` |
-| S3 | `memory_chunks.embedding_local vector(<dims>)` + HNSW `vector_cosine_ops` index |
+| S3 | `memory_chunks.embedding_local vector(768)` + HNSW `vector_cosine_ops` index (migration `008_local_embeddings`) |
 | S5 | `memory_items`: `key_points jsonb`, `enrichment_status` (`none` \| `queued` \| `ready` \| `failed`), `enrich_requested_at`, `enriched_at`, `enrichment_model`; existing `summary` starts being used |
 | S5 | `memory_chunks.context text` (enrichment context line) |
 | S5 | New `memory_questions`: `id`, `memory_id` (FK, cascade), `user_id` (indexed), `chunk_id` (FK `memory_chunks`, nullable, `ON DELETE SET NULL`), `question text`, `embedding_local vector(<dims>)` (HNSW), `created_at` |
@@ -613,8 +622,9 @@ that adds them.
 | `METRICS_ENABLED` | true | S2 |
 | `PROMETHEUS_MULTIPROC_DIR` (env, read by `prometheus_client`) | unset | S2 |
 | `EMBEDDING_PROVIDER` | gains `local` | S3 |
-| `LOCAL_EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | S3 |
+| `LOCAL_EMBEDDING_MODEL` | `nomic-ai/nomic-embed-text-v1.5-Q` (D4 eval) | S3 |
 | `MODEL_CACHE_DIR` | `backend/.models` | S3 |
+| `RAG_MIN_SIMILARITY` | 0.65 with the local model (code default stays 0.25 for remote embeddings; set in `.env.example` and compose) | S3 |
 | `RERANKER_MODEL` | `BAAI/bge-reranker-base` | S4 |
 | `RAG_RERANK_CANDIDATES` | 30 | S4 |
 | `ENRICH_DAILY_LIMIT` | 50 | S5 |
@@ -625,6 +635,8 @@ that adds them.
 | `ANSWER_CACHE_TTL_SECONDS` | 86400 | S6 |
 | `VITE_SENTRY_DSN` (root `.env`, build time) | unset (off) | S10 |
 | `PRIVACY_NOTICE_VERSION` | `2026-11-20` | S7 |
+| `GROQ_API_KEY` | unset | D11 |
+| `GROQ_CHAT_MODEL` | `openai/gpt-oss-120b` | D11 |
 | `LLM_PROVIDER` | gains `anthropic` | S10 |
 | `ANTHROPIC_API_KEY` | unset | S10 |
 | `ANTHROPIC_CHAT_MODEL` | `claude-haiku-5-5` | S10 |

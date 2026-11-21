@@ -22,7 +22,13 @@ from app.core.config import get_settings
 from app.core.metrics import observe_stage
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
-from app.services.embedding_service import get_embedding_adapter
+from app.services.embedding_service import (
+    chunk_vector,
+    current_embedding_model,
+    get_embedding_adapter,
+    has_vector_for,
+    vector_column,
+)
 from app.services.retrieval import selection
 from app.services.usage import usage_for
 
@@ -195,6 +201,9 @@ class RetrievalService:
         self.settings = get_settings()
         # True once a query embedding succeeded (the vector leg is active).
         self._vector_ready = False
+        # model_id of the adapter that embedded the query; picks the vector
+        # column (embedding or embedding_local) used for MMR.
+        self._model_id: str | None = None
 
     def retrieve_relevant_memories(
         self,
@@ -385,8 +394,14 @@ class RetrievalService:
             rank=rank,
             start_sec=chunk.start_sec,
             end_sec=chunk.end_sec,
-            vector=tuple(chunk.embedding) if chunk.embedding is not None else None,
+            vector=self._chunk_vector(chunk),
         )
+
+    def _chunk_vector(self, chunk: MemoryChunk) -> tuple[float, ...] | None:
+        if self._model_id is None:
+            self._model_id = current_embedding_model()
+        vector = chunk_vector(chunk, self._model_id)
+        return tuple(vector) if vector is not None else None
 
     def _semantic_search(
         self,
@@ -401,25 +416,22 @@ class RetrievalService:
 
         try:
             with observe_stage("embed"):
-                vectors = adapter.embed_texts([query])
+                query_vector = adapter.embed_query(query)
         except Exception:
+            logger.warning("Query embedding failed; continuing with full-text search")
             return []
-        if not vectors:
-            return []
-
-        query_vector = vectors[0]
         if not query_vector:
             return []
         self._vector_ready = True
         # Only compare against vectors from the model that embedded the query.
         model_id = getattr(adapter, "model_id", None)
+        self._model_id = model_id
         try:
-            distance = MemoryChunk.embedding.cosine_distance(query_vector)
+            distance = vector_column(model_id).cosine_distance(query_vector)
             stmt = (
                 self._base_query(user_id, scope)
                 .add_columns(distance.label("distance"))
-                .where(MemoryChunk.embedding.is_not(None))
-                .where(MemoryChunk.embedding_model.is_not_distinct_from(model_id))
+                .where(has_vector_for(model_id))
                 .order_by(distance)
                 .limit(top_k)
             )

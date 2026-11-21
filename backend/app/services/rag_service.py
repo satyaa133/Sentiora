@@ -48,6 +48,7 @@ from app.services.llm.structured import (
 from app.services.llm_pool import (
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_MAX_COOLDOWN_SECONDS,
+    OPENROUTER_PRIVACY,
     LLMBackend,
     build_backends,
     key_pool,
@@ -106,6 +107,7 @@ DEFAULT_CHAT_TIMEOUT_SECONDS = 10.0
 DEFAULT_META_TIMEOUT_SECONDS = 8.0
 # A key is not tried with less time than this left in the answer's budget.
 MIN_ATTEMPT_SECONDS = 1.0
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # Gemini rejects a deadline under 10 s (400 INVALID_ARGUMENT); its SDK sends the
 # timeout as that deadline, so a Gemini attempt always gets at least this much.
 GEMINI_MIN_DEADLINE_SECONDS = 10.0
@@ -1080,6 +1082,18 @@ class RagService:
         self, backend: LLMBackend, timeout: float, *, structured: bool = False
     ) -> tuple[OpenAI, _Extra]:
         """Client and extra request arguments for an OpenAI-compatible backend."""
+        if backend.provider == "groq":
+            # gpt-oss models reason before answering; keep it short so the
+            # answer fits max_tokens and starts quickly.
+            groq_body = (
+                {"reasoning_effort": "low"} if "gpt-oss" in backend.model else None
+            )
+            return OpenAI(
+                api_key=backend.api_key,
+                base_url=GROQ_BASE_URL,
+                timeout=timeout,
+                max_retries=0,
+            ), _Extra(body=groq_body)
         if backend.provider != "openrouter":
             return OpenAI(
                 api_key=backend.api_key, timeout=timeout, max_retries=0
@@ -1091,9 +1105,12 @@ class RagService:
         if fallbacks:
             # OpenRouter tries these in order when the primary model is unavailable.
             body["models"] = [backend.model, *fallbacks]
+        # Never route to a provider that stores or trains on prompts (REBUILD_PLAN
+        # D13): zero-data-retention endpoints that don't collect data only.
+        body["provider"] = dict(OPENROUTER_PRIVACY)
         if structured:
             # Only route to providers that actually enforce response_format.
-            body["provider"] = {"require_parameters": True}
+            body["provider"]["require_parameters"] = True
         # OpenRouter usage accounting: the response reports the call's cost.
         body["usage"] = {"include": True}
         extra = _Extra(headers=OPENROUTER_HEADERS, body=body or None)

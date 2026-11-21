@@ -197,3 +197,38 @@ def test_every_key_failing_still_answers_from_memory(monkeypatch: pytest.MonkeyP
     assert sorted(calls) == ["openrouter", "openrouter-2"]
     assert resp.used_fallback is True
     assert "host kernel" in resp.answer
+
+
+def test_groq_is_the_first_backup_after_the_primary() -> None:
+    settings = _settings(
+        openrouter_api_key="or-1",
+        gemini_api_key="gm-1",
+        groq_api_key="gq-1",
+        groq_chat_model="openai/gpt-oss-120b",
+    )
+    backends = build_backends(settings)
+    assert [b.name for b in backends] == ["openrouter", "groq", "gemini"]
+    assert backends[1].model == "openai/gpt-oss-120b"
+
+    groq_first = _settings(llm_provider="groq", groq_api_key="gq-1", openrouter_api_key="or-1")
+    assert [b.name for b in build_backends(groq_first)] == ["groq", "openrouter"]
+
+
+def test_groq_calls_use_its_endpoint_and_short_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, Any] = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            created.update(kwargs)
+
+    monkeypatch.setattr("app.services.rag_service.OpenAI", _FakeOpenAI)
+    rag = _rag(monkeypatch, _settings(groq_api_key="gq-1"))
+    groq = LLMBackend(name="groq", provider="groq", api_key="gq-1", model="openai/gpt-oss-120b")
+    _, extra = rag._openai_client(groq, 10.0)
+    assert created["base_url"] == "https://api.groq.com/openai/v1"
+    assert created["api_key"] == "gq-1" and created["max_retries"] == 0
+    assert extra.body == {"reasoning_effort": "low"}
+    assert extra.headers is None  # OpenRouter's headers and usage flag aren't sent
+
+    other = LLMBackend(name="groq", provider="groq", api_key="gq-1", model="llama-3.3-70b-versatile")
+    assert rag._openai_client(other, 10.0)[1].body is None

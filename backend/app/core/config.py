@@ -10,10 +10,21 @@ from dotenv import dotenv_values
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLM_PROVIDERS = ("openai", "gemini", "openrouter")
-EMBEDDING_PROVIDER_CHOICES = ("auto", "openrouter", "openai", "gemini", "none")
+LLM_PROVIDERS = ("openai", "gemini", "openrouter", "groq")
+EMBEDDING_PROVIDER_CHOICES = ("auto", "openrouter", "openai", "gemini", "local", "none")
 # memory_chunks.embedding is vector(1536) in the migrations.
 VECTOR_DIMENSIONS = 1536
+# Local (fastembed) models Sentiora knows, with their output size. A model
+# can only be used when its size matches memory_chunks.embedding_local
+# (LOCAL_VECTOR_DIMENSIONS); a different size needs a migration.
+LOCAL_EMBEDDING_DIMENSIONS = {
+    "nomic-ai/nomic-embed-text-v1.5-Q": 768,
+    "nomic-ai/nomic-embed-text-v1.5": 768,
+    "BAAI/bge-small-en-v1.5": 384,
+}
+# memory_chunks.embedding_local is vector(768) in the migrations.
+LOCAL_VECTOR_DIMENSIONS = 768
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 _OPENROUTER_MODEL_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._:-]+$")
 
 logger = logging.getLogger(__name__)
@@ -63,7 +74,9 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 30
     llm_provider: str = "openai"
     # Embedding provider for semantic search:
-    # "auto" | "openrouter" | "openai" | "gemini" | "none".
+    # "auto" | "openrouter" | "openai" | "gemini" | "local" | "none".
+    # "local" embeds on this machine's CPU (fastembed) and needs no key or
+    # network once the model is downloaded; its vectors go in embedding_local.
     # "auto" uses OpenRouter when an OpenRouter key is set; otherwise it follows
     # LLM_PROVIDER (openai/gemini), then the first configured embedding key.
     embedding_provider: str = "auto"
@@ -72,6 +85,12 @@ class Settings(BaseSettings):
     # embedding backfill: queries only match chunks embedded with this model.
     embedding_model: str | None = None
     openrouter_embedding_model: str = "openai/text-embedding-3-small"
+    # Model for EMBEDDING_PROVIDER=local (see LOCAL_EMBEDDING_DIMENSIONS);
+    # chosen by the S3 eval (quantized nomic-embed-text-v1.5). Changing it
+    # requires the embedding backfill with --force.
+    local_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5-Q"
+    # Where local model files are stored; a relative path is under backend/.
+    model_cache_dir: str = ".models"
     openai_api_key: str | None = None
     openai_embedding_model: str = "text-embedding-3-small"
     openai_chat_model: str = "gpt-4o-mini"
@@ -79,6 +98,9 @@ class Settings(BaseSettings):
     # Must support EMBEDDING_DIMENSIONS output (text-embedding-004 caps at 768).
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_chat_model: str = "gemini-2.5-flash"
+    # Groq (OpenAI-compatible, chat only): a fast backup in development (D11).
+    groq_api_key: str | None = None
+    groq_chat_model: str = "openai/gpt-oss-120b"
     # OpenRouter keys: OPENROUTER_API_KEY and/or OPENROUTER_API_KEY_1..N (any
     # count, auto-detected from the environment and .env files). Ask and
     # embeddings rotate across all of them; use openrouter_keys() to read them.
@@ -172,6 +194,18 @@ class Settings(BaseSettings):
                 f"EMBEDDING_PROVIDER={self.embedding_provider!r} must be one of "
                 f"{', '.join(EMBEDDING_PROVIDER_CHOICES)}"
             )
+        local_dims = LOCAL_EMBEDDING_DIMENSIONS.get(self.local_embedding_model)
+        if local_dims is None:
+            problems.append(
+                f"LOCAL_EMBEDDING_MODEL={self.local_embedding_model!r} must be one of "
+                f"{', '.join(LOCAL_EMBEDDING_DIMENSIONS)}"
+            )
+        elif local_dims != LOCAL_VECTOR_DIMENSIONS:
+            problems.append(
+                f"LOCAL_EMBEDDING_MODEL={self.local_embedding_model!r} makes "
+                f"{local_dims}-dimension vectors but memory_chunks.embedding_local "
+                f"is vector({LOCAL_VECTOR_DIMENSIONS}); it needs a migration"
+            )
         if self.embedding_dimensions != VECTOR_DIMENSIONS:
             problems.append(
                 f"EMBEDDING_DIMENSIONS must be {VECTOR_DIMENSIONS}: memory_chunks.embedding "
@@ -190,6 +224,11 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError("; ".join(problems))
         return self
+
+    @property
+    def model_cache_path(self) -> Path:
+        path = Path(self.model_cache_dir)
+        return path if path.is_absolute() else BACKEND_DIR / path
 
     @property
     def effective_log_format(self) -> str:

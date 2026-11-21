@@ -178,6 +178,9 @@ _CONCEPTS = {
 class ConceptAdapter:
     model_id = "test:concepts"
 
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         vectors = []
         for text in texts:

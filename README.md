@@ -170,7 +170,13 @@ Set `LLM_PROVIDER` (`openai`, `gemini`, or `openrouter`) plus its key in `backen
 
 **More than one chat key.** Ask rotates across every chat key that is set (`OPENROUTER_API_KEY`, the optional `OPENROUTER_API_KEY_2`, `GEMINI_API_KEY`, `OPENAI_API_KEY`), starting with the `LLM_PROVIDER` one. A key that is out of credits, revoked or rate-limited is skipped for `LLM_KEY_COOLDOWN_SECONDS` (default 300), an overloaded one for 30 seconds, so answers never wait on a dead key. `backend/.env` is git-ignored; never put keys in `.env.example`.
 
-**Semantic search needs an embedding key.** OpenRouter provides chat only, so with `LLM_PROVIDER=openrouter` set `OPENAI_API_KEY` or `GEMINI_API_KEY` as well. `EMBEDDING_PROVIDER=auto` (default) picks the provider; `GEMINI_EMBEDDING_MODEL` must output 1536 dimensions (`gemini-embedding-001`). Restart the API and worker after changing keys. Vectors are model-specific, so re-capture after switching embedding models.
+**Semantic search runs on your machine.** With `EMBEDDING_PROVIDER=local` (as in `.env.example`) saves and questions are embedded on the CPU with quantized `nomic-embed-text-v1.5` (fastembed): no key, nothing sent anywhere. The model (~130 MB) downloads into `backend/.models` the first time the API or worker embeds; the Docker image has it built in. After upgrading the database, fill the local vectors for existing saves once (about 0.25 s per chunk):
+
+```bash
+node scripts/run-python.mjs -m scripts.reprocess_memories --embed
+```
+
+The remote providers (`openrouter`, `openai`, `gemini`, `auto`) still work and keep their own vectors (`memory_chunks.embedding`), so switching back is a setting; each provider needs its own `RAG_MIN_SIMILARITY` (local: 0.65, remote: 0.25). Restart the API and worker after changing either.
 
 Without a provider key:
 

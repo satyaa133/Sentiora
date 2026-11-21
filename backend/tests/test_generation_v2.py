@@ -185,7 +185,11 @@ def test_structured_call_uses_strict_json_schema_and_require_parameters(
     call = meta_calls[0]
     assert call["response_format"]["type"] == "json_schema"
     assert call["response_format"]["json_schema"]["strict"] is True
-    assert call["extra_body"]["provider"] == {"require_parameters": True}
+    assert call["extra_body"]["provider"] == {
+        "data_collection": "deny",
+        "zdr": True,
+        "require_parameters": True,
+    }
     assert "stream" not in call
     answer_call = next(c for c in fake_llm.calls if c.get("stream"))
     assert answer_call["extra_body"]["models"] == [
@@ -252,3 +256,18 @@ def test_personal_question_without_memory_streams_a_fixed_answer(
     assert [name for name, _ in events] == ["sources", "delta", "final"]
     assert events[-1][1]["insufficient_context"] is True
     assert fake_llm.calls == []
+
+
+def test_every_openrouter_answer_refuses_providers_that_keep_data(
+    fake_llm: type[FakeOpenAI],
+) -> None:
+    """REBUILD_PLAN D13: no provider may store or train on the user's text."""
+    fake_llm.stream_pieces = {"or-key-1": ["Halves it [S1]."], "or-key-2": ["Halves it [S1]."]}
+    headers = _headers("stream_privacy@example.com")
+    _save(headers)
+    _stream(headers, "How does binary search halve the interval?")
+
+    assert fake_llm.calls
+    for call in fake_llm.calls:
+        provider = call["extra_body"]["provider"]
+        assert provider["data_collection"] == "deny" and provider["zdr"] is True
