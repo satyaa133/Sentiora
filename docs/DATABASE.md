@@ -178,7 +178,7 @@ YouTube transcripts.
 | `embedding` | vector(1536) | yes | null when embedding failed (full-text still works) |
 | `embedding_model` | varchar | yes | `provider:model` that produced `embedding`; queries only match the active model |
 | `embedding_local` | vector(768) | yes | vector from the local model (`EMBEDDING_PROVIDER=local`, `LOCAL_EMBEDDING_MODEL`, default `nomic-ai/nomic-embed-text-v1.5-Q`); null until embedded. `embedding_model` does not describe it: it always holds `LOCAL_EMBEDDING_MODEL` vectors |
-| `context` | text | yes | enrichment: one line placing the chunk in its document; the chunk is embedded as `context` + blank line + `content` (contextual retrieval) |
+| `context` | text | yes | enrichment: one line placing the chunk in its document. Stored, not embedded (embedding it with the chunk scored lower in the S5 eval) |
 | `content_tsv` | tsvector | — | generated: `setweight(to_tsvector('english', coalesce(heading, '')), 'B') \|\| setweight(to_tsvector('english', content), 'A')` |
 | `created_at` | timestamptz | no | `now()` |
 

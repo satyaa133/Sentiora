@@ -19,7 +19,6 @@ from app.services.content_normalizer import (
     normalize_content,
 )
 from app.services.embedding_service import (
-    chunk_embedding_text,
     current_embedding_model,
     get_embedding_adapter,
     needs_vector_for,
@@ -216,7 +215,7 @@ def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
 
     logger.info("memory_id=%s stage=embed chunks=%d", memory_label, len(chunks))
     try:
-        vectors = adapter.embed_texts([chunk_embedding_text(chunk) for chunk in chunks])
+        vectors = adapter.embed_texts([chunk.content for chunk in chunks])
         expected = int(getattr(adapter, "dimensions", 0) or _vector_dim())
         if len(vectors) != len(chunks):
             raise CaptureProcessingError(

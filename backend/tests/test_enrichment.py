@@ -200,9 +200,11 @@ def test_save_now_enriches_and_stores_everything(ai: dict[str, Any]) -> None:
             .order_by(MemoryChunk.chunk_index)
             .all()
         )
-    assert chunks and all(c.context and c.embedding_local is not None for c in chunks)
-    # Contextual retrieval: each chunk is re-embedded with its context line first.
-    assert ai["adapter"].passages[0].startswith("From the bee guide: part 0.\n\n")
+    assert chunks and all(c.context for c in chunks)
+    # Context lines are stored, not embedded: chunk vectors are left alone, and
+    # chunk text is only embedded (unsaved) to pick each question's chunk.
+    assert all(c.embedding_local is None for c in chunks)
+    assert ai["adapter"].passages[0].startswith("Section 0.")
     questions = _questions(memory_id)
     assert len(questions) == 6
     assert {q.chunk_id for q in questions} <= {c.id for c in chunks}
@@ -211,6 +213,27 @@ def test_save_now_enriches_and_stores_everything(ai: dict[str, Any]) -> None:
 
     data = client.get(f"/api/v1/memory-items/{memory_id}", headers=headers).json()["data"]
     assert data["summary"] and data["key_points"] and data["enrichment_status"] == "ready"
+
+
+def test_only_groq_enriches(ai: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "openrouter_api_key", "test-openrouter-key")
+    with SessionLocal() as db:
+        backends = EnrichmentService(db)._backends()
+    assert backends and {b.provider for b in backends} == {"groq"}
+    monkeypatch.setattr(settings, "groq_api_key", None)
+    with SessionLocal() as db:
+        assert EnrichmentService(db)._backends() == []
+
+
+def test_questions_point_at_the_chunk_that_answers_them() -> None:
+    from app.services.enrichment_service import answering_chunks
+
+    chunks = [MemoryChunk(content=f"text {i}", chunk_index=i) for i in range(4)]
+    vectors = [[1.0, 0.0], [0.0, 1.0], [0.7, 0.7], [-1.0, 0.0]]
+    # The model guessed chunk 3; the question's vector is closest to chunk 1.
+    picks = answering_chunks([("q?", 3), ("p?", 0)], [[0.0, 1.0], None], chunks, vectors)
+    assert picks == [1, 0]
 
 
 def test_enrich_endpoint_queues_once_and_is_owner_only(ai: dict[str, Any]) -> None:

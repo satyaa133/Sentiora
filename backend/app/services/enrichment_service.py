@@ -6,15 +6,21 @@ pages are never enriched on capture. Each enrichment is one structured AI
 call; a per-user daily cap (``ENRICH_DAILY_LIMIT``) bounds the cost.
 
 Enrichment stores the summary and key points on the save, a context line on
-each chunk (the chunk is re-embedded with it: contextual retrieval) and the
-questions the save answers (embedded locally, for the question-bank leg).
+each chunk and the questions the save answers (embedded locally, for the
+question-bank leg). Chunks keep vectors of their own text: embedding the
+context line with them scored lower in the S5 eval (owner, 2026-11-21).
+
+Only Groq enriches (no paid fallback, owner 2026-11-21): when it is rate-
+limited the job retries later instead of spending OpenRouter credit.
 """
 
 from __future__ import annotations
 
 import enum
 import logging
+import math
 import time
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import cast
@@ -30,12 +36,12 @@ from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import EnrichmentStatus, ItemStatus, MemoryItem
 from app.models.memory_question import MemoryQuestion
 from app.services.embedding_service import (
-    chunk_embedding_text,
+    chunk_vector,
     get_embedding_adapter,
     is_local_model,
-    set_chunk_vector,
 )
 from app.services.llm.clients import openai_compatible_client
+from app.services.retrieval.reranker import get_reranker, passage_text
 from app.services.llm.enrichment import (
     ENRICH_RESPONSE_FORMAT,
     ENRICH_SYSTEM_PROMPT,
@@ -56,6 +62,9 @@ from app.workers.queue import enrich_queue
 
 logger = logging.getLogger(__name__)
 
+# Providers that enrich: free tier, keeps and trains on nothing (D13). No paid
+# fallback: a rate-limited provider means a retry later.
+ENRICH_PROVIDERS = ("groq",)
 # Enrichment runs in the background, so it can wait longer than an answer.
 ENRICH_TIMEOUT_SECONDS = 60.0
 # Output budget: summary, key points, questions and a line per chunk.
@@ -147,7 +156,9 @@ class EnrichmentService:
     # -- running ------------------------------------------------------------
 
     def _backends(self) -> list[LLMBackend]:
-        backends = [b for b in build_backends(self.settings) if b.provider != "gemini"]
+        backends = [
+            b for b in build_backends(self.settings) if b.provider in ENRICH_PROVIDERS
+        ]
         model = (self.settings.enrich_model or "").strip()
         primary = (self.settings.llm_provider or "").strip().lower()
         if model:
@@ -158,7 +169,7 @@ class EnrichmentService:
         """One structured call through the key pool; raises EnrichmentError."""
         backends = self._backends()
         if not backends:
-            raise EnrichmentError("No chat model key is configured.")
+            raise EnrichmentError("No enrichment provider (Groq) key is configured.")
         prompt = enrich_prompt(
             item.title,
             item.source_type.value,
@@ -243,7 +254,7 @@ class EnrichmentService:
     def store(
         self, item: MemoryItem, chunks: list[MemoryChunk], result: Enrichment, model: str
     ) -> None:
-        """Save the enrichment and re-embed chunks and questions (local model)."""
+        """Save the enrichment and embed its questions (local model)."""
         item.summary = result.summary
         item.key_points = result.key_points
         item.enrichment_status = EnrichmentStatus.ready.value
@@ -259,23 +270,29 @@ class EnrichmentService:
             logger.warning("No embedding adapter for enrichment", exc_info=True)
         model_id = getattr(adapter, "model_id", None)
         question_vectors: list[list[float] | None] = [None] * len(result.questions)
+        answering = [hint for _, hint in result.questions]
         if adapter is not None:
             try:
-                vectors = adapter.embed_texts([chunk_embedding_text(c) for c in chunks])
-                for chunk, vector in zip(chunks, vectors, strict=True):
-                    set_chunk_vector(chunk, model_id, vector)
                 if is_local_model(model_id):
                     question_vectors = [
                         adapter.embed_query(question) for question, _ in result.questions
                     ]
+                    stored = [chunk_vector(c, model_id) for c in chunks]
+                    vectors = (
+                        [list(v) for v in stored]
+                        if all(v is not None for v in stored)
+                        else adapter.embed_texts([c.content for c in chunks])
+                    )
+                    answering = answering_chunks(
+                        result.questions, question_vectors, chunks, vectors
+                    )
             except Exception:
-                # Vectors without context still work; the embedding backfill
-                # re-embeds later.
-                logger.warning("Re-embedding after enrichment failed", exc_info=True)
+                # Questions without vectors are kept; the model's chunk is used.
+                logger.warning("Embedding enrichment questions failed", exc_info=True)
 
         self.db.execute(delete(MemoryQuestion).where(MemoryQuestion.memory_id == item.id))
-        for (question, chunk_index), question_vector in zip(
-            result.questions, question_vectors, strict=True
+        for (question, _), chunk_index, question_vector in zip(
+            result.questions, answering, question_vectors, strict=True
         ):
             self.db.add(
                 MemoryQuestion(
@@ -304,6 +321,52 @@ class EnrichmentService:
             raise EnrichmentError("The save has no chunks yet.")
         result, model = self.generate(item, chunks)
         self.store(item, chunks, result, model)
+
+
+# Chunks (besides the model's own pick) considered as a question's answer.
+_ANSWER_CANDIDATES = 5
+
+
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    return dot / norm if norm else 0.0
+
+
+def answering_chunks(
+    questions: Sequence[tuple[str, int]],
+    question_vectors: Sequence[Sequence[float] | None],
+    chunks: Sequence[MemoryChunk],
+    chunk_vectors: Sequence[Sequence[float]],
+) -> list[int]:
+    """The chunk that answers each question, chosen on this machine.
+
+    The model names a chunk for each question, but on a long save it sees only
+    the start of each chunk and often guesses. Its pick and the chunks closest
+    to the question are scored by the reranker (or, without one, by vector
+    similarity), and the best one wins.
+    """
+    reranker = get_reranker()
+    picks: list[int] = []
+    for (question, hint), vector in zip(questions, question_vectors, strict=True):
+        if vector is None:
+            picks.append(hint)
+            continue
+        similarity = [_cosine(vector, cv) for cv in chunk_vectors]
+        nearest = sorted(range(len(chunks)), key=lambda i: -similarity[i])[:_ANSWER_CANDIDATES]
+        candidates = list(dict.fromkeys([hint, *nearest]))
+        best = max(candidates, key=lambda i: similarity[i])
+        if reranker is not None:
+            try:
+                scores = reranker.score(
+                    question,
+                    [passage_text("", chunks[i].heading, chunks[i].content) for i in candidates],
+                )
+                best = candidates[max(range(len(candidates)), key=lambda k: scores[k])]
+            except Exception:
+                logger.warning("Reranking answer chunks failed", exc_info=True)
+        picks.append(best)
+    return picks
 
 
 def forget_enrichment(db: DBSession, item: MemoryItem) -> None:

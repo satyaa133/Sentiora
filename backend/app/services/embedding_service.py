@@ -499,15 +499,3 @@ def set_chunk_vector(
         return
     chunk.embedding = vector
     chunk.embedding_model = model_id if vector is not None else None
-
-
-def chunk_embedding_text(chunk: MemoryChunk) -> str:
-    """Text a chunk is embedded from: its enrichment context line (S5), then its content.
-
-    The context line places the chunk in its document ("From the YOLO tutorial:
-    anchor boxes ..."), so a question can match a passage whose own words don't
-    say what it is about (contextual retrieval).
-    """
-    if chunk.context:
-        return f"{chunk.context}\n\n{chunk.content}"
-    return chunk.content

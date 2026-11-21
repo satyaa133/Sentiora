@@ -53,7 +53,6 @@ from app.models.user import User
 from app.repositories.chunk_repository import ChunkRepository
 from app.services.enrichment_service import forget_enrichment
 from app.services.embedding_service import (
-    chunk_embedding_text,
     get_embedding_adapter,
     needs_vector_for,
     set_chunk_vector,
@@ -234,7 +233,7 @@ def embed(args: argparse.Namespace) -> int:
                 break
             after = chunks[-1].id
             try:
-                vectors = adapter.embed_texts([chunk_embedding_text(c) for c in chunks])
+                vectors = adapter.embed_texts([chunk.content for chunk in chunks])
                 if len(vectors) != len(chunks) or any(
                     len(v) != expected for v in vectors
                 ):
