@@ -23,7 +23,7 @@ from uuid import UUID
 from openai import OpenAI
 from openai.types.shared_params import ResponseFormatJSONSchema
 
-from app.core.config import get_settings, openrouter_fallback_list
+from app.core.config import get_settings
 from app.core.metrics import ASK_STAGE_SECONDS, observe_stage
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.repositories.memory_repository import MemoryFilters, MemoryRepository
@@ -34,7 +34,9 @@ from app.services.ask_intent import (
     resolve_timezone,
     scoped_intent,
 )
+from app.services.enrichment_service import EnrichmentService
 from app.services.llm import prompts
+from app.services.llm.clients import Extra, openai_compatible_client
 from app.services.llm.structured import (
     RESPONSE_FORMAT,
     AnswerMeta,
@@ -48,7 +50,6 @@ from app.services.llm.structured import (
 from app.services.llm_pool import (
     DEFAULT_COOLDOWN_SECONDS,
     DEFAULT_MAX_COOLDOWN_SECONDS,
-    OPENROUTER_PRIVACY,
     LLMBackend,
     build_backends,
     key_pool,
@@ -107,7 +108,6 @@ DEFAULT_CHAT_TIMEOUT_SECONDS = 10.0
 DEFAULT_META_TIMEOUT_SECONDS = 8.0
 # A key is not tried with less time than this left in the answer's budget.
 MIN_ATTEMPT_SECONDS = 1.0
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 # Gemini rejects a deadline under 10 s (400 INVALID_ARGUMENT); its SDK sends the
 # timeout as that deadline, so a Gemini attempt always gets at least this much.
 GEMINI_MIN_DEADLINE_SECONDS = 10.0
@@ -240,18 +240,7 @@ def _event_sources(sources: list[AskCitation]) -> AskEvent:
     )
 
 
-OPENROUTER_HEADERS = {
-    "HTTP-Referer": "https://github.com/satyaa133/Sentiora",
-    "X-Title": "Sentiora",
-}
-
-
-@dataclass(frozen=True)
-class _Extra:
-    """Provider-specific headers and body fields for an OpenAI-compatible call."""
-
-    headers: dict[str, str] | None = None
-    body: dict[str, Any] | None = None
+_Extra = Extra
 
 
 def _source_available(url: str) -> bool:
@@ -548,6 +537,7 @@ class RagService:
             **({"date_from": window.start, "date_to": window.end} if window else {}),
         )
 
+        self._request_enrichment(user_id, chunks)
         if intent.mention_topic:
             return self._mention_answer(base, intent.mention_topic, chunks)
 
@@ -565,6 +555,15 @@ class RagService:
         base.chunks = list(chunks)
         base.sources = [_citation(chunk) for chunk in chunks]
         return base
+
+    def _request_enrichment(self, user_id: UUID, chunks: Sequence[RetrievedChunk]) -> None:
+        """Saves that answer a question matter: enrich them in the background (S5)."""
+        db = getattr(self.retrieval, "db", None)
+        if db is None or not chunks:
+            return
+        EnrichmentService(db).request_for_memories(
+            user_id, [chunk.memory_id for chunk in chunks]
+        )
 
     def run(
         self, prepared: PreparedAnswer, *, stream: bool = True
@@ -1082,45 +1081,9 @@ class RagService:
         self, backend: LLMBackend, timeout: float, *, structured: bool = False
     ) -> tuple[OpenAI, _Extra]:
         """Client and extra request arguments for an OpenAI-compatible backend."""
-        if backend.provider == "groq":
-            # gpt-oss models reason before answering; keep it short so the
-            # answer fits max_tokens and starts quickly.
-            groq_body = (
-                {"reasoning_effort": "low"} if "gpt-oss" in backend.model else None
-            )
-            return OpenAI(
-                api_key=backend.api_key,
-                base_url=GROQ_BASE_URL,
-                timeout=timeout,
-                max_retries=0,
-            ), _Extra(body=groq_body)
-        if backend.provider != "openrouter":
-            return OpenAI(
-                api_key=backend.api_key, timeout=timeout, max_retries=0
-            ), _Extra()
-        body: dict[str, Any] = {}
-        fallbacks = [
-            m for m in openrouter_fallback_list(self.settings) if m != backend.model
-        ]
-        if fallbacks:
-            # OpenRouter tries these in order when the primary model is unavailable.
-            body["models"] = [backend.model, *fallbacks]
-        # Never route to a provider that stores or trains on prompts (REBUILD_PLAN
-        # D13): zero-data-retention endpoints that don't collect data only.
-        body["provider"] = dict(OPENROUTER_PRIVACY)
-        if structured:
-            # Only route to providers that actually enforce response_format.
-            body["provider"]["require_parameters"] = True
-        # OpenRouter usage accounting: the response reports the call's cost.
-        body["usage"] = {"include": True}
-        extra = _Extra(headers=OPENROUTER_HEADERS, body=body or None)
-        client = OpenAI(
-            api_key=backend.api_key,
-            base_url="https://openrouter.ai/api/v1",
-            timeout=timeout,
-            max_retries=0,  # the key pool fails over instead of the SDK retrying
+        return openai_compatible_client(
+            backend, timeout, self.settings, structured=structured, client_cls=OpenAI
         )
-        return client, extra
 
     def _max_output_tokens(self) -> int:
         return int(getattr(self.settings, "rag_max_output_tokens", 900) or 900)

@@ -411,34 +411,45 @@ chunking, which a reranker can't fix.
 **Goal:** better chunks, background enrichment, and no per-page AI cost
 (fixes P4, P9, P10, P11, P13).
 
-- [ ] **Chunking:** raise `MIN_SECTION_CHARS` (start at 800) so short headed
+- [x] **Chunking:** raise `MIN_SECTION_CHARS` (start at 800) so short headed
       sections merge; re-chunk with `--reclean`; confirm average chunk size
-      moves toward 400 tokens without hurting eval.
-- [ ] **PDF title fallback:** first heading when the PDF has no metadata title.
-- [ ] **Queues:** `sentiora.capture` and `sentiora.enrich`; workers can listen
+      moves toward 400 tokens without hurting eval. (800: PDF 188 → 328 tokens,
+      webpage 185 → 266; eval MRR 0.84 → 0.86.)
+- [x] **PDF title fallback:** first heading when the PDF has no metadata title.
+      (A title that is only an ID or a generic file name; a file name with
+      words just loses `.pdf`.)
+- [x] **Queues:** `sentiora.capture` and `sentiora.enrich`; workers can listen
       to either.
-- [ ] **Enrichment job** `enrich_memory(memory_id)`: one structured call
+- [x] **Enrichment job** `enrich_memory(memory_id)`: one structured call
       (pydantic-validated) returning `summary`, `key_points` (≤ 8),
       `questions` (5–10, each with its answering chunk index) and one context
       line per chunk. Input capped at ~12,000 characters plus headings. Saved
       text passes through `rag_sanitize.py`. Usage logged to `llm_usage`.
-- [ ] **Lazy enrichment rules** — a save is enriched when any of these happens:
+      **Groq only** (owner, 2026-11-21): no paid fallback; a rate-limited
+      provider means a retry later.
+- [x] **Lazy enrichment rules** — a save is enriched when any of these happens:
       the user clicks **Save now** in the extension, opens it in the app, or it
       appears in an Ask answer. Auto-saved pages are never enriched on capture.
       A per-user daily cap (`ENRICH_DAILY_LIMIT`, default 50) protects cost.
-- [ ] **Retries:** 1 min, 5 min, 30 min, 6 h, then `enrichment_status = failed`.
-- [ ] **Store:** `memory_items.summary` (column exists, unused today),
+- [x] **Retries:** 1 min, 5 min, 30 min, 6 h, then `enrichment_status = failed`.
+- [x] **Store:** `memory_items.summary` (column exists, unused today),
       `key_points`, enrichment fields; `memory_questions` rows with local
-      embeddings; context line embedded together with its chunk text
-      (contextual retrieval) by re-embedding that chunk.
-- [ ] **Backfill:** `scripts.reprocess_memories --enrich [--user EMAIL]`,
+      embeddings; ~~context line embedded together with its chunk text
+      (contextual retrieval) by re-embedding that chunk~~. **Revised (owner,
+      2026-11-21):** context lines are stored, not embedded: embedding them
+      scored lower (long-page 6/10 → 5/10, MRR 0.86 → 0.83), since on long
+      saves the model sees ~110 characters per chunk. Each question's
+      answering chunk is picked locally (the model's pick and the 5 nearest
+      chunks, scored by the reranker), not taken from the model.
+- [x] **Backfill:** `scripts.reprocess_memories --enrich [--user EMAIL]`,
       rate-limited and resumable.
-- [ ] `GET /memory-items/{id}` returns `summary`, `key_points`,
+- [x] `GET /memory-items/{id}` returns `summary`, `key_points`,
       `enrichment_status`.
 
-**Done when:** an outage only delays enrichment, deleting a memory removes its
-questions, eval with enrichment beats eval without it, and the long-page
-cases (`long-*` in `questions.json`, moved from S4) pass.
+**Done when:** an outage only delays enrichment and deleting a memory removes
+its questions. **Revised (owner, 2026-11-21):** "eval with enrichment beats
+eval without it" and the long-page cases moved to S6: enrichment pays off in
+retrieval through the question-bank leg, which S6 adds.
 
 ### S6 — Ask v3 (5–7 days)
 
@@ -473,7 +484,9 @@ cases (`long-*` in `questions.json`, moved from S4) pass.
 
 **Done when:** the instant path makes zero external calls (a test stub fails if
 any provider is called), and 50 parallel AI requests make at most
-`LLM_MAX_CONCURRENT` provider calls with clean `AI_BUSY` for the rest.
+`LLM_MAX_CONCURRENT` provider calls with clean `AI_BUSY` for the rest. Moved
+from S5: eval with the question-bank leg beats eval without it, and the
+long-page cases (`long-*` in `questions.json`) pass.
 
 ### S7 — Web app and extension (4–5 days)
 
@@ -604,7 +617,7 @@ responses keep the envelope.
 | ----- | -------- | ------ |
 | S2 | `POST /api/v1/answers/feedback` | New. Body: `question`, `answer_mode`, `rating`, `comment?`, `source_chunk_ids`. 201. |
 | S5 | `GET /api/v1/memory-items/{id}` | Adds `summary`, `key_points`, `enrichment_status`. |
-| S5 | `POST /api/v1/memory-items/{id}/enrich` | New. Queues enrichment for one save (Summarise button, Save now). 202; 409 if already queued. |
+| S5 | `POST /api/v1/memory-items/{id}/enrich` | New. Queues enrichment for one save (Summarise button, Save now). 202; 409 `ENRICHMENT_ALREADY_QUEUED` if already queued; 429 `RATE_LIMITED` past `ENRICH_DAILY_LIMIT`. |
 | S5 | `POST /api/v1/memory-items` | Optional `enrich: bool` (extension sends `true` for Save now). |
 | S6 | `POST /api/v1/chat`, `POST /api/v1/chat/stream` | New request field `answer_mode: "instant" \| "ai"` (default from `ASK_DEFAULT_MODE`). `final.mode` gains `"instant"`; `final` adds `aiAvailable`. New error code `AI_BUSY` (429, `retry_after`). `/chat` keeps its shape and reports `instant` as `memory`. |
 | S7 | `PATCH /api/v1/memory-items/{id}` | New. Body: `title` (1–300 chars). |

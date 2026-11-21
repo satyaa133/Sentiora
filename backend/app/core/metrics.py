@@ -48,7 +48,8 @@ AI_PROVIDER_ERRORS = Counter(
     ["provider", "reason"],
 )
 
-QUEUE_NAMES = ("sentiora.default",)
+# Same names as app/workers/queue.py (capture, enrich, pre-S5 queue).
+QUEUE_NAMES = ("sentiora.capture", "sentiora.enrich", "sentiora.default")
 
 
 @contextmanager

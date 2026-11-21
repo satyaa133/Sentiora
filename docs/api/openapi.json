@@ -837,6 +837,56 @@
         }
       }
     },
+    "/api/v1/memory-items/{item_id}/enrich": {
+      "post": {
+        "tags": [
+          "Memory Items"
+        ],
+        "summary": "Queue enrichment (summary, key points, questions) for one save",
+        "operationId": "enrich_memory_item_api_v1_memory_items__item_id__enrich_post",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_MemoryItemResponse_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEMORY_ITEM_NOT_FOUND"
+          },
+          "409": {
+            "description": "ENRICHMENT_ALREADY_QUEUED"
+          },
+          "422": {
+            "description": "VALIDATION_ERROR: the save has no content"
+          },
+          "429": {
+            "description": "RATE_LIMITED: ENRICH_DAILY_LIMIT reached"
+          }
+        }
+      }
+    },
     "/api/v1/chat": {
       "post": {
         "tags": [
@@ -2048,6 +2098,11 @@
                 "type": "null"
               }
             ]
+          },
+          "enrich": {
+            "type": "boolean",
+            "title": "Enrich",
+            "default": false
           }
         },
         "type": "object",
@@ -2320,6 +2375,31 @@
               }
             ],
             "title": "Received At"
+          },
+          "key_points": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Points"
+          },
+          "enrichment_status": {
+            "type": "string",
+            "enum": [
+              "none",
+              "queued",
+              "ready",
+              "failed"
+            ],
+            "title": "Enrichment Status",
+            "default": "none"
           }
         },
         "type": "object",

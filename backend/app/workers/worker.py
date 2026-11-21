@@ -1,3 +1,4 @@
+import argparse
 import contextlib
 import logging
 import os
@@ -41,9 +42,13 @@ class SentioraSimpleWorker(_JobContextMixin, SimpleWorker):
     pass
 
 
+# Queues this process listens to ("capture", "enrich"); set from the command line.
+_queue_names: tuple[str, ...] = ("capture", "enrich")
+
+
 def _build_worker() -> Worker:
     connection = create_redis_connection()
-    queues = create_queues(connection)
+    queues = create_queues(connection, _queue_names)
     # RQ's default Worker uses os.fork() and SIGALRM, which Windows does not support.
     if os.name == "nt":
         worker: Worker = SentioraSimpleWorker(queues, connection=connection)
@@ -62,6 +67,16 @@ def _recover_stale_captures() -> None:
         return
     if recovered:
         print(f"Reprocessed {recovered} stale capture(s) left in pending/processing.")
+
+    from app.workers.jobs.enrich_memory import recover_stale_enrichments
+
+    try:
+        requeued = recover_stale_enrichments()
+    except Exception as exc:  # database or Redis down: the next reconnect retries
+        print(f"Could not requeue stale enrichments yet: {exc}")
+        return
+    if requeued:
+        print(f"Requeued {requeued} enrichment(s) whose job was lost.")
 
 
 def _move_due_jobs(worker: Worker, stop: threading.Event) -> None:
@@ -135,7 +150,17 @@ def run_until_stopped(
         sleep(RECONNECT_DELAY_SECONDS)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    global _queue_names
+    parser = argparse.ArgumentParser(description="Sentiora background worker")
+    parser.add_argument(
+        "queues",
+        nargs="*",
+        choices=["capture", "enrich"],
+        help="queues to listen to (default: both, captures first)",
+    )
+    args = parser.parse_args(argv)
+    _queue_names = tuple(dict.fromkeys(args.queues)) or ("capture", "enrich")
     configure_logging()
     init_error_tracking("worker")
     run_until_stopped()

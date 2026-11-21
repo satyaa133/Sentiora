@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session as DBSession
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.memory_chunk import MemoryChunk
-from app.models.memory_item import ItemStatus, MemoryItem, SourceType
+from app.models.memory_item import EnrichmentStatus, ItemStatus, MemoryItem, SourceType
 from app.repositories.chunk_repository import ChunkRepository
 from app.services.chunking import ChunkDraft, chunk_content, chunk_transcript
 from app.services.content_normalizer import (
@@ -24,12 +24,14 @@ from app.services.embedding_service import (
     needs_vector_for,
     set_chunk_vector,
 )
+from app.services.ingest.pdf_title import readable_pdf_title
 from app.services.ingest.transcript_normalizer import (
     clean_transcript_nodes,
     clean_transcript_text,
 )
 from app.services.usage import usage_for
 from app.workers.queue import create_queues
+from app.services.enrichment_service import enqueue_enrichment
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +145,8 @@ def prepare_chunks(item: MemoryItem) -> list[ChunkDraft]:
         raise CaptureProcessingError(
             "Extraction produced no searchable content (metadata/stub only)."
         )
+    if item.source_type == SourceType.pdf and item.title:
+        item.title = readable_pdf_title(item.title, item.content or normalized)
 
     word_count = calculate_word_count(normalized)
     if word_count < MIN_SEARCHABLE_WORDS:
@@ -234,6 +238,12 @@ def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
     return adapter
 
 
+def _queue_requested_enrichment(item: MemoryItem) -> None:
+    """Enrichment asked for before the save was ready (Save now) starts now."""
+    if item.enrichment_status == EnrichmentStatus.queued:
+        enqueue_enrichment(item.id)
+
+
 def process_capture(memory_item_id_str: str) -> None:
     """Normalize, chunk, optionally embed, then mark READY or FAILED."""
     logger.info("memory_id=%s stage=start", memory_item_id_str)
@@ -285,11 +295,13 @@ def process_capture(memory_item_id_str: str) -> None:
                         embedding=chunk.embedding,
                         embedding_model=chunk.embedding_model,
                         embedding_local=chunk.embedding_local,
+                        context=chunk.context,
                     )
                     for chunk in originals
                 ]
                 ChunkRepository(db).replace_for_memory(item.id, item.user_id, clones)
                 db.commit()
+                _queue_requested_enrichment(item)
                 logger.info("memory_id=%s stage=ready via=dedup", memory_item_id_str)
                 return
             logger.warning(
@@ -329,6 +341,7 @@ def process_capture(memory_item_id_str: str) -> None:
         db.commit()
         if retry_embedding_later:
             schedule_embedding_retry(memory_item_id_str, attempt=1)
+        _queue_requested_enrichment(item)
         logger.info(
             "memory_id=%s stage=ready words=%d chunks=%d embedded=%s",
             memory_item_id_str,

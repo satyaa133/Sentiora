@@ -4,7 +4,17 @@ from datetime import datetime, UTC
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Computed, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    CheckConstraint,
+    Computed,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,8 +41,21 @@ class ItemStatus(enum.StrEnum):
     failed = "failed"
 
 
+class EnrichmentStatus(enum.StrEnum):
+    none = "none"
+    queued = "queued"
+    ready = "ready"
+    failed = "failed"
+
+
 class MemoryItem(Base):
     __tablename__ = "memory_items"
+    __table_args__ = (
+        CheckConstraint(
+            "enrichment_status IN ('none', 'queued', 'ready', 'failed')",
+            name="ck_memory_items_enrichment_status",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -96,6 +119,18 @@ class MemoryItem(Base):
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utc_now, nullable=False
     )
+
+    # Enrichment (REBUILD_PLAN S5): summary, key points and the question bank,
+    # written in the background only for saves that matter.
+    key_points: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    enrichment_status: Mapped[str] = mapped_column(
+        String(16), default=EnrichmentStatus.none.value, server_default="none", nullable=False
+    )
+    enrich_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    enrichment_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     chunks: Mapped[list["MemoryChunk"]] = relationship(
         "MemoryChunk",

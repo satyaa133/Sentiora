@@ -210,6 +210,12 @@ The worker reconnects on its own if Redis restarts, and re-queues captures left 
 
 To process captures in parallel (for example when testing many saves at once), run `npm run dev:worker` in a second terminal as well; workers share the queue and only one of them queues the scheduled retries. Production runs `WORKER_COUNT` workers (default 2, `docker-compose.prod.yml`).
 
+The worker listens to two queues: `sentiora.capture` (processing saves, always first) and `sentiora.enrich` (AI summaries, key points and the question bank). To dedicate a worker to one, pass it: `npm run dev:worker -- capture` or `npm run dev:worker -- enrich`. Enrichment only runs for saves that matter (Save now, opened in the app, a source of an Ask answer), at most `ENRICH_DAILY_LIMIT` (50) per user per day. It uses Groq only (no paid fallback) and retries after 1, 5, 30 minutes and 6 hours when Groq is down or rate-limited. To enrich existing saves (one AI call each, with a pause between calls):
+
+```bash
+node scripts/run-python.mjs -m scripts.reprocess_memories --enrich --user you@example.com --delay 8
+```
+
 If the API won't start because port 8000 is in use, check for the containerised backend with `docker ps` and stop it with `docker compose --profile app stop backend worker`.
 
 ### See What the App Is Doing

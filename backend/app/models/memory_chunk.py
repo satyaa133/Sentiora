@@ -76,6 +76,9 @@ class MemoryChunk(Base):
     embedding_local: Mapped[list[float] | None] = mapped_column(
         Vector(LOCAL_VECTOR_DIMENSIONS), nullable=True
     )
+    # One line placing the chunk in its document, written by enrichment (S5).
+    # Stored only: embedding it with the chunk scored lower in the S5 eval.
+    context: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Transcript time range in seconds; null for non-video chunks.
     start_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
     end_sec: Mapped[float | None] = mapped_column(Float, nullable=True)

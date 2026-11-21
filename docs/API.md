@@ -141,8 +141,9 @@ OpenAPI schema; nginx doesn't forward it).
 | ------ | ---- | ---- | ------- |
 | POST | `` (collection) | Bearer | Ingest a capture from the extension; queues processing (201) |
 | GET | `` (collection) | Bearer | List the user's memories |
-| GET | `/{item_id}` | Bearer | One memory |
-| DELETE | `/{item_id}` | Bearer | Soft delete |
+| GET | `/{item_id}` | Bearer | One memory; opening it queues its enrichment |
+| POST | `/{item_id}/enrich` | Bearer | Queue enrichment of one save (Summarise button, Save now) (202) |
+| DELETE | `/{item_id}` | Bearer | Soft delete (also removes its questions) |
 
 List query parameters: `page` (≥ 1), `per_page` (1–100, default 20),
 `source_type`, `status`, `date_from` (inclusive), `date_to` (exclusive), `q`.
@@ -151,6 +152,20 @@ The list response has `items`, `total`, `page`, `per_page`.
 A capture of a blocked sensitive URL is refused with
 `403 CAPTURE_SENSITIVE_BLOCKED`. Processing (chunking, embedding) happens in the
 capture worker; the item's `status` moves from `pending` to `ready` or `failed`.
+
+**Enrichment (S5).** A memory has `summary`, `key_points` (up to 8) and
+`enrichment_status` (`none` | `queued` | `ready` | `failed`). Enrichment is one
+AI call in the `sentiora.enrich` worker queue and runs only for saves that
+matter: `POST` with `"enrich": true` (the extension's Save now; auto-saves send
+`false`), `POST /{item_id}/enrich`, opening the memory (`GET /{item_id}`) or the
+memory being a source of an Ask answer. Each user gets `ENRICH_DAILY_LIMIT`
+(default 50) requests per UTC day. A failed attempt is retried after 1, 5 and 30
+minutes and 6 hours, then the status is `failed` (the memory stays searchable).
+
+`POST /{item_id}/enrich` returns `202` with the memory (`enrichment_status:
+"queued"`), `409 ENRICHMENT_ALREADY_QUEUED` when it is already queued, `429
+RATE_LIMITED` past the daily limit, `422 VALIDATION_ERROR` for a failed capture
+and `404 MEMORY_ITEM_NOT_FOUND`. It also re-enriches a `ready` or `failed` memory.
 
 ### Ask and search (`/api/v1`)
 
@@ -215,6 +230,7 @@ UUIDs). Returns `{id, rating, created_at}`.
 | `AUTH_LOGIN_THROTTLED` | 429 | Too many failed logins for the account |
 | `USER_PROFILE_NOT_FOUND` | 404 | Profile missing |
 | `MEMORY_ITEM_NOT_FOUND` | 404 | Memory doesn't exist or isn't the user's |
+| `ENRICHMENT_ALREADY_QUEUED` | 409 | `POST /memory-items/{id}/enrich` while that memory's enrichment is queued |
 | `CAPTURE_SENSITIVE_BLOCKED` | 403 | Capture of a blocked sensitive URL |
 | `AI_NOT_CONFIGURED` | 503 | No AI model configured and no saved memory could answer |
 | `AI_PROVIDER_UNAVAILABLE` | 503 | Every AI key is out of credit, invalid, rate-limited or overloaded |

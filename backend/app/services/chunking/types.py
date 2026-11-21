@@ -15,7 +15,7 @@ MIN_CHUNK_CHARS = MIN_CHUNK_TOKENS * CHARS_PER_TOKEN
 OVERLAP_CHARS = int(TARGET_CHUNK_CHARS * OVERLAP_RATIO)
 # A section shorter than this is merged with the next one instead of becoming
 # its own chunk, so short headed sections don't produce tiny chunks.
-MIN_SECTION_CHARS = 200
+MIN_SECTION_CHARS = 800
 
 
 @dataclass(frozen=True)
