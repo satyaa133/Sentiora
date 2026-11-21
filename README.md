@@ -178,6 +178,8 @@ node scripts/run-python.mjs -m scripts.reprocess_memories --embed
 
 The remote providers (`openrouter`, `openai`, `gemini`, `auto`) still work and keep their own vectors (`memory_chunks.embedding`), so switching back is a setting; each provider needs its own `RAG_MIN_SIMILARITY` (local: 0.65, remote: 0.25). Restart the API and worker after changing either.
 
+**Reranking also runs on your machine.** After search picks candidates, a small cross-encoder (`jinaai/jina-reranker-v1-tiny-en`, ~130 MB, downloaded on first use) re-reads the top `RAG_RERANK_CANDIDATES` (10) with the question and puts the passage that answers it first. It adds about 0.25 s per question on a laptop CPU; `RERANKER_MODEL=none` turns it off.
+
 Without a provider key:
 
 - **Ask Sentiora** (`POST /api/v1/chat`) still returns HTTP `200` with a short grounded answer from retrieved READY memory (`used_fallback: true`).

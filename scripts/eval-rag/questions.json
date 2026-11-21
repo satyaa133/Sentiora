@@ -1,5 +1,5 @@
 {
-  "description": "Ask Sentiora retrieval eval. PLACEHOLDERS: written from the dev account's saved titles; replace or extend with real questions. 'expected' lists substrings of memory titles that count as a hit (case-insensitive); an empty list means the question is NOT covered by memory and retrieval should return nothing. 'history' holds earlier turns for vague follow-ups.",
+  "description": "Ask Sentiora retrieval eval. PLACEHOLDERS: written from the dev account's saved titles; replace or extend with real questions. 'expected' lists substrings of memory titles that count as a hit (case-insensitive); an empty list means the question is NOT covered by memory and retrieval should return nothing. 'history' holds earlier turns for vague follow-ups. Long-page cases add 'passage': text the answering chunk must contain.",
   "questions": [
     { "id": "pascal-cover", "question": "What does the Pascal Triangle video cover?", "expected": ["Pascal Triangle"] },
     { "id": "ncr-fast", "question": "What's the quickest way to compute n choose r?", "expected": ["Pascal Triangle"] },
@@ -44,6 +44,16 @@
       ],
       "expected": ["Sliding Window"]
     },
+    { "id": "long-api-refresh-reuse", "question": "What happens if someone tries to use an old session renewal token a second time?", "expected": ["Sentiora_API_Specification"], "passage": "Reuse of an already-rotated refresh token" },
+    { "id": "long-api-auth-limit", "question": "How many sign-in attempts can someone make before they get blocked?", "expected": ["Sentiora_API_Specification"], "passage": "Auth (login, register, forgot-password) 10 requests" },
+    { "id": "long-adam-bias", "question": "Why does Adam divide its moving averages by one minus beta to the power t?", "expected": ["Unit2_Deep_Networks"], "passage": "Note the effect of bias correction" },
+    { "id": "long-early-stopping", "question": "When should training be halted so the network doesn't just memorise the training data?", "expected": ["Unit2_Deep_Networks"], "passage": "stop training once validation loss stops improving" },
+    { "id": "long-yolo-anchor", "question": "How can YOLO find two different objects whose centres land in the same cell?", "expected": ["What is YOLO algorithm"], "passage": "two anchor boxes" },
+    { "id": "long-yolo-grid", "question": "How does YOLO split up the picture before it predicts anything?", "expected": ["A beginners introduction to YOLO"], "passage": "divide the image into certain number of grids" },
+    { "id": "long-sliding-shrink", "question": "In the two-pointer window pattern, which end moves when the window breaks the rule?", "expected": ["Introduction to Sliding Window"], "passage": "shrinking happens for the left edge" },
+    { "id": "long-ncr-overflow", "question": "Which integer type should I pick so computing combinations doesn't wrap around?", "expected": ["Pascal Triangle"], "passage": "long long so that there is no overflow" },
+    { "id": "long-oop-drawbacks", "question": "Why can object-oriented code be hard for people who are just starting out?", "expected": ["Object Oriented Programming"], "passage": "Steeper Learning Curve" },
+    { "id": "long-tcp-connection", "question": "How does TCP establish a connection?", "expected": ["TCP vs UDP"], "passage": "3-way handshake" },
     { "id": "not-covered-bread", "question": "How do I bake sourdough bread?", "expected": [] },
     { "id": "not-covered-capital", "question": "What is the capital of Australia?", "expected": [] }
   ]

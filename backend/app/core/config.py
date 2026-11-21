@@ -133,6 +133,13 @@ class Settings(BaseSettings):
     rag_final_k: int = 6
     # Candidates fetched from each retrieval leg (vector, full-text) before fusion.
     rag_candidates: int = 30
+    # Cross-encoder that re-orders the fused candidates (fastembed, on CPU);
+    # "none" turns reranking off. Downloaded into MODEL_CACHE_DIR once.
+    # Chosen by the S4 eval (owner, 2026-11-21).
+    reranker_model: str = "jinaai/jina-reranker-v1-tiny-en"
+    # Fused candidates the reranker scores; the rest are dropped. Each costs
+    # ~25 ms of CPU on every question (S4: 10 -> p95 ~0.32 s, 20 -> ~0.61 s).
+    rag_rerank_candidates: int = Field(default=10, ge=1, le=100)
     # Cosine similarity a vector hit needs to count as relevant. When no hit
     # clears it and no full-text hit matches, the question is "not covered".
     rag_min_similarity: float = Field(default=0.25, ge=0.0, le=1.0)

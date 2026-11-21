@@ -28,6 +28,10 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # Never call live embedding providers from tests (index or query time), even if
 # real keys exist in the local .env files.
 os.environ["EMBEDDING_PROVIDER"] = "none"
+# No real cross-encoder in tests; reranker tests install a fake one.
+os.environ["RERANKER_MODEL"] = "none"
+# Retrieval tests assume the default threshold, whatever a developer's .env says.
+os.environ["RAG_MIN_SIMILARITY"] = "0.25"
 # Tests register accounts on the reserved example.com / example.dev domains.
 os.environ["ALLOW_TEST_EMAIL_DOMAINS"] = "true"
 for _key in (
