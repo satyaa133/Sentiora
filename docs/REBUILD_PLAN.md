@@ -134,6 +134,7 @@ Locked unless this file is changed:
 | D8 | Keep pgvector. Revisit a dedicated vector database only past ~20M chunks. |
 | D9 | **AI providers.** Development: OpenRouter, as today (no Anthropic API budget yet), with OpenRouter's "don't route to providers that train" setting on. Production (S10): Anthropic API directly with **Claude Haiku 5.5** (`claude-haiku-5-5`) for AI answers, and enrichment through Anthropic's **Message Batches API** (half price; enrichment can wait); Gemini **paid tier only** as backup. Pro plan's "best model" (L1): Claude Sonnet 5.5. Never a free tier or a provider that trains on user data. |
 | D11 | **Development providers (2026-11-21, owner).** Use every configured key: OpenRouter is the primary for answers and embeddings (Claude Haiku); **Groq** (`openai/gpt-oss-120b`, OpenAI-compatible) is the first chat backup, then Gemini. Groq has no embeddings API. Groq keeps no API inputs or outputs by default (abuse/error logs up to 30 days; Zero Data Retention can be turned on); whether it trains on API data is in its services agreement, not yet read. Before Groq serves real users: confirm its no-training terms, turn on ZDR, and add it to the D10 notice (new notice version). |
+| D12 | **OpenAI as the main provider (2026-11-21, owner).** The owner wants the OpenAI API (`gpt-4o-mini` answers, `text-embedding-3-small` embeddings) as the main provider. The key is configured, but its account has no credit yet (429 `insufficient_quota`), so development runs on Groq (`LLM_PROVIDER=groq`) until credit is added; then set `LLM_PROVIDER=openai` and `EMBEDDING_PROVIDER=openai` and re-embed (`scripts.reprocess_memories --embed`, the model id changes from `openrouter:` to `openai:`). OpenAI API data isn't used for training by default; it must be named in the D10 notice before it serves real users. D9's production choice (Anthropic) stands until the owner changes it. |
 | D10 | **Privacy notice at sign-up.** New users see the notice below and must accept it to create an account; the accepted version and time are stored. When the notice changes, signed-in users accept the new version before using AI features. The same text goes in the privacy policy (S10). |
 
 **Approved privacy notice (D10), version `2026-11-20`:**
@@ -145,8 +146,8 @@ Locked unless this file is changed:
 > run on our own servers and send nothing to AI providers.
 
 The notice describes production (D9). During development, text goes through
-OpenRouter, Groq and Gemini (D11); only the team's own accounts use the
-development setup.
+OpenRouter, Groq, Gemini and OpenAI (D11, D12); only the team's own
+accounts use the development setup.
 
 ### Open
 
