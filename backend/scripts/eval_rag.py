@@ -9,6 +9,11 @@ one user, prints the chunks it picked with their scores, and reports:
   noise   share of returned chunks that are not from an expected memory
   reject  not-covered questions (expected: []) that correctly returned nothing
 
+A question with ``passage`` (long-page cases) only counts a chunk as a hit
+when it is from an expected memory AND contains that text (case and spacing
+ignored), so it checks that the best passage of a long save was found, not
+just the save.
+
 Usage (from the repo root):
 
     node scripts/run-python.mjs -m scripts.eval_rag --user you@example.com
@@ -54,6 +59,7 @@ class Case:
     question: str
     expected: list[str]
     history: list[AskTurn] = field(default_factory=list)
+    passage: str | None = None
 
 
 @dataclass
@@ -73,7 +79,15 @@ class Outcome:
 
     def matches(self, chunk: RetrievedChunk) -> bool:
         title = chunk.title.lower()
-        return any(part.lower() in title for part in self.case.expected)
+        if not any(part.lower() in title for part in self.case.expected):
+            return False
+        if self.case.passage is None:
+            return True
+        return _normalize(self.case.passage) in _normalize(chunk.content)
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.lower().split())
 
 
 class CachingAdapter:
@@ -107,7 +121,13 @@ def load_cases(path: Path) -> list[Case]:
     for raw in data["questions"]:
         history = [AskTurn(**turn) for turn in raw.get("history", [])]
         cases.append(
-            Case(raw["id"], raw["question"], list(raw.get("expected", [])), history)
+            Case(
+                raw["id"],
+                raw["question"],
+                list(raw.get("expected", [])),
+                history,
+                raw.get("passage"),
+            )
         )
     return cases
 
