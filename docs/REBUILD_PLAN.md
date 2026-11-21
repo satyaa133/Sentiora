@@ -386,15 +386,25 @@ and eval meets the section 2 target.
 **Goal:** the best passage reaches the top (fixes P9 for the current pipeline,
 and powers the instant answer in S6).
 
-- [ ] `RerankerService` (`app/services/retrieval/reranker.py`) using a
+- [x] `RerankerService` (`app/services/retrieval/reranker.py`) using a
       `fastembed` cross-encoder; model chosen by eval (start with
       `BAAI/bge-reranker-base`; a smaller MiniLM cross-encoder if CPU time is
-      too high).
-- [ ] Retrieval: RRF candidates (top 30) → rerank → MMR → top 6.
-- [ ] Add the long-page cases from TASKS.md to `questions.json`.
-- [ ] Measure rerank time (target p95 < 150 ms for 30 candidates).
+      too high). **Chosen 2026-11-21 (owner): `jinaai/jina-reranker-v1-tiny-en`**;
+      bge-reranker-base took ~17 s for 30 candidates on a laptop CPU.
+- [x] Retrieval: RRF candidates (top **10**, `RAG_RERANK_CANDIDATES`) → rerank
+      → MMR → top 6. Passages scored one at a time (batches pad to the longest
+      passage) and cut to 1,200 characters, title and heading first.
+- [x] Add the long-page cases from TASKS.md to `questions.json` (10 cases with
+      a `passage` the answering chunk must contain).
+- [x] Measure rerank time. The original target (p95 < 150 ms for 30
+      candidates) is not reachable on CPU: every cross-encoder costs ~25–30 ms
+      per passage. **Revised (owner, 2026-11-21): p95 < 350 ms**; measured
+      p50 243 ms, p95 322 ms with 10 candidates.
 
-**Done when:** eval MRR is equal or better and the long-page cases pass.
+**Done when:** eval MRR is equal or better. **Revised (owner, 2026-11-21):**
+the long-page cases moved to S5: their misses come from candidate recall
+(answering chunk outside the top candidates or under the similarity bar) and
+chunking, which a reranker can't fix.
 
 ### S5 — Save pipeline v3 (5–7 days)
 
@@ -427,7 +437,8 @@ and powers the instant answer in S6).
       `enrichment_status`.
 
 **Done when:** an outage only delays enrichment, deleting a memory removes its
-questions, and eval with enrichment beats eval without it.
+questions, eval with enrichment beats eval without it, and the long-page
+cases (`long-*` in `questions.json`, moved from S4) pass.
 
 ### S6 — Ask v3 (5–7 days)
 
@@ -625,8 +636,8 @@ that adds them.
 | `LOCAL_EMBEDDING_MODEL` | `nomic-ai/nomic-embed-text-v1.5-Q` (D4 eval) | S3 |
 | `MODEL_CACHE_DIR` | `backend/.models` | S3 |
 | `RAG_MIN_SIMILARITY` | 0.65 with the local model (code default stays 0.25 for remote embeddings; set in `.env.example` and compose) | S3 |
-| `RERANKER_MODEL` | `BAAI/bge-reranker-base` | S4 |
-| `RAG_RERANK_CANDIDATES` | 30 | S4 |
+| `RERANKER_MODEL` | `jinaai/jina-reranker-v1-tiny-en` (S4 eval; `none` turns it off) | S4 |
+| `RAG_RERANK_CANDIDATES` | 10 (S4 eval) | S4 |
 | `ENRICH_DAILY_LIMIT` | 50 | S5 |
 | `ENRICH_MODEL` | cheapest configured chat model | S5 |
 | `ASK_DEFAULT_MODE` | `instant` | S6 |
