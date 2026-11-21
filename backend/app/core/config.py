@@ -10,7 +10,7 @@ from dotenv import dotenv_values
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLM_PROVIDERS = ("openai", "gemini", "openrouter")
+LLM_PROVIDERS = ("openai", "gemini", "openrouter", "groq")
 EMBEDDING_PROVIDER_CHOICES = ("auto", "openrouter", "openai", "gemini", "none")
 # memory_chunks.embedding is vector(1536) in the migrations.
 VECTOR_DIMENSIONS = 1536
@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     # Must support EMBEDDING_DIMENSIONS output (text-embedding-004 caps at 768).
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_chat_model: str = "gemini-2.5-flash"
+    # Groq (OpenAI-compatible, chat only): a fast backup in development (D11).
+    groq_api_key: str | None = None
+    groq_chat_model: str = "openai/gpt-oss-120b"
     # OpenRouter keys: OPENROUTER_API_KEY and/or OPENROUTER_API_KEY_1..N (any
     # count, auto-detected from the environment and .env files). Ask and
     # embeddings rotate across all of them; use openrouter_keys() to read them.

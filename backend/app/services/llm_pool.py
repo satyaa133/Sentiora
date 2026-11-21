@@ -42,7 +42,7 @@ TRANSIENT_COOLDOWN_SECONDS = 30
 @dataclass(frozen=True)
 class LLMBackend:
     name: str
-    provider: str  # "openai" | "openrouter" | "gemini"
+    provider: str  # "openai" | "openrouter" | "groq" | "gemini"
     api_key: str
     model: str
 
@@ -70,6 +70,13 @@ def build_backends(settings: Any) -> list[LLMBackend]:
             )
             for index, key in enumerate(openrouter_keys(settings), start=1)
         ],
+        "groq": [
+            (
+                "groq",
+                _setting(settings, "groq_api_key"),
+                _setting(settings, "groq_chat_model", "openai/gpt-oss-120b"),
+            ),
+        ],
         "gemini": [
             (
                 "gemini",
@@ -86,7 +93,10 @@ def build_backends(settings: Any) -> list[LLMBackend]:
         ],
     }
     primary = (_setting(settings, "llm_provider") or "openai").strip().lower()
-    order = [primary] + [p for p in ("openrouter", "gemini", "openai") if p != primary]
+    # Backups after the primary: Groq first (fastest), then Gemini, then OpenAI.
+    order = [primary] + [
+        p for p in ("openrouter", "groq", "gemini", "openai") if p != primary
+    ]
 
     backends: list[LLMBackend] = []
     seen_keys: set[str] = set()
