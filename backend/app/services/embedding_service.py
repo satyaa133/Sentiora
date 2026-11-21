@@ -221,9 +221,10 @@ class GeminiEmbeddingAdapter(EmbeddingPort):
             raise EmbeddingNotConfiguredError("GEMINI_API_KEY is not configured.")
         self._client = genai.Client(
             api_key=settings.gemini_api_key,
-            # Milliseconds; Gemini also sends it as the server-side deadline.
+            # Milliseconds; Gemini also sends it as the server-side deadline,
+            # which it rejects under 10 s.
             http_options=types.HttpOptions(
-                timeout=int(settings.embedding_timeout_seconds * 1000)
+                timeout=int(max(settings.embedding_timeout_seconds, 10.0) * 1000)
             ),
         )
         self._model = settings.embedding_model or settings.gemini_embedding_model

@@ -150,3 +150,27 @@ def test_openrouter_embeddings_use_the_embedding_timeout(
     adapter = embedding_service.OpenRouterEmbeddingAdapter()
     adapter.embed_texts(["hello"])
     assert captured["timeout"] == 7
+
+
+def test_gemini_always_gets_its_minimum_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gemini rejects a deadline under 10 s (400 INVALID_ARGUMENT), which a
+    nearly used-up answer budget would otherwise send."""
+    from google import genai
+
+    captured: dict[str, Any] = {}
+
+    class FakeClient:
+        def __init__(self, api_key: str, http_options: Any) -> None:
+            captured["timeout_ms"] = http_options.timeout
+            self.models = SimpleNamespace(
+                generate_content=lambda **kwargs: SimpleNamespace(
+                    text="ok", candidates=[], usage_metadata=None
+                )
+            )
+
+    monkeypatch.setattr(genai, "Client", FakeClient)
+    rag = _rag(monkeypatch, _settings())
+    rag._attempt_timeout = 7.5
+    backend = LLMBackend(name="gemini", provider="gemini", api_key="g", model="gemini-2.5-flash")
+    rag._complete_gemini("prompt", "system", backend)
+    assert captured["timeout_ms"] == 10_000

@@ -106,6 +106,9 @@ DEFAULT_CHAT_TIMEOUT_SECONDS = 10.0
 DEFAULT_META_TIMEOUT_SECONDS = 8.0
 # A key is not tried with less time than this left in the answer's budget.
 MIN_ATTEMPT_SECONDS = 1.0
+# Gemini rejects a deadline under 10 s (400 INVALID_ARGUMENT); its SDK sends the
+# timeout as that deadline, so a Gemini attempt always gets at least this much.
+GEMINI_MIN_DEADLINE_SECONDS = 10.0
 
 
 class LLMProviderError(RuntimeError):
@@ -1136,7 +1139,9 @@ class RagService:
 
         client = genai.Client(
             api_key=backend.api_key,
-            http_options=types.HttpOptions(timeout=int(self._attempt_timeout * 1000)),  # ms
+            http_options=types.HttpOptions(
+                timeout=int(max(self._attempt_timeout, GEMINI_MIN_DEADLINE_SECONDS) * 1000)
+            ),  # ms
         )
 
         def generate(thinking: types.ThinkingConfig | None) -> object:
