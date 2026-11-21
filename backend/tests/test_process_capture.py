@@ -160,6 +160,9 @@ def test_process_capture_fails_when_extraction_is_empty() -> None:
 
 def test_process_capture_stays_ready_when_embeddings_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class BoomAdapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             raise RuntimeError("quota exceeded")
 

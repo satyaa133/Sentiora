@@ -4,11 +4,14 @@ Usage (from the repo root):
 
     node scripts/run-python.mjs -m scripts.reprocess_memories --reclean --dry-run
     node scripts/run-python.mjs -m scripts.reprocess_memories --reclean [--user EMAIL] [--batch 25]
-    node scripts/run-python.mjs -m scripts.reprocess_memories --embed [--user EMAIL] [--dry-run]
+    node scripts/run-python.mjs -m scripts.reprocess_memories --embed [--user EMAIL] [--force] [--dry-run]
     node scripts/run-python.mjs -m scripts.reprocess_memories --retry-failed-embedding [--dry-run]
 
-``--embed`` embeds every chunk that has no vector, or a vector from a model
-other than the current ``EMBEDDING_MODEL``. It commits after every batch and
+``--embed`` embeds every chunk that has no vector for the active embedding
+model: for a remote provider, no ``embedding`` or one from a model other than
+the current ``EMBEDDING_MODEL``; for ``EMBEDDING_PROVIDER=local``, no
+``embedding_local``. ``--embed --force`` re-embeds every chunk (needed after
+changing ``LOCAL_EMBEDDING_MODEL`` to a model of the same size). It commits after every batch and
 only ever selects chunks that still need work, so it is idempotent and can be
 stopped and re-run at any time. It stops at the first provider failure.
 
@@ -31,7 +34,7 @@ import sys
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -39,7 +42,11 @@ from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem
 from app.models.user import User
 from app.repositories.chunk_repository import ChunkRepository
-from app.services.embedding_service import get_embedding_adapter
+from app.services.embedding_service import (
+    get_embedding_adapter,
+    needs_vector_for,
+    set_chunk_vector,
+)
 from app.workers.jobs.process_capture import (
     CaptureProcessingError,
     build_chunk_rows,
@@ -149,6 +156,7 @@ def reclean(args: argparse.Namespace) -> int:
                     for chunk in chunks:
                         chunk.embedding = None
                         chunk.embedding_model = None
+                        chunk.embedding_local = None
                     embedded = False
                     logger.warning("memory_id=%s embed_pending reason=%s", item_id, exc)
                 db.commit()
@@ -175,7 +183,7 @@ def embed(args: argparse.Namespace) -> int:
             "No embedding provider is configured (EMBEDDING_PROVIDER / API keys)."
         )
         return 1
-    expected = get_settings().embedding_dimensions
+    expected = int(getattr(adapter, "dimensions", 0) or get_settings().embedding_dimensions)
     batch_size = max(1, min(args.batch, 256))
     embedded = 0
 
@@ -188,13 +196,11 @@ def embed(args: argparse.Namespace) -> int:
                 MemoryItem.status == ItemStatus.ready,
                 MemoryItem.deleted_at.is_(None),
                 MemoryItem.user_id == MemoryChunk.user_id,
-                or_(
-                    MemoryChunk.embedding.is_(None),
-                    MemoryChunk.embedding_model.is_distinct_from(model_id),
-                ),
             )
             .order_by(MemoryChunk.id)
         )
+        if not args.force:
+            needs_work = needs_work.where(needs_vector_for(model_id))
         if user_id:
             needs_work = needs_work.where(MemoryChunk.user_id == user_id)
 
@@ -205,10 +211,14 @@ def embed(args: argparse.Namespace) -> int:
         if args.dry_run:
             return 0
 
+        # Keyset paging by id: a re-embedded chunk (--force) is never picked twice.
+        after: UUID | None = None
         while True:
-            chunks = list(db.execute(needs_work.limit(batch_size)).scalars())
+            page = needs_work if after is None else needs_work.where(MemoryChunk.id > after)
+            chunks = list(db.execute(page.limit(batch_size)).scalars())
             if not chunks:
                 break
+            after = chunks[-1].id
             try:
                 vectors = adapter.embed_texts([chunk.content for chunk in chunks])
                 if len(vectors) != len(chunks) or any(
@@ -227,8 +237,7 @@ def embed(args: argparse.Namespace) -> int:
                 )
                 return 1
             for chunk, vector in zip(chunks, vectors, strict=True):
-                chunk.embedding = vector
-                chunk.embedding_model = model_id
+                set_chunk_vector(chunk, model_id, vector)
             db.commit()
             embedded += len(chunks)
             logger.info("embedded %d/%d", embedded, total)
@@ -295,6 +304,11 @@ def main(argv: list[str] | None = None) -> int:
         "--embed",
         action="store_true",
         help="embed chunks missing a current-model vector",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with --embed: re-embed every chunk, not only those missing a vector",
     )
     parser.add_argument(
         "--retry-failed-embedding",

@@ -31,12 +31,18 @@ ARTICLE = (
 class _FailingAdapter:
     model_id = "test:embed"
 
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         raise RuntimeError("Connection error.")
 
 
 class _WorkingAdapter:
     model_id = "test:embed"
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return [[0.01] * 1536 for _ in texts]

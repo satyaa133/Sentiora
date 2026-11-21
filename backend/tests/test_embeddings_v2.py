@@ -114,6 +114,9 @@ class _ModelAdapter:
         self.model_id = model_id
         self.fail = fail
 
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         if self.fail:
             raise RuntimeError("provider down")

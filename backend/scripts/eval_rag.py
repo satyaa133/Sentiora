@@ -82,7 +82,14 @@ class CachingAdapter:
     def __init__(self, inner: Any) -> None:
         self.inner = inner
         self.model_id = getattr(inner, "model_id", None)
+        self.dimensions = getattr(inner, "dimensions", None)
         self.cache: dict[str, list[float]] = {}
+        self.query_cache: dict[str, list[float]] = {}
+
+    def embed_query(self, text: str) -> list[float]:
+        if text not in self.query_cache:
+            self.query_cache[text] = self.inner.embed_query(text)
+        return self.query_cache[text]
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         missing = [t for t in texts if t not in self.cache]

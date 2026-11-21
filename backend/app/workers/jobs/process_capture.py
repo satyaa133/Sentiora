@@ -18,7 +18,12 @@ from app.services.content_normalizer import (
     extract_domain,
     normalize_content,
 )
-from app.services.embedding_service import current_embedding_model, get_embedding_adapter
+from app.services.embedding_service import (
+    current_embedding_model,
+    get_embedding_adapter,
+    needs_vector_for,
+    set_chunk_vector,
+)
 from app.services.ingest.transcript_normalizer import (
     clean_transcript_nodes,
     clean_transcript_text,
@@ -181,7 +186,10 @@ def build_chunk_rows(item: MemoryItem, drafts: list[ChunkDraft]) -> list[MemoryC
 
 
 def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
-    """Fill ``embedding`` and ``embedding_model`` on every chunk.
+    """Fill every chunk's vector for the active model.
+
+    Remote models write ``embedding`` and ``embedding_model``; the local model
+    writes ``embedding_local`` (``set_chunk_vector``).
 
     Returns the adapter used, or None when no provider is configured. Raises
     CaptureProcessingError when the provider fails; callers decide whether
@@ -204,7 +212,7 @@ def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
     logger.info("memory_id=%s stage=embed chunks=%d", memory_label, len(chunks))
     try:
         vectors = adapter.embed_texts([chunk.content for chunk in chunks])
-        expected = _vector_dim()
+        expected = int(getattr(adapter, "dimensions", 0) or _vector_dim())
         if len(vectors) != len(chunks):
             raise CaptureProcessingError(
                 f"Embedding count mismatch: got {len(vectors)} for {len(chunks)} chunks."
@@ -216,8 +224,7 @@ def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
                 )
         model_id = getattr(adapter, "model_id", None)
         for chunk, vector in zip(chunks, vectors, strict=True):
-            chunk.embedding = vector
-            chunk.embedding_model = model_id
+            set_chunk_vector(chunk, model_id, vector)
     except CaptureProcessingError:
         raise
     except Exception as emb_exc:
@@ -277,6 +284,7 @@ def process_capture(memory_item_id_str: str) -> None:
                         source_type=chunk.source_type,
                         embedding=chunk.embedding,
                         embedding_model=chunk.embedding_model,
+                        embedding_local=chunk.embedding_local,
                     )
                     for chunk in originals
                 ]
@@ -307,6 +315,7 @@ def process_capture(memory_item_id_str: str) -> None:
             for chunk in chunks:
                 chunk.embedding = None
                 chunk.embedding_model = None
+                chunk.embedding_local = None
             adapter = None
             logger.warning(
                 "memory_id=%s stage=embed pending reason=%s", memory_item_id_str, embed_exc
@@ -420,10 +429,7 @@ def retry_embedding(memory_item_id_str: str, attempt: int) -> None:
             .filter(
                 MemoryChunk.memory_id == item.id,
                 MemoryChunk.user_id == item.user_id,
-                or_(
-                    MemoryChunk.embedding.is_(None),
-                    MemoryChunk.embedding_model.is_distinct_from(model_id),
-                ),
+                needs_vector_for(model_id),
             )
             .order_by(MemoryChunk.chunk_index)
             .all()
