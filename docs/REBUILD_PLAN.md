@@ -133,6 +133,7 @@ Locked unless this file is changed:
 | D7 | Future plans: Free (15 AI answers/day), Student, Plus, Pro. No Business plan for now. Student verification: college email **and** ID upload. Details in L1. |
 | D8 | Keep pgvector. Revisit a dedicated vector database only past ~20M chunks. |
 | D9 | **AI providers.** Development: OpenRouter, as today (no Anthropic API budget yet), with OpenRouter's "don't route to providers that train" setting on. Production (S10): Anthropic API directly with **Claude Haiku 5.5** (`claude-haiku-5-5`) for AI answers, and enrichment through Anthropic's **Message Batches API** (half price; enrichment can wait); Gemini **paid tier only** as backup. Pro plan's "best model" (L1): Claude Sonnet 5.5. Never a free tier or a provider that trains on user data. |
+| D11 | **Development providers (2026-11-21, owner).** Use every configured key: OpenRouter is the primary for answers and embeddings (Claude Haiku); **Groq** (`openai/gpt-oss-120b`, OpenAI-compatible) is the first chat backup, then Gemini. Groq has no embeddings API. Groq keeps no API inputs or outputs by default (abuse/error logs up to 30 days; Zero Data Retention can be turned on); whether it trains on API data is in its services agreement, not yet read. Before Groq serves real users: confirm its no-training terms, turn on ZDR, and add it to the D10 notice (new notice version). |
 | D10 | **Privacy notice at sign-up.** New users see the notice below and must accept it to create an account; the accepted version and time are stored. When the notice changes, signed-in users accept the new version before using AI features. The same text goes in the privacy policy (S10). |
 
 **Approved privacy notice (D10), version `2026-11-20`:**
@@ -144,7 +145,8 @@ Locked unless this file is changed:
 > run on our own servers and send nothing to AI providers.
 
 The notice describes production (D9). During development, text goes through
-OpenRouter; only the team's own accounts use the development setup.
+OpenRouter, Groq and Gemini (D11); only the team's own accounts use the
+development setup.
 
 ### Open
 
@@ -625,6 +627,8 @@ that adds them.
 | `ANSWER_CACHE_TTL_SECONDS` | 86400 | S6 |
 | `VITE_SENTRY_DSN` (root `.env`, build time) | unset (off) | S10 |
 | `PRIVACY_NOTICE_VERSION` | `2026-11-20` | S7 |
+| `GROQ_API_KEY` | unset | D11 |
+| `GROQ_CHAT_MODEL` | `openai/gpt-oss-120b` | D11 |
 | `LLM_PROVIDER` | gains `anthropic` | S10 |
 | `ANTHROPIC_API_KEY` | unset | S10 |
 | `ANTHROPIC_CHAT_MODEL` | `claude-haiku-5-5` | S10 |
