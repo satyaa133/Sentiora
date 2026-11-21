@@ -24,6 +24,7 @@ from app.services.embedding_service import (
     needs_vector_for,
     set_chunk_vector,
 )
+from app.services.ingest.pdf_title import readable_pdf_title
 from app.services.ingest.transcript_normalizer import (
     clean_transcript_nodes,
     clean_transcript_text,
@@ -143,6 +144,8 @@ def prepare_chunks(item: MemoryItem) -> list[ChunkDraft]:
         raise CaptureProcessingError(
             "Extraction produced no searchable content (metadata/stub only)."
         )
+    if item.source_type == SourceType.pdf and item.title:
+        item.title = readable_pdf_title(item.title, item.content or normalized)
 
     word_count = calculate_word_count(normalized)
     if word_count < MIN_SEARCHABLE_WORDS:
