@@ -30,6 +30,7 @@ from app.services.embedding_service import (
     vector_column,
 )
 from app.services.retrieval import selection
+from app.services.retrieval.reranker import get_reranker, passage_text
 from app.services.usage import usage_for
 
 _TSQUERY_SAFE = re.compile(r"[^a-z0-9]")
@@ -257,7 +258,9 @@ class RetrievalService:
             if memory_id is not None or document
             else int(self._setting("rag_max_chunks_per_memory", 2))
         )
-        chosen = self._select(semantic, fulltext, limit=limit, per_memory=per_memory)
+        chosen = self._select(
+            semantic, fulltext, limit=limit, per_memory=per_memory, query=query
+        )
         if document and chosen:
             chosen = self._expand_primary_memory(user_id, chosen, limit=limit, scope=scope)[:limit]
         self._log_retrieval(query, semantic, fulltext, chosen)
@@ -267,6 +270,37 @@ class RetrievalService:
         value = getattr(self.settings, name, None)
         return default if value is None else value
 
+    def _rerank(
+        self, query: str, ranked: list[RetrievedChunk], limit: int
+    ) -> tuple[list[RetrievedChunk], dict[UUID, float]] | None:
+        """Re-order the top fused candidates with the cross-encoder.
+
+        Returns the candidates by reranker score with scores scaled to 0–1 (for
+        MMR), or None to keep the fused order (reranker off or failed).
+        """
+        reranker = get_reranker()
+        if reranker is None or not ranked:
+            return None
+        count = max(limit, int(self._setting("rag_rerank_candidates", 10)))
+        candidates = ranked[:count]
+        try:
+            with observe_stage("rerank"):
+                raw = reranker.score(
+                    query,
+                    [passage_text(c.title, c.heading, c.content) for c in candidates],
+                )
+        except Exception:
+            logger.warning("Reranking failed; using fused order", exc_info=True)
+            return None
+        low, high = min(raw), max(raw)
+        span = (high - low) or 1.0
+        scaled = {c.chunk_id: (s - low) / span for c, s in zip(candidates, raw, strict=True)}
+        # The top candidate scores 1.0; MMR divides by the top score.
+        if high == low:
+            scaled = dict.fromkeys(scaled, 1.0)
+        order = sorted(candidates, key=lambda c: -scaled[c.chunk_id])
+        return order, scaled
+
     def _select(
         self,
         semantic: list[RetrievedChunk],
@@ -274,8 +308,9 @@ class RetrievalService:
         *,
         limit: int,
         per_memory: int,
+        query: str = "",
     ) -> list[RetrievedChunk]:
-        """RRF-fuse both legs, drop near-duplicates, then pick with MMR."""
+        """RRF-fuse both legs, drop near-duplicates, rerank, then pick with MMR."""
         if not semantic and not fulltext:
             return []
         scores = selection.rrf([[c.chunk_id for c in semantic], [c.chunk_id for c in fulltext]])
@@ -288,6 +323,9 @@ class RetrievalService:
             )
         ranked = sorted(by_id.values(), key=lambda c: -scores[c.chunk_id])
         ranked = selection.drop_near_duplicates(ranked, lambda c: c.content)
+        reranked = self._rerank(query, ranked, limit)
+        if reranked is not None:
+            ranked, scores = reranked
         leaders = {c.memory_id for c in ranked[:limit]}
         if len(leaders) == 1 and per_memory < limit:
             # One save holds every top candidate: it is the match. Use more of
