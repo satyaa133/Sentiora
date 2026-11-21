@@ -12,6 +12,9 @@ retrieval and capture work.
 from __future__ import annotations
 
 import logging
+import os
+import queue
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -97,7 +100,11 @@ def record_usage(
     error: BaseException | None = None,
     user_id: UUID | None = None,
 ) -> None:
-    """Insert one ``llm_usage`` row. ``started`` is a ``time.perf_counter()`` value."""
+    """Queue one ``llm_usage`` row. ``started`` is a ``time.perf_counter()`` value.
+
+    The row is written by a background thread, so a slow or unreachable
+    database never delays the answer (or eats its time budget).
+    """
     latency_ms = int((time.perf_counter() - started) * 1000)
     report = report or UsageReport()
     row = LLMUsage(
@@ -112,12 +119,74 @@ def record_usage(
         success=error is None,
         error_code=error_code(error) if error is not None else None,
     )
+    _writer.submit(row)
+
+
+def flush_usage(timeout: float = 5.0) -> bool:
+    """Wait until queued rows are written (tests, scripts). True if all were."""
+    return _writer.flush(timeout)
+
+
+def _write(row: LLMUsage) -> None:
     db = SessionLocal()
     try:
         db.add(row)
         db.commit()
     except Exception:
         db.rollback()
-        logger.warning("Could not record AI usage (%s %s)", provider, purpose, exc_info=True)
+        logger.warning(
+            "Could not record AI usage (%s %s)", row.provider, row.purpose, exc_info=True
+        )
     finally:
         db.close()
+
+
+class _UsageWriter:
+    """One daemon thread per process draining a bounded queue of rows."""
+
+    MAX_QUEUED = 1000
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue[LLMUsage] = queue.Queue(maxsize=self.MAX_QUEUED)
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._pid: int | None = None
+
+    def submit(self, row: LLMUsage) -> None:
+        self._ensure_thread()
+        try:
+            self._queue.put_nowait(row)
+        except queue.Full:
+            logger.warning("AI usage queue full; dropping a row (%s)", row.purpose)
+
+    def flush(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while self._queue.unfinished_tasks:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def _ensure_thread(self) -> None:
+        # Restarted after a fork (RQ's forking worker): threads don't survive it.
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive() and self._pid == os.getpid():
+                return
+            if self._pid != os.getpid():
+                self._queue = queue.Queue(maxsize=self.MAX_QUEUED)
+            self._pid = os.getpid()
+            self._thread = threading.Thread(
+                target=self._run, name="llm-usage-writer", daemon=True
+            )
+            self._thread.start()
+
+    def _run(self) -> None:
+        while True:
+            row = self._queue.get()
+            try:
+                _write(row)
+            finally:
+                self._queue.task_done()
+
+
+_writer = _UsageWriter()

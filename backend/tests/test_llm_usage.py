@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -19,7 +21,7 @@ from app.services import embedding_service, rag_service, usage
 from app.services.llm_pool import LLMBackend, key_pool
 from app.services.rag_service import RagService
 from app.services.retrieval_service import RetrievalService
-from app.services.usage import UsageReport, report_from_openai, usage_for
+from app.services.usage import UsageReport, flush_usage, report_from_openai, usage_for
 
 client = TestClient(app)
 
@@ -38,6 +40,7 @@ def _user(email: str) -> UUID:
 
 
 def _rows(user_id: UUID) -> list[LLMUsage]:
+    assert flush_usage(), "usage rows were not written in time"
     db = SessionLocal()
     try:
         return (
@@ -198,6 +201,39 @@ def test_a_database_failure_never_breaks_the_ai_call(
         lambda self, backend, prompt, system_prompt: "still answered",
     )
     assert rag._complete_raw("prompt", "system") == "still answered"
+    assert flush_usage()
+
+
+def test_a_slow_database_never_delays_failover(
+    monkeypatch: pytest.MonkeyPatch, rag: RagService
+) -> None:
+    """Regression: writing the failed attempt's row used to happen inline; with
+    the database down it took the whole answer budget and the backup provider
+    was never tried."""
+    release = threading.Event()
+    monkeypatch.setattr(usage, "_write", lambda row: release.wait(5))
+    settings = _settings()
+    settings.gemini_api_key = "gm-1"
+    settings.gemini_chat_model = "gemini-2.5-flash"
+    monkeypatch.setattr(rag_service, "get_settings", lambda: settings)
+    rag = RagService(retrieval=None)  # type: ignore[arg-type]
+
+    class _OutOfCreditsError(Exception):
+        status_code = 402
+
+    def call(self: RagService, backend: LLMBackend, prompt: str, system_prompt: str) -> str:
+        if backend.provider == "openrouter":
+            raise _OutOfCreditsError("no credits")
+        return "from the backup"
+
+    monkeypatch.setattr(RagService, "_call_backend", call)
+    started = time.perf_counter()
+    try:
+        assert rag._complete_raw("prompt", "system") == "from the backup"
+        assert time.perf_counter() - started < 1.0
+    finally:
+        release.set()
+        flush_usage()
 
 
 def test_openai_usage_reports_parse_tokens_and_optional_cost() -> None:
