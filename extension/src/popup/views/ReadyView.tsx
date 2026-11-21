@@ -40,7 +40,7 @@ function StatusPill({ status }: { status: Exclude<PageStatus, "checking"> }) {
   return (
     <span
       className={cx(
-        "inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-3 text-sm font-medium",
+        "inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3 text-sm font-medium",
         status === "not_saved"
           ? "border border-line text-muted"
           : "bg-accent-soft text-accent-soft-fg",
@@ -97,7 +97,7 @@ export default function ReadyView({
           </h1>
           {status === "not_saved" ? (
             <p className="mt-2 text-[15px] text-muted">
-              Click &ldquo;Capture page&rdquo; to save this into your Sentiora vault.
+              Click &ldquo;Save now&rdquo; to save this into your Sentiora vault.
             </p>
           ) : null}
         </div>

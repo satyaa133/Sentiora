@@ -5,6 +5,7 @@ Usage (from the repo root):
     node scripts/run-python.mjs -m scripts.reprocess_memories --reclean --dry-run
     node scripts/run-python.mjs -m scripts.reprocess_memories --reclean [--user EMAIL] [--batch 25]
     node scripts/run-python.mjs -m scripts.reprocess_memories --embed [--user EMAIL] [--dry-run]
+    node scripts/run-python.mjs -m scripts.reprocess_memories --retry-failed-embedding [--dry-run]
 
 ``--embed`` embeds every chunk that has no vector, or a vector from a model
 other than the current ``EMBEDDING_MODEL``. It commits after every batch and
@@ -236,6 +237,51 @@ def embed(args: argparse.Namespace) -> int:
     return 0
 
 
+EMBED_FAILURE_PREFIX = "Embedding generation failed"
+
+
+def retry_failed_embedding(args: argparse.Namespace) -> int:
+    """Re-run captures that were marked FAILED only because embedding failed.
+
+    Older builds failed the whole capture when the embedding provider was down
+    or out of quota; the capture job now keeps such memories READY (full-text
+    searchable) and leaves vectors to the backfill. Captures that failed for
+    any other reason (no readable content) are left alone.
+    """
+    from app.workers.jobs.process_capture import process_capture
+
+    with SessionLocal() as db:
+        user_id = _user_id(db, args.user)
+        stmt = select(MemoryItem).where(
+            MemoryItem.status == ItemStatus.failed,
+            MemoryItem.deleted_at.is_(None),
+            MemoryItem.processing_error.startswith(EMBED_FAILURE_PREFIX),
+        )
+        if user_id:
+            stmt = stmt.where(MemoryItem.user_id == user_id)
+        items = list(db.execute(stmt).scalars())
+        logger.info("captures_failed_on_embedding=%d", len(items))
+        if args.dry_run or not items:
+            return 0
+        ids = [str(item.id) for item in items]
+        for item in items:
+            item.status = ItemStatus.pending
+            item.processing_error = None
+        db.commit()
+
+    for item_id in ids:
+        process_capture(item_id)
+
+    with SessionLocal() as db:
+        statuses = db.execute(
+            select(MemoryItem.status, func.count())
+            .where(MemoryItem.id.in_([UUID(i) for i in ids]))
+            .group_by(MemoryItem.status)
+        ).all()
+    logger.info("retried=%d result=%s", len(ids), {str(s): n for s, n in statuses})
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -250,6 +296,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="embed chunks missing a current-model vector",
     )
+    parser.add_argument(
+        "--retry-failed-embedding",
+        action="store_true",
+        help="re-run captures that FAILED only because embedding failed",
+    )
     parser.add_argument("--user", help="limit to one user (email or id)")
     parser.add_argument("--batch", type=int, default=25)
     parser.add_argument(
@@ -260,6 +311,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    if args.retry_failed_embedding:
+        status = retry_failed_embedding(args)
+        if status or not args.embed:
+            return status
     if args.reclean:
         status = reclean(args)
         if status or not args.embed:

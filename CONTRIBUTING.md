@@ -11,8 +11,8 @@ See `README.md` for local setup and running the app.
 
 ## Rules
 
-- Read `docs/PROMPT_GUIDE.md` before writing any code
-- Never invent API endpoints — all contracts are in `docs/05_API_Specification_v1.0.pdf`
-- Never change DB schema without an Alembic migration
+- Read `docs/REBUILD_PLAN.md` and `docs/PROMPT_GUIDE.md` before writing any code
+- Never invent API endpoints: the contract is `docs/API.md` and `docs/api/openapi.json`; new endpoints come only from `docs/REBUILD_PLAN.md` section 8. Run `npm run docs:api` after any API change
+- Never change DB schema without an Alembic migration and an update to `docs/DATABASE.md`
 - No `console.log` or debug `print()` left in committed code
 - Update `docs/TASKS.md` when a phase milestone is completed

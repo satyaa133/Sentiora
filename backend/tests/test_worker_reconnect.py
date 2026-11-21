@@ -6,6 +6,10 @@ import redis
 from app.workers.worker import run_until_stopped
 
 
+def _no_scheduler(worker: object) -> object:
+    return lambda: None
+
+
 def _worker(*, stop_requested: bool, work_error: Exception | None = None) -> MagicMock:
     worker = MagicMock()
     worker._shutdown_requested_date = datetime.now(UTC) if stop_requested else None
@@ -23,7 +27,10 @@ def test_worker_reconnects_after_redis_timeout_instead_of_exiting():
     sleeps: list[float] = []
 
     run_until_stopped(
-        build_worker=lambda: next(workers), recover=recover, sleep=sleeps.append
+        build_worker=lambda: next(workers),
+        recover=recover,
+        sleep=sleeps.append,
+        start_scheduler=_no_scheduler,
     )
 
     assert lost.work.call_count == 1
@@ -42,7 +49,10 @@ def test_worker_retries_while_redis_is_down():
     sleeps: list[float] = []
 
     run_until_stopped(
-        build_worker=lambda: next(attempts), recover=lambda: None, sleep=sleeps.append
+        build_worker=lambda: next(attempts),
+        recover=lambda: None,
+        sleep=sleeps.append,
+        start_scheduler=_no_scheduler,
     )
 
     assert len(sleeps) == 2
@@ -54,7 +64,10 @@ def test_worker_exits_on_requested_shutdown():
     sleeps: list[float] = []
 
     run_until_stopped(
-        build_worker=lambda: stopped, recover=lambda: None, sleep=sleeps.append
+        build_worker=lambda: stopped,
+        recover=lambda: None,
+        sleep=sleeps.append,
+        start_scheduler=_no_scheduler,
     )
 
     assert sleeps == []

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import tzinfo
@@ -23,6 +24,7 @@ from openai import OpenAI
 from openai.types.shared_params import ResponseFormatJSONSchema
 
 from app.core.config import get_settings, openrouter_fallback_list
+from app.core.metrics import ASK_STAGE_SECONDS, observe_stage
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.repositories.memory_repository import MemoryFilters, MemoryRepository
 from app.schemas.ask import AnswerMode, AskCitation, AskResponse, AskTurn
@@ -57,6 +59,12 @@ from app.services.rag_sanitize import (
     strip_instruction_like_lines,
 )
 from app.services.retrieval.query_rewriter import rewrite_query
+from app.services.usage import (
+    UsageReport,
+    record_usage,
+    report_from_gemini,
+    report_from_openai,
+)
 from app.services.retrieval_service import (
     RetrievalService,
     RetrievedChunk,
@@ -93,10 +101,14 @@ class LLMNotConfiguredError(RuntimeError):
     """Raised when the LLM API key is not set and no retrieved memory is available."""
 
 
-# Per-key limit for one answer. Answers take a few seconds; a key that hangs
-# this long is treated as down so the next key (or the memory answer) is used.
-CHAT_TIMEOUT_SECONDS = 25
-META_TIMEOUT_SECONDS = 15
+# Defaults when settings lack the values (tests pass partial settings objects).
+DEFAULT_CHAT_TIMEOUT_SECONDS = 10.0
+DEFAULT_META_TIMEOUT_SECONDS = 8.0
+# A key is not tried with less time than this left in the answer's budget.
+MIN_ATTEMPT_SECONDS = 1.0
+# Gemini rejects a deadline under 10 s (400 INVALID_ARGUMENT); its SDK sends the
+# timeout as that deadline, so a Gemini attempt always gets at least this much.
+GEMINI_MIN_DEADLINE_SECONDS = 10.0
 
 
 class LLMProviderError(RuntimeError):
@@ -415,9 +427,46 @@ def _format_listing(
 
 
 class RagService:
+    # Time limit for the key being tried now (see _attempts).
+    _attempt_timeout: float = DEFAULT_CHAT_TIMEOUT_SECONDS
+    # Usage of the latest provider call, set by the call methods (llm_usage).
+    _last_usage: UsageReport | None = None
+    # llm_usage attribution: the user asking, and what the next call is for.
+    _usage_user_id: UUID | None = None
+    _usage_purpose: str = "answer"
+
     def __init__(self, retrieval: RetrievalService) -> None:
         self.retrieval = retrieval
         self.settings = get_settings()
+        self._attempt_timeout = self._chat_timeout()
+
+    def _chat_timeout(self) -> float:
+        value = getattr(self.settings, "llm_chat_timeout_seconds", None)
+        return float(value) if value else DEFAULT_CHAT_TIMEOUT_SECONDS
+
+    def _meta_timeout(self) -> float:
+        value = getattr(self.settings, "llm_meta_timeout_seconds", None)
+        return float(value) if value else DEFAULT_META_TIMEOUT_SECONDS
+
+    def _attempts(self, backends: list[LLMBackend]) -> Iterator[LLMBackend]:
+        """Backends to try within one budget of ``llm_chat_timeout_seconds``.
+
+        Each attempt gets the time that is left, so a hung provider costs the
+        budget once instead of once per key. A key that fails fast (bad key,
+        connection refused) leaves time for the next one.
+        """
+        deadline = time.monotonic() + self._chat_timeout()
+        for index, backend in enumerate(
+            key_pool.order(backends)[: max_attempts(self.settings)]
+        ):
+            remaining = deadline - time.monotonic()
+            if index > 0 and remaining < MIN_ATTEMPT_SECONDS:
+                logger.warning(
+                    "Answer time budget used up; not trying backend %s", backend.name
+                )
+                return
+            self._attempt_timeout = max(remaining, MIN_ATTEMPT_SECONDS)
+            yield backend
 
     def _llm_configured(self) -> bool:
         return bool(build_backends(self.settings))
@@ -459,6 +508,7 @@ class RagService:
         tz: str | None = None,
     ) -> PreparedAnswer:
         """Intent, query rewrite and retrieval. The only step that uses the database."""
+        self._usage_user_id = user_id
         zone = resolve_timezone(tz)
         intent = classify(question, zone)
         if memory_id or source_type:
@@ -474,9 +524,17 @@ class RagService:
             effective_top_k = max(top_k or configured, min(8, configured))
 
         llm = self._llm_configured()
-        query = intent.mention_topic or rewrite_query(
-            question, history, self._complete_raw if llm else None
-        )
+        if intent.mention_topic:
+            query = intent.mention_topic
+        else:
+            self._usage_purpose = "rewrite"
+            try:
+                with observe_stage("rewrite"):
+                    query = rewrite_query(
+                        question, history, self._complete_raw if llm else None
+                    )
+            finally:
+                self._usage_purpose = "answer"
         # Date filters only apply to questions about the user's own saves.
         window = intent.date_window if intent.kind != "open" else None
         chunks = self.retrieval.retrieve_relevant_memories(
@@ -774,9 +832,10 @@ class RagService:
         history: Sequence[AskTurn],
     ) -> str:
         try:
-            answer = self._complete(
-                question, chunks, system_prompt=system_prompt, history=history
-            )
+            with observe_stage("answer_total"):
+                answer = self._complete(
+                    question, chunks, system_prompt=system_prompt, history=history
+                )
         except LLMProviderError:
             raise
         except Exception as exc:
@@ -837,17 +896,39 @@ class RagService:
         last_error: Exception | None = None
         # Rotate across keys; a key that fails is skipped for a while and the
         # next one answers. Only when every key fails does the error surface.
-        for backend in key_pool.order(backends)[: max_attempts(self.settings)]:
+        for backend in self._attempts(backends):
+            self._last_usage = None
+            started = time.perf_counter()
             try:
                 answer = self._call_backend(backend, prompt, system_prompt)
             except Exception as exc:
+                self._record_call(backend, started, exc)
                 self._mark_failed(backend, exc)
                 last_error = exc
                 continue
+            self._record_call(backend, started)
             key_pool.mark_ok(backend)
             return answer
         assert last_error is not None
         raise last_error
+
+    def _record_call(
+        self,
+        backend: LLMBackend,
+        started: float,
+        error: BaseException | None = None,
+        *,
+        purpose: str | None = None,
+    ) -> None:
+        record_usage(
+            purpose=purpose or self._usage_purpose,
+            provider=backend.provider,
+            model=backend.model,
+            started=started,
+            report=self._last_usage,
+            error=error,
+            user_id=self._usage_user_id,
+        )
 
     def _stream_answer(self, prepared: PreparedAnswer) -> Iterator[str]:
         """Stream answer text, failing over to the next key only before the first token."""
@@ -862,14 +943,22 @@ class RagService:
         )
         system_prompt = self._system_prompt(prepared)
         last_error: Exception | None = None
-        for backend in key_pool.order(backends)[: max_attempts(self.settings)]:
+        began = time.perf_counter()
+        for backend in self._attempts(backends):
             started = False
+            self._last_usage = None
+            call_started = time.perf_counter()
             try:
                 for piece in self._stream_backend(backend, prompt, system_prompt):
                     if piece:
+                        if not started:
+                            ASK_STAGE_SECONDS.labels(stage="answer").observe(
+                                time.perf_counter() - began
+                            )
                         started = True
                         yield piece
             except Exception as exc:
+                self._record_call(backend, call_started, exc)
                 if started:
                     logger.exception("Answer stream broke after the first token")
                     raise LLMProviderError(
@@ -883,7 +972,11 @@ class RagService:
                     "The language model returned an empty response."
                 )
                 continue
+            self._record_call(backend, call_started)
             key_pool.mark_ok(backend)
+            ASK_STAGE_SECONDS.labels(stage="answer_total").observe(
+                time.perf_counter() - began
+            )
             return
         status = _status_of(last_error) if isinstance(last_error, Exception) else None
         if isinstance(last_error, LLMProviderError):
@@ -901,9 +994,12 @@ class RagService:
         ][:2]
         prompt = prompts.meta_prompt(prepared.question, answer, prepared.chunks)
         for backend in backends:
+            self._last_usage = None
+            started = time.perf_counter()
             try:
                 raw = self._call_structured(backend, prompt, prompts.META_SYSTEM_PROMPT)
             except Exception as exc:
+                self._record_call(backend, started, exc, purpose="answer")
                 logger.warning(
                     "answer metadata call failed backend=%s status=%s",
                     backend.name,
@@ -912,6 +1008,7 @@ class RagService:
                 if _status_of(exc) in LLMProviderError.UNAVAILABLE_STATUSES:
                     self._mark_failed(backend, exc)
                 continue
+            self._record_call(backend, started, purpose="answer")
             meta = parse_meta(raw)
             if meta is not None:
                 return meta
@@ -934,7 +1031,7 @@ class RagService:
             # One piece: the answer still reaches the client through the same events.
             yield self._complete_gemini(prompt, system_prompt, backend)
             return
-        client, extra = self._openai_client(backend, CHAT_TIMEOUT_SECONDS)
+        client, extra = self._openai_client(backend, self._attempt_timeout)
         stream = client.chat.completions.create(
             model=backend.model,
             temperature=0.2,
@@ -944,10 +1041,14 @@ class RagService:
                 {"role": "user", "content": prompt},
             ],
             stream=True,
+            stream_options={"include_usage": True},
             extra_headers=extra.headers,
             extra_body=extra.body,
         )
         for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                self._last_usage = report_from_openai(usage)
             choices = getattr(chunk, "choices", None) or []
             delta = getattr(choices[0], "delta", None) if choices else None
             text = getattr(delta, "content", None)
@@ -958,7 +1059,7 @@ class RagService:
         self, backend: LLMBackend, prompt: str, system_prompt: str
     ) -> str:
         client, extra = self._openai_client(
-            backend, META_TIMEOUT_SECONDS, structured=True
+            backend, self._meta_timeout(), structured=True
         )
         completion = client.chat.completions.create(
             model=backend.model,
@@ -972,6 +1073,7 @@ class RagService:
             extra_headers=extra.headers,
             extra_body=extra.body,
         )
+        self._last_usage = report_from_openai(getattr(completion, "usage", None))
         return completion.choices[0].message.content or ""
 
     def _openai_client(
@@ -992,6 +1094,8 @@ class RagService:
         if structured:
             # Only route to providers that actually enforce response_format.
             body["provider"] = {"require_parameters": True}
+        # OpenRouter usage accounting: the response reports the call's cost.
+        body["usage"] = {"include": True}
         extra = _Extra(headers=OPENROUTER_HEADERS, body=body or None)
         client = OpenAI(
             api_key=backend.api_key,
@@ -1007,7 +1111,7 @@ class RagService:
     def _complete_openai(
         self, prompt: str, system_prompt: str, backend: LLMBackend
     ) -> str:
-        client, extra = self._openai_client(backend, CHAT_TIMEOUT_SECONDS)
+        client, extra = self._openai_client(backend, self._attempt_timeout)
         completion = client.chat.completions.create(
             model=backend.model,
             temperature=0.2,
@@ -1019,6 +1123,7 @@ class RagService:
             extra_headers=extra.headers,
             extra_body=extra.body,
         )
+        self._last_usage = report_from_openai(getattr(completion, "usage", None))
         return completion.choices[0].message.content or ""
 
     def _complete_openrouter(
@@ -1034,7 +1139,9 @@ class RagService:
 
         client = genai.Client(
             api_key=backend.api_key,
-            http_options=types.HttpOptions(timeout=CHAT_TIMEOUT_SECONDS * 1000),  # ms
+            http_options=types.HttpOptions(
+                timeout=int(max(self._attempt_timeout, GEMINI_MIN_DEADLINE_SECONDS) * 1000)
+            ),  # ms
         )
 
         def generate(thinking: types.ThinkingConfig | None) -> object:
@@ -1051,16 +1158,42 @@ class RagService:
 
         # Thinking tokens count against max_output_tokens on Gemini 2.5+/3.x and
         # cut answers off before the cited memory part; grounded answers don't
-        # need them, and skipping them roughly halves latency.
+        # need them, and keeping them low roughly halves latency.
         try:
-            response = generate(types.ThinkingConfig(thinking_budget=0))
+            response = generate(gemini_thinking_config(backend.model))
         except Exception as exc:
-            # Some models (e.g. 2.5 Pro) refuse to switch thinking off; any other
-            # 400 (a bad key, a bad request) would only fail again.
-            if getattr(exc, "code", None) != 400 or "thinking" not in str(exc).lower():
+            # Some models refuse a thinking setting (2.5 Pro cannot switch it off,
+            # 3.x lite rejects a zero budget); any other 400 (a bad key, a bad
+            # request) would only fail again.
+            if getattr(exc, "code", None) != 400 or not _rejects_thinking(exc):
                 raise
             response = generate(None)
+        self._last_usage = report_from_gemini(response)
         return _gemini_response_text(response)
+
+
+_GEMINI_MAJOR_RE = re.compile(r"gemini-(\d+)")
+
+
+def gemini_thinking_config(model: str) -> Any:
+    """Least thinking the model accepts.
+
+    Gemini 3.x (and the ``-latest`` aliases, which point at 3.x) take
+    ``thinking_level``; a zero ``thinking_budget`` makes some of them hang or
+    reject the request. ``low`` is the lowest level every 3.x model accepts.
+    Gemini 2.x switches thinking off with ``thinking_budget=0``.
+    """
+    from google.genai import types
+
+    match = _GEMINI_MAJOR_RE.search(model)
+    if (match and int(match.group(1)) >= 3) or model.endswith("-latest"):
+        return types.ThinkingConfig(thinking_level=types.ThinkingLevel.LOW)
+    return types.ThinkingConfig(thinking_budget=0)
+
+
+def _rejects_thinking(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return "thinking" in text or "invalid argument" in text
 
 
 def _gemini_response_text(response: object) -> str:

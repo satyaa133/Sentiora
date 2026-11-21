@@ -1,3 +1,5 @@
+from app.models.answer_feedback import AnswerFeedback
+from app.models.llm_usage import LLMUsage
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import MemoryItem
 from app.models.session import RefreshToken, Session
@@ -10,4 +12,6 @@ __all__ = [
     "RefreshToken",
     "MemoryItem",
     "MemoryChunk",
+    "LLMUsage",
+    "AnswerFeedback",
 ]

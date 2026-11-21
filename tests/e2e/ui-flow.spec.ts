@@ -122,13 +122,23 @@ test("UI: two tabs opened at once share one token refresh and both stay signed i
     await expect(tab.getByRole("button", { name: "Add memory" }).first()).toBeVisible();
     await expect(tab).toHaveURL(/\/dashboard/);
   }
-  // One rotation for both tabs: a second refresh with the same token would be
-  // treated as reuse and revoke every session.
-  expect(refreshStatuses).toEqual([200]);
+  // The tabs never spend the same refresh token twice (reuse would revoke every
+  // session): when they overlap they share one rotation, and a tab whose
+  // refresh starts after the other finished rotates the new token. Which of the
+  // two happens depends on timing, so check the invariant, not the count.
+  expect(refreshStatuses.length).toBeGreaterThanOrEqual(1);
+  expect(refreshStatuses.length).toBeLessThanOrEqual(2);
+  expect(refreshStatuses.every((status) => status === 200)).toBe(true);
 
   // The session is still valid afterwards: another fresh tab can refresh normally.
+  const before = refreshStatuses.length;
   const tabC = await context.newPage();
   await tabC.goto("/dashboard");
   await expect(tabC.getByRole("button", { name: "Add memory" }).first()).toBeVisible();
-  expect(refreshStatuses).toEqual([200, 200]);
+  expect(refreshStatuses.slice(before)).toEqual([200]);
+  // Both earlier tabs are still signed in after tab C's rotation.
+  for (const tab of [tabA, tabB]) {
+    await tab.reload();
+    await expect(tab.getByRole("button", { name: "Add memory" }).first()).toBeVisible();
+  }
 });

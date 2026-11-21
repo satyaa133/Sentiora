@@ -18,16 +18,24 @@ from app.services.content_normalizer import (
     extract_domain,
     normalize_content,
 )
-from app.services.embedding_service import get_embedding_adapter
+from app.services.embedding_service import current_embedding_model, get_embedding_adapter
 from app.services.ingest.transcript_normalizer import (
     clean_transcript_nodes,
     clean_transcript_text,
 )
+from app.services.usage import usage_for
+from app.workers.queue import create_queues
 
 logger = logging.getLogger(__name__)
 
 MIN_SEARCHABLE_WORDS = 8
 STALE_AFTER = timedelta(minutes=2)
+# When embedding fails at capture, it is retried after each of these delays.
+EMBEDDING_RETRY_DELAYS = (
+    timedelta(minutes=1),
+    timedelta(minutes=5),
+    timedelta(minutes=30),
+)
 _STUB_MARKERS = (
     "captured youtube content:",
     "captured pdf content:",
@@ -291,7 +299,8 @@ def process_capture(memory_item_id_str: str) -> None:
         chunks = build_chunk_rows(item, drafts)
         ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
         try:
-            adapter = embed_chunks(chunks, memory_item_id_str)
+            with usage_for(item.user_id):
+                adapter = embed_chunks(chunks, memory_item_id_str)
         except CaptureProcessingError as embed_exc:
             # The memory is still searchable by full text; the embedding
             # backfill (scripts.reprocess_memories --embed) fills it in later.
@@ -302,10 +311,15 @@ def process_capture(memory_item_id_str: str) -> None:
             logger.warning(
                 "memory_id=%s stage=embed pending reason=%s", memory_item_id_str, embed_exc
             )
+            retry_embedding_later = True
+        else:
+            retry_embedding_later = False
 
         item.status = ItemStatus.ready
         item.processing_error = None
         db.commit()
+        if retry_embedding_later:
+            schedule_embedding_retry(memory_item_id_str, attempt=1)
         logger.info(
             "memory_id=%s stage=ready words=%d chunks=%d embedded=%s",
             memory_item_id_str,
@@ -355,3 +369,89 @@ def recover_stale_captures(limit: int = 25) -> int:
         logger.warning("memory_id=%s stage=stale_recover", item_id)
         process_capture(item_id)
     return len(ids)
+
+
+def schedule_embedding_retry(memory_item_id_str: str, attempt: int) -> bool:
+    """Queue embedding retry number ``attempt`` (1-based) after its delay.
+
+    Returns False when every retry is used up or the queue can't be reached;
+    the memory stays searchable by full text and the backfill
+    (scripts.reprocess_memories --embed) can still fill it in.
+    """
+    if attempt > len(EMBEDDING_RETRY_DELAYS):
+        logger.warning(
+            "memory_id=%s stage=embed_retry gave_up attempts=%d",
+            memory_item_id_str,
+            len(EMBEDDING_RETRY_DELAYS),
+        )
+        return False
+    delay = EMBEDDING_RETRY_DELAYS[attempt - 1]
+    try:
+        queue = create_queues()[0]
+        queue.enqueue_in(delay, retry_embedding, memory_item_id_str, attempt)
+    except Exception:
+        logger.exception(
+            "memory_id=%s stage=embed_retry schedule_failed attempt=%d",
+            memory_item_id_str,
+            attempt,
+        )
+        return False
+    logger.info(
+        "memory_id=%s stage=embed_retry scheduled attempt=%d in=%ds",
+        memory_item_id_str,
+        attempt,
+        int(delay.total_seconds()),
+    )
+    return True
+
+
+def retry_embedding(memory_item_id_str: str, attempt: int) -> None:
+    """Embed a READY memory's chunks that have no vector for the active model."""
+    db = SessionLocal()
+    try:
+        item = db.get(MemoryItem, UUID(memory_item_id_str))
+        if item is None or item.deleted_at is not None or item.status != ItemStatus.ready:
+            return
+        model_id = current_embedding_model()
+        if model_id is None:
+            return
+        chunks = (
+            db.query(MemoryChunk)
+            .filter(
+                MemoryChunk.memory_id == item.id,
+                MemoryChunk.user_id == item.user_id,
+                or_(
+                    MemoryChunk.embedding.is_(None),
+                    MemoryChunk.embedding_model.is_distinct_from(model_id),
+                ),
+            )
+            .order_by(MemoryChunk.chunk_index)
+            .all()
+        )
+        if not chunks:
+            return
+        try:
+            with usage_for(item.user_id):
+                adapter = embed_chunks(chunks, memory_item_id_str)
+        except CaptureProcessingError as exc:
+            db.rollback()
+            logger.warning(
+                "memory_id=%s stage=embed_retry failed attempt=%d reason=%s",
+                memory_item_id_str,
+                attempt,
+                exc,
+            )
+            schedule_embedding_retry(memory_item_id_str, attempt + 1)
+            return
+        if adapter is None:
+            db.rollback()
+            return
+        db.commit()
+        logger.info(
+            "memory_id=%s stage=embed_retry done attempt=%d chunks=%d",
+            memory_item_id_str,
+            attempt,
+            len(chunks),
+        )
+    finally:
+        db.close()

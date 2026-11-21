@@ -27,15 +27,20 @@ export const TRUSTED_EMAIL_DOMAINS = new Set([
   "aol.com",
   "gmx.com",
   "mail.com",
-  // Local development / testing domains
-  "example.com",
-  "example.dev",
 ]);
+
+/** Reserved example domains: accepted only when a test build opts in. */
+export const TEST_EMAIL_DOMAINS = new Set(["example.com", "example.dev"]);
+
+export interface TrustedEmailOptions {
+  /** Accept TEST_EMAIL_DOMAINS (test and e2e builds only). */
+  allowTestDomains?: boolean;
+}
 
 /**
  * Validates whether an email is from a popular trusted provider or educational institution.
  */
-export function isTrustedEmail(email: string): boolean {
+export function isTrustedEmail(email: string, options: TrustedEmailOptions = {}): boolean {
   if (!email || typeof email !== "string") return false;
   const parts = email.trim().toLowerCase().split("@");
   if (parts.length !== 2) return false;
@@ -43,6 +48,9 @@ export function isTrustedEmail(email: string): boolean {
   if (!domain) return false;
 
   if (TRUSTED_EMAIL_DOMAINS.has(domain)) {
+    return true;
+  }
+  if (options.allowTestDomains && TEST_EMAIL_DOMAINS.has(domain)) {
     return true;
   }
 

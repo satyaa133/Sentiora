@@ -8,16 +8,25 @@ Sentiora is a product repository for building a memory-oriented application with
 
 AI agents MUST read the documentation in the docs folder before implementing anything.
 
-- 01_PRD_v2.1_FINAL.pdf
-- 02_SRS_v1.0.pdf
-- 03_Backend_Technical_Specification_v1.2.pdf
-- 04_Technical_Specification_v1.2.pdf
-- 05_API_Specification_v1.0.pdf
-- 06_Database_Schema_Design_v1.2.pdf
-- 07_Development_Implementation_Plan.pdf
-- 08_UIUX_Specification_v1.0_FINAL.pdf
+- REBUILD_PLAN.md (current work; overrides the others where they differ)
 - TASKS.md
+- API.md and api/openapi.json (API contract)
+- DATABASE.md (schema contract)
+- RAG_v2_ADDENDUM.md (current Ask and retrieval design)
+- DESIGN.md (UI)
 - PROMPT_GUIDE.md
+- 01_PRD_v2.1_FINAL.pdf (product vision only; scope superseded)
+
+Documents in `docs/archive/` are superseded. Don't follow them when writing code.
+
+## Rebuild v3 (current work)
+
+The current work is the rebuild described in `docs/REBUILD_PLAN.md`. Before any rebuild task:
+
+- Read `docs/REBUILD_PLAN.md` and the "Rebuild v3" section of `docs/TASKS.md`.
+- Work on the current stage only (S0–S10, in order); stages replace the phase sequence below for rebuild work, and the rest of Phase 9 is stage S10.
+- For anything the plan covers, it overrides `docs/RAG_v2_ADDENDUM.md` and the PRD. Its section 12 lists which documents are current.
+- New endpoints, fields, tables, columns and settings are only those in the plan's sections 7–9. Propose a plan change instead of inventing one.
 
 ## Development Rules
 
@@ -26,10 +35,10 @@ AI agents must:
 - Never skip implementation phases.
 - Never mix multiple phases.
 - Complete one phase before starting another.
-- Follow the Development & Implementation Plan exactly.
+- Follow the rebuild plan (`docs/REBUILD_PLAN.md`) exactly; phases 0–8 of the original implementation plan are complete.
 - Preserve architectural consistency.
-- Never invent APIs not defined in the specifications.
-- Never invent database schemas.
+- Never invent APIs not defined in `docs/API.md` or the rebuild plan's section 8.
+- Never invent database schemas: the schema is `docs/DATABASE.md` plus the rebuild plan's section 7.
 - Never ignore security requirements.
 - Never remove existing documentation.
 - Keep commits focused and atomic.
@@ -68,7 +77,7 @@ AI agents must:
 
 ## Phase Workflow
 
-Implementation must always follow:
+Original implementation sequence (phases 0–8 complete; the rest of Phase 9 is rebuild stage S10, after S0–S9):
 
 Repository Preparation
 
@@ -110,6 +119,6 @@ Phase 8
 
 ↓
 
-Phase 9
+Phase 9 (continues as rebuild stage S10)
 
-No exceptions.
+Rebuild stages run S0 → S10 in order, one at a time. No exceptions.

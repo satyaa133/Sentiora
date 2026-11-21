@@ -19,10 +19,12 @@ from sqlalchemy import Select, case, func, literal, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
+from app.core.metrics import observe_stage
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
 from app.services.embedding_service import get_embedding_adapter
 from app.services.retrieval import selection
+from app.services.usage import usage_for
 
 _TSQUERY_SAFE = re.compile(r"[^a-z0-9]")
 
@@ -209,6 +211,22 @@ class RetrievalService:
         Returns [] when nothing clears the relevance bar (the question is not
         covered by the user's memory).
         """
+        # Embedding calls made for this search count against this user.
+        with usage_for(user_id):
+            return self._retrieve(
+                user_id, query, top_k, source_type, memory_id, date_from, date_to
+            )
+
+    def _retrieve(
+        self,
+        user_id: UUID,
+        query: str,
+        top_k: int | None,
+        source_type: SourceType | None,
+        memory_id: UUID | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> list[RetrievedChunk]:
         scope = _Scope(source_type, memory_id, date_from, date_to)
         self._vector_ready = False
         document = needs_document_context(query)
@@ -261,6 +279,13 @@ class RetrievalService:
             )
         ranked = sorted(by_id.values(), key=lambda c: -scores[c.chunk_id])
         ranked = selection.drop_near_duplicates(ranked, lambda c: c.content)
+        leaders = {c.memory_id for c in ranked[:limit]}
+        if len(leaders) == 1 and per_memory < limit:
+            # One save holds every top candidate: it is the match. Use more of
+            # it, and drop weak stragglers from other saves instead of padding
+            # the answer with them.
+            ranked = [c for c in ranked if c.memory_id in leaders]
+            per_memory = max(per_memory, int(self._setting("rag_single_memory_chunks", 4)))
         top = max(scores.values())
         shingle_cache: dict[UUID, frozenset[str]] = {}
 
@@ -270,6 +295,12 @@ class RetrievalService:
             return shingle_cache[chunk.chunk_id]
 
         def similarity(a: RetrievedChunk, b: RetrievedChunk) -> float:
+            # Sections of one page share its topic, so their vectors are close
+            # even when their text says different things; judging them by
+            # vector made MMR drop the section that held the answer. Within a
+            # memory, redundancy is text overlap; across memories, vectors.
+            if a.memory_id == b.memory_id:
+                return selection.jaccard(shingles(a), shingles(b))
             cos = selection.cosine(a.vector, b.vector)
             return cos if cos is not None else selection.jaccard(shingles(a), shingles(b))
 
@@ -369,7 +400,8 @@ class RetrievalService:
             return []
 
         try:
-            vectors = adapter.embed_texts([query])
+            with observe_stage("embed"):
+                vectors = adapter.embed_texts([query])
         except Exception:
             return []
         if not vectors:
@@ -391,12 +423,18 @@ class RetrievalService:
                 .order_by(distance)
                 .limit(top_k)
             )
-            rows = cast(list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all())
+            with observe_stage("vector_search"):
+                rows = cast(
+                    list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all()
+                )
         except Exception:
             logger.exception("Semantic retrieval failed; continuing with lexical search")
             return []
         # Below this cosine similarity a vector neighbour is not relevant.
         max_distance = 1.0 - float(self._setting("rag_min_similarity", 0.25))
+        # Iterative HNSW scans (relaxed_order, see app/core/db.py) may return
+        # rows slightly out of order; rank by the exact distance.
+        rows.sort(key=lambda row: float("inf") if row[2] is None else float(row[2]))
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
             if dist is None or float(dist) > max_distance:
@@ -442,9 +480,10 @@ class RetrievalService:
             .limit(top_k)
         )
         try:
-            rows = cast(
-                list[tuple[MemoryChunk, MemoryItem, float, int]], self.db.execute(stmt).all()
-            )
+            with observe_stage("fulltext_search"):
+                rows = cast(
+                    list[tuple[MemoryChunk, MemoryItem, float, int]], self.db.execute(stmt).all()
+                )
         except Exception:
             logger.exception("Full-text retrieval failed")
             self.db.rollback()

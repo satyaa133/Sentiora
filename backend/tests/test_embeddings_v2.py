@@ -49,7 +49,9 @@ class _FakeOpenAI:
         self.api_key = api_key
         self.embeddings = SimpleNamespace(create=self._create)
 
-    def _create(self, *, model: str, input: list[str]) -> SimpleNamespace:  # noqa: A002
+    def _create(
+        self, *, model: str, input: list[str], **kwargs: object  # noqa: A002
+    ) -> SimpleNamespace:
         _FakeOpenAI.calls.append((self.api_key, len(input)))
         if self.api_key in _FakeOpenAI.failing:
             raise _status_error(_FakeOpenAI.failing[self.api_key])
@@ -239,3 +241,29 @@ def test_backfill_stops_on_provider_failure(monkeypatch: pytest.MonkeyPatch) -> 
     )
     assert reprocess(["--embed", "--user", "embed_backfill_fail@example.com"]) == 1
     assert all(c.embedding is None for c in _chunks(memory_id))
+
+
+def test_retry_failed_embedding_requeues_only_embedding_failures() -> None:
+    from app.models.memory_item import ItemStatus, MemoryItem
+
+    headers, _ = _register("embed_retry@example.com")
+    embed_failed = _capture(headers, "embed-failed")
+    no_content = _capture(headers, "no-content")
+    with SessionLocal() as db:
+        for memory_id, reason in (
+            (embed_failed, "Embedding generation failed: quota exceeded"),
+            (no_content, "Extracted text is too short to index (4 words)."),
+        ):
+            item = db.get(MemoryItem, memory_id)
+            assert item is not None
+            item.status = ItemStatus.failed
+            item.processing_error = reason
+        db.commit()
+
+    assert reprocess(["--retry-failed-embedding", "--user", "embed_retry@example.com"]) == 0
+
+    with SessionLocal() as db:
+        retried = db.get(MemoryItem, embed_failed)
+        untouched = db.get(MemoryItem, no_content)
+        assert retried is not None and retried.status == ItemStatus.ready
+        assert untouched is not None and untouched.status == ItemStatus.failed

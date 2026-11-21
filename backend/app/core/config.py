@@ -4,7 +4,7 @@ import re
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from dotenv import dotenv_values
 from pydantic import Field, ValidationError, field_validator, model_validator
@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     app_name: str = "Sentiora Backend"
     app_environment: str = "development"
     app_version: str = "0.1.0"
+    # "json" (one object per line) or "text". Unset: text in development,
+    # json everywhere else.
+    log_format: Literal["json", "text"] | None = None
+    # Error tracking (Sentry) for the API and worker; off when unset.
+    sentry_dsn: str | None = None
+    # Share of requests traced for performance (0 = errors only).
+    sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Serve Prometheus metrics at /metrics (outside /api/, not proxied by nginx).
+    metrics_enabled: bool = True
+    # Accept the reserved example.com / example.dev sign-up domains. On only
+    # in the test suite and the e2e stack; never in a real deployment.
+    allow_test_email_domains: bool = False
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://127.0.0.1:6379/0"
@@ -85,6 +97,14 @@ class Settings(BaseSettings):
     llm_cooldown_max_seconds: int = Field(default=3600, ge=1)
     # At most this many backends (keys) are tried for one model call.
     llm_max_attempts: int = Field(default=4, ge=1, le=20)
+    # Most an answer waits for its first token, across every key it tries.
+    # One-piece responses (Gemini, POST /chat, the follow-up rewrite) must finish
+    # within it; Gemini's SDK also sends it as the server-side deadline.
+    llm_chat_timeout_seconds: float = Field(default=10, gt=0, le=120)
+    # Per-key limit for the structured answer-metadata call.
+    llm_meta_timeout_seconds: float = Field(default=8, gt=0, le=120)
+    # Per-request limit for embedding calls (capture and question embeddings).
+    embedding_timeout_seconds: float = Field(default=10, gt=0, le=120)
     # RAG retrieval tuning
     rag_top_k: int = 15
     # Chunks handed to the model per question (summary questions take up to 8).
@@ -99,6 +119,8 @@ class Settings(BaseSettings):
     # At most this many chunks from one memory, unless the question is scoped
     # to that memory or asks for a summary.
     rag_max_chunks_per_memory: int = 2
+    # When only one memory matches, up to this many of its chunks are used.
+    rag_single_memory_chunks: int = 4
     # "Which sources mention X" answers: a meaning-only hit must be at least
     # this close (cosine distance) to be listed as mentioning X.
     rag_strong_distance: float = 0.4
@@ -168,6 +190,12 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError("; ".join(problems))
         return self
+
+    @property
+    def effective_log_format(self) -> str:
+        if self.log_format:
+            return self.log_format
+        return "text" if self.app_environment == "development" else "json"
 
     @model_validator(mode="after")
     def validate_non_development_secrets(self) -> Self:

@@ -36,6 +36,9 @@ const JUNK_SELECTOR = [
   "#comments",
   ".comments",
   ".comment-section",
+  // Wiki "[edit]" section links (MediaWiki and its copies)
+  ".mw-editsection",
+  "[class*='editsection']",
 ].join(",");
 
 const SEMANTIC_TEXT_SELECTOR = "h1,h2,h3,h4,h5,h6,p,li,pre,blockquote,figcaption,td,th";
