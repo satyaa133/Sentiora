@@ -25,8 +25,11 @@ dependencies = [
   "pyjwt>=2.15,<3.0",
   "passlib[bcrypt]>=1.7.4",
   "bcrypt>=4.0,<5.0",
-  # Pulled in by pydantic[email]; floor clears CVE-2026-114605 (pip-audit).
-  "dnspython>=2.9.0",
+  # Pulled in by pydantic[email]; floor clears CVE-2026-114605 and the 2.9.0
+  # advisories (pip-audit).
+  "dnspython>=2.9.2",
+  # Pulled in by google-genai's auth stack; floor clears CVE-2026-119194..119197.
+  "pyasn1>=0.6.5",
 ]
 
 [project.optional-dependencies]
