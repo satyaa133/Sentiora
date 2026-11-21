@@ -22,7 +22,11 @@ x-backend-env: &backend-env
   # The web container's fixed address on the internal network (see below).
   TRUSTED_PROXY_IPS: '["172.30.0.10"]'
   LLM_PROVIDER: ${LLM_PROVIDER:-openai}
-  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
+  # local = on the server's CPU; the model is baked into the image (S3).
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+  LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-nomic-ai/nomic-embed-text-v1.5-Q}
+  # Per embedding model: 0.65 for local nomic, 0.25 for remote embeddings.
+  RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.65}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}

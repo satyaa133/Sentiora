@@ -11,3 +11,4 @@
 tests
 test_e2e.py
 pip_output*.txt
+.models
