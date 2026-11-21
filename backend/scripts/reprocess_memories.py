@@ -6,6 +6,13 @@ Usage (from the repo root):
     node scripts/run-python.mjs -m scripts.reprocess_memories --reclean [--user EMAIL] [--batch 25]
     node scripts/run-python.mjs -m scripts.reprocess_memories --embed [--user EMAIL] [--force] [--dry-run]
     node scripts/run-python.mjs -m scripts.reprocess_memories --retry-failed-embedding [--dry-run]
+    node scripts/run-python.mjs -m scripts.reprocess_memories --enrich [--user EMAIL] [--memory ID] [--limit N] [--delay 5] [--dry-run]
+
+``--enrich`` enriches READY saves that aren't enriched yet (summary, key
+points, question bank, chunk context lines; REBUILD_PLAN S5), one AI call per
+save with ``--delay`` seconds between calls so the provider's rate limits hold.
+It ignores ENRICH_DAILY_LIMIT, skips saves already enriched (so it can be
+stopped and re-run) and stops at the first save the AI provider can't enrich.
 
 ``--embed`` embeds every chunk that has no vector for the active embedding
 model: for a remote provider, no ``embedding`` or one from a model other than
@@ -31,6 +38,7 @@ import argparse
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from uuid import UUID
 
@@ -40,9 +48,12 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem
+from app.models.memory_question import MemoryQuestion
 from app.models.user import User
 from app.repositories.chunk_repository import ChunkRepository
+from app.services.enrichment_service import forget_enrichment
 from app.services.embedding_service import (
+    chunk_embedding_text,
     get_embedding_adapter,
     needs_vector_for,
     set_chunk_vector,
@@ -148,6 +159,9 @@ def reclean(args: argparse.Namespace) -> int:
                     db.rollback()
                     continue
 
+                # Context lines and questions point at the old chunks; the save
+                # is enriched again when it next matters (lazy rules).
+                forget_enrichment(db, item)
                 chunks = build_chunk_rows(item, drafts)
                 ChunkRepository(db).replace_for_memory(item.id, item.user_id, chunks)
                 try:
@@ -220,7 +234,7 @@ def embed(args: argparse.Namespace) -> int:
                 break
             after = chunks[-1].id
             try:
-                vectors = adapter.embed_texts([chunk.content for chunk in chunks])
+                vectors = adapter.embed_texts([chunk_embedding_text(c) for c in chunks])
                 if len(vectors) != len(chunks) or any(
                     len(v) != expected for v in vectors
                 ):
@@ -291,6 +305,66 @@ def retry_failed_embedding(args: argparse.Namespace) -> int:
     return 0
 
 
+def enrich(args: argparse.Namespace) -> int:
+    from app.models.memory_item import EnrichmentStatus
+    from app.services.enrichment_service import EnrichmentError, EnrichmentService
+
+    with SessionLocal() as db:
+        user_id = _user_id(db, args.user)
+        stmt = (
+            select(MemoryItem)
+            .where(
+                MemoryItem.status == ItemStatus.ready,
+                MemoryItem.deleted_at.is_(None),
+                MemoryItem.enrichment_status != EnrichmentStatus.ready.value,
+            )
+            .order_by(MemoryItem.captured_at.desc())
+        )
+        if user_id:
+            stmt = stmt.where(MemoryItem.user_id == user_id)
+        if args.memory:
+            stmt = stmt.where(MemoryItem.id.in_([UUID(m) for m in args.memory]))
+        items = list(db.execute(stmt).scalars())
+        if args.limit:
+            items = items[: args.limit]
+        logger.info("saves_to_enrich=%d", len(items))
+        if args.dry_run:
+            for item in items:
+                logger.info("would enrich memory_id=%s title=%r", item.id, item.title[:80])
+            return 0
+        service = EnrichmentService(db)
+        for done, item in enumerate(items, start=1):
+            if done > 1 and args.delay > 0:
+                time.sleep(args.delay)
+            started = time.perf_counter()
+            try:
+                service.enrich_now(item)
+            except EnrichmentError as exc:
+                db.rollback()
+                logger.error(
+                    "stopped at memory_id=%s after %d/%d: %s. Re-run to continue.",
+                    item.id,
+                    done - 1,
+                    len(items),
+                    exc,
+                )
+                return 1
+            logger.info(
+                "enriched %d/%d memory_id=%s questions=%d in %.1fs title=%r",
+                done,
+                len(items),
+                item.id,
+                db.execute(
+                    select(func.count())
+                    .select_from(MemoryQuestion)
+                    .where(MemoryQuestion.memory_id == item.id)
+                ).scalar_one(),
+                time.perf_counter() - started,
+                item.title[:60],
+            )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -315,6 +389,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="re-run captures that FAILED only because embedding failed",
     )
+    parser.add_argument(
+        "--enrich",
+        action="store_true",
+        help="enrich READY saves that aren't enriched yet (one AI call each)",
+    )
+    parser.add_argument(
+        "--memory", action="append", help="with --enrich: only this save id (repeatable)"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="with --enrich: at most this many saves"
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=5.0,
+        help="with --enrich: seconds between AI calls (provider rate limits)",
+    )
     parser.add_argument("--user", help="limit to one user (email or id)")
     parser.add_argument("--batch", type=int, default=25)
     parser.add_argument(
@@ -334,7 +425,11 @@ def main(argv: list[str] | None = None) -> int:
         if status or not args.embed:
             return status
     if args.embed:
-        return embed(args)
+        status = embed(args)
+        if status or not args.enrich:
+            return status
+    if args.enrich:
+        return enrich(args)
     parser.print_help()
     return 2
 

@@ -137,6 +137,12 @@ class Settings(BaseSettings):
     # "none" turns reranking off. Downloaded into MODEL_CACHE_DIR once.
     # Chosen by the S4 eval (owner, 2026-11-21).
     reranker_model: str = "jinaai/jina-reranker-v1-tiny-en"
+    # Enrichment (summary, key points, question bank) per user per day (UTC);
+    # protects AI cost. Saves over the cap stay searchable, just not enriched.
+    enrich_daily_limit: int = Field(default=50, ge=0)
+    # Chat model for enrichment. Empty = each configured provider's chat model
+    # (LLM_PROVIDER first); set a cheaper one of the primary provider here.
+    enrich_model: str = ""
     # Fused candidates the reranker scores; the rest are dropped. Each costs
     # ~25 ms of CPU on every question (S4: 10 -> p95 ~0.32 s, 20 -> ~0.61 s).
     rag_rerank_candidates: int = Field(default=10, ge=1, le=100)

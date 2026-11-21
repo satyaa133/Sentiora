@@ -604,7 +604,7 @@ responses keep the envelope.
 | ----- | -------- | ------ |
 | S2 | `POST /api/v1/answers/feedback` | New. Body: `question`, `answer_mode`, `rating`, `comment?`, `source_chunk_ids`. 201. |
 | S5 | `GET /api/v1/memory-items/{id}` | Adds `summary`, `key_points`, `enrichment_status`. |
-| S5 | `POST /api/v1/memory-items/{id}/enrich` | New. Queues enrichment for one save (Summarise button, Save now). 202; 409 if already queued. |
+| S5 | `POST /api/v1/memory-items/{id}/enrich` | New. Queues enrichment for one save (Summarise button, Save now). 202; 409 `ENRICHMENT_ALREADY_QUEUED` if already queued; 429 `RATE_LIMITED` past `ENRICH_DAILY_LIMIT`. |
 | S5 | `POST /api/v1/memory-items` | Optional `enrich: bool` (extension sends `true` for Save now). |
 | S6 | `POST /api/v1/chat`, `POST /api/v1/chat/stream` | New request field `answer_mode: "instant" \| "ai"` (default from `ASK_DEFAULT_MODE`). `final.mode` gains `"instant"`; `final` adds `aiAvailable`. New error code `AI_BUSY` (429, `retry_after`). `/chat` keeps its shape and reports `instant` as `memory`. |
 | S7 | `PATCH /api/v1/memory-items/{id}` | New. Body: `title` (1–300 chars). |

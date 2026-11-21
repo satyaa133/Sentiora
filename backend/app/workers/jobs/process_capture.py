@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session as DBSession
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models.memory_chunk import MemoryChunk
-from app.models.memory_item import ItemStatus, MemoryItem, SourceType
+from app.models.memory_item import EnrichmentStatus, ItemStatus, MemoryItem, SourceType
 from app.repositories.chunk_repository import ChunkRepository
 from app.services.chunking import ChunkDraft, chunk_content, chunk_transcript
 from app.services.content_normalizer import (
@@ -19,6 +19,7 @@ from app.services.content_normalizer import (
     normalize_content,
 )
 from app.services.embedding_service import (
+    chunk_embedding_text,
     current_embedding_model,
     get_embedding_adapter,
     needs_vector_for,
@@ -31,6 +32,7 @@ from app.services.ingest.transcript_normalizer import (
 )
 from app.services.usage import usage_for
 from app.workers.queue import create_queues
+from app.services.enrichment_service import enqueue_enrichment
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +216,7 @@ def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
 
     logger.info("memory_id=%s stage=embed chunks=%d", memory_label, len(chunks))
     try:
-        vectors = adapter.embed_texts([chunk.content for chunk in chunks])
+        vectors = adapter.embed_texts([chunk_embedding_text(chunk) for chunk in chunks])
         expected = int(getattr(adapter, "dimensions", 0) or _vector_dim())
         if len(vectors) != len(chunks):
             raise CaptureProcessingError(
@@ -235,6 +237,12 @@ def embed_chunks(chunks: list[MemoryChunk], memory_label: str) -> object | None:
         raise CaptureProcessingError(f"Embedding generation failed: {emb_exc}") from emb_exc
     logger.info("memory_id=%s stage=store embeddings=%d", memory_label, len(vectors))
     return adapter
+
+
+def _queue_requested_enrichment(item: MemoryItem) -> None:
+    """Enrichment asked for before the save was ready (Save now) starts now."""
+    if item.enrichment_status == EnrichmentStatus.queued:
+        enqueue_enrichment(item.id)
 
 
 def process_capture(memory_item_id_str: str) -> None:
@@ -288,11 +296,13 @@ def process_capture(memory_item_id_str: str) -> None:
                         embedding=chunk.embedding,
                         embedding_model=chunk.embedding_model,
                         embedding_local=chunk.embedding_local,
+                        context=chunk.context,
                     )
                     for chunk in originals
                 ]
                 ChunkRepository(db).replace_for_memory(item.id, item.user_id, clones)
                 db.commit()
+                _queue_requested_enrichment(item)
                 logger.info("memory_id=%s stage=ready via=dedup", memory_item_id_str)
                 return
             logger.warning(
@@ -332,6 +342,7 @@ def process_capture(memory_item_id_str: str) -> None:
         db.commit()
         if retry_embedding_later:
             schedule_embedding_retry(memory_item_id_str, attempt=1)
+        _queue_requested_enrichment(item)
         logger.info(
             "memory_id=%s stage=ready words=%d chunks=%d embedded=%s",
             memory_item_id_str,

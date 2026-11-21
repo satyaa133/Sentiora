@@ -95,6 +95,29 @@ def get_memory_item(
     return APIResponse(data=data, meta=response_meta(request))
 
 
+@router.post(
+    "/{item_id}/enrich",
+    response_model=APIResponse[MemoryItemResponse],
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Queue enrichment (summary, key points, questions) for one save",
+    responses={
+        404: {"description": "MEMORY_ITEM_NOT_FOUND"},
+        409: {"description": "ENRICHMENT_ALREADY_QUEUED"},
+        422: {"description": "VALIDATION_ERROR: the save has no content"},
+        429: {"description": "RATE_LIMITED: ENRICH_DAILY_LIMIT reached"},
+    },
+)
+def enrich_memory_item(
+    item_id: uuid.UUID,
+    request: Request,
+    db: Annotated[DBSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> APIResponse[MemoryItemResponse]:
+    service = MemoryService(db)
+    data = service.enrich_item(item_id, current_user.id)
+    return APIResponse(data=data, meta=response_meta(request))
+
+
 @router.delete(
     "/{item_id}",
     status_code=status.HTTP_200_OK,

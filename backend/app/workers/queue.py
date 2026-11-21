@@ -6,7 +6,19 @@ from rq import Queue
 
 from app.api.deps import get_settings
 
-DEFAULT_QUEUE_NAME = "sentiora.default"
+# Saves being processed (normalise, chunk, embed) and their embedding retries.
+CAPTURE_QUEUE_NAME = "sentiora.capture"
+# AI enrichment of saves that matter (summary, key points, questions); slower
+# and rate-limited by the AI provider, so it never holds up captures.
+ENRICH_QUEUE_NAME = "sentiora.enrich"
+# Queue used before S5; workers still drain it so no queued capture is lost.
+LEGACY_QUEUE_NAME = "sentiora.default"
+
+QUEUE_NAMES = {
+    "capture": CAPTURE_QUEUE_NAME,
+    "enrich": ENRICH_QUEUE_NAME,
+}
+ALL_QUEUE_NAMES = (CAPTURE_QUEUE_NAME, ENRICH_QUEUE_NAME, LEGACY_QUEUE_NAME)
 
 
 def create_redis_connection() -> Redis:
@@ -17,6 +29,25 @@ def create_redis_connection() -> Redis:
     )
 
 
-def create_queues(connection: Redis | None = None) -> list[Queue]:
+def capture_queue(connection: Redis | None = None) -> Queue:
+    return Queue(CAPTURE_QUEUE_NAME, connection=connection or create_redis_connection())
+
+
+def enrich_queue(connection: Redis | None = None) -> Queue:
+    return Queue(ENRICH_QUEUE_NAME, connection=connection or create_redis_connection())
+
+
+def create_queues(
+    connection: Redis | None = None, names: tuple[str, ...] | None = None
+) -> list[Queue]:
+    """Queues a worker listens to, in priority order (captures first).
+
+    ``names`` are "capture" and/or "enrich"; default both. A capture worker
+    also drains the pre-S5 queue.
+    """
     redis_connection = connection or create_redis_connection()
-    return [Queue(DEFAULT_QUEUE_NAME, connection=redis_connection)]
+    wanted = names or ("capture", "enrich")
+    queue_names = [QUEUE_NAMES[name] for name in wanted]
+    if "capture" in wanted:
+        queue_names.append(LEGACY_QUEUE_NAME)
+    return [Queue(name, connection=redis_connection) for name in queue_names]

@@ -33,7 +33,7 @@ def _looks_like_title(line: str) -> bool:
     long_words = [w for w in words if len(w) > 3 and w[0].isalpha()]
     if not long_words:
         return False
-    capitalised = sum(w[0].isupper() for w in long_words)
+    capitalised = sum(1 for w in long_words if w[0].isupper())
     return capitalised / len(long_words) >= 0.6
 
 

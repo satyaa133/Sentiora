@@ -78,6 +78,8 @@ def disable_rq_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.services.memory_service.create_queues", _unavailable)
     # Embedding retries are scheduled from the capture job; never on a live queue.
     monkeypatch.setattr("app.workers.jobs.process_capture.create_queues", _unavailable)
+    # Enrichment jobs (S5) never go to a live queue either.
+    monkeypatch.setattr("app.services.enrichment_service.enrich_queue", _unavailable)
 
 
 @pytest.fixture(autouse=True)
@@ -128,3 +130,4 @@ def block_live_llm_clients(monkeypatch: pytest.MonkeyPatch) -> None:
             raise RuntimeError("live LLM clients are disabled in tests")
 
     monkeypatch.setattr("app.services.rag_service.OpenAI", _Offline)
+    monkeypatch.setattr("app.services.enrichment_service.OpenAI", _Offline)
