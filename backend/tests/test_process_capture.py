@@ -79,7 +79,8 @@ def test_process_capture_creates_owned_chunks_without_duplicates() -> None:
             .order_by(MemoryChunk.chunk_index)
             .all()
         )
-        assert len(chunks) >= 2
+        # Short headed sections merge into one chunk (MIN_SECTION_CHARS).
+        assert len(chunks) >= 1
         indexes = [chunk.chunk_index for chunk in chunks]
         assert indexes == list(range(len(chunks)))
         assert {str(chunk.user_id) for chunk in chunks} == {item["user_id"]}

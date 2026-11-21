@@ -45,19 +45,21 @@ def test_extract_domain() -> None:
 
 
 def test_webpage_chunks_keep_heading_with_related_paragraphs() -> None:
-    text = """
-Introduction
-
-Binary search reduces the search interval by half at each iteration. It compares the target with the middle element.
-
-How it works
-
-The algorithm starts with the full sorted array. If the middle value is too small, the search continues on the right half. If the middle value is too large, the search continues on the left half.
-
-Complexity
-
-The time complexity is O(log n) because each comparison discards half of the remaining elements. This makes binary search efficient for large sorted collections.
-""".strip()
+    # Sections long enough to stand alone (MIN_SECTION_CHARS) stay separate.
+    intro = (
+        "Binary search reduces the search interval by half at each iteration. "
+        "It compares the target with the middle element. "
+    ) * 8
+    works = (
+        "The algorithm starts with the full sorted array. If the middle value is too small, "
+        "the search continues on the right half. If the middle value is too large, the "
+        "search continues on the left half. "
+    ) * 6
+    complexity = (
+        "The time complexity is O(log n) because each comparison discards half of the "
+        "remaining elements. This makes binary search efficient for large sorted collections. "
+    ) * 6
+    text = f"Introduction\n\n{intro}\n\nHow it works\n\n{works}\n\nComplexity\n\n{complexity}"
     chunks = chunk_content(text, SourceType.webpage, title="Binary Search")
     assert len(chunks) >= 2
     joined = " ".join(chunk.content for chunk in chunks)
@@ -67,6 +69,27 @@ The time complexity is O(log n) because each comparison discards half of the rem
         assert len(chunk.content) >= 20
         assert not chunk.content.endswith("to")
         assert chunk.chunk_index == chunks.index(chunk)
+
+
+def test_short_headed_sections_merge_into_one_chunk() -> None:
+    text = """
+Introduction
+
+Binary search reduces the search interval by half at each iteration.
+
+How it works
+
+If the middle value is too small, the search continues on the right half.
+
+Complexity
+
+The time complexity is O(log n).
+""".strip()
+    chunks = chunk_content(text, SourceType.webpage, title="Binary Search")
+    assert len(chunks) == 1
+    assert chunks[0].heading == "Introduction"
+    for phrase in ("reduces the search interval", "right half", "O(log n)"):
+        assert phrase in chunks[0].content
 
 
 def test_pdf_chunks_preserve_page_numbers() -> None:
