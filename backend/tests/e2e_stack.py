@@ -72,6 +72,7 @@ def main() -> int:
         "GEMINI_API_KEY": "",
         "OPENROUTER_API_KEY": "",
         "OPENROUTER_API_KEY_2": "",
+        "GROQ_API_KEY": "",
         "RATE_LIMIT_REGISTER_PER_MINUTE": "1000",
         "RATE_LIMIT_LOGIN_PER_MINUTE": "1000",
         "RATE_LIMIT_CHAT_PER_MINUTE": "1000",
