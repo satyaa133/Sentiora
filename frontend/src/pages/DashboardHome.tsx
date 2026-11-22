@@ -112,6 +112,15 @@ export default function DashboardHome() {
     }
   };
 
+  // A renamed or summarised save: show it, and refresh the lists' copies.
+  const onItemChanged = useCallback(
+    (item: MemoryItem) => {
+      setSelectedItem((selected) => (selected?.id === item.id ? item : selected));
+      void loadMemoryFeed(true);
+    },
+    [loadMemoryFeed],
+  );
+
   // Changes only when a memory is added, removed or changes status, so the
   // Timeline and statistics refresh without refetching on every poll.
   const feedKey = useMemo(
@@ -311,6 +320,7 @@ export default function DashboardHome() {
         item={selectedItem}
         onClose={() => setSelectedItem(null)}
         onDelete={onDeleteItem}
+        onItemChanged={onItemChanged}
         onAskAnything={(item) => {
           askAboutItem(item);
           setSelectedItem(null);

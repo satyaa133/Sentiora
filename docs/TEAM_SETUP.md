@@ -1,6 +1,6 @@
 # Sentiora Team Setup
 
-The steps a new teammate follows on a clean machine. Commands are the repository's own scripts. Verification status for each step is in [TEST_RESULTS.md](TEST_RESULTS.md).
+The steps a new teammate follows on a clean machine. Commands are the repository's own scripts. Verification status for each step as of 2026-10-25 is in [TEST_RESULTS.md](archive/qa-audit-2026-10-25/TEST_RESULTS.md) (archived).
 
 ## 1. Install runtimes
 
@@ -27,6 +27,34 @@ cp backend/.env.example backend/.env  # Windows: copy backend\.env.example backe
 - **`backend/.env`** holds the API and worker settings: `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS`, `JWT_SECRET_KEY`, and the AI keys.
 - If 5432 or 6379 is already in use, set `POSTGRES_PORT=5433` / `REDIS_PORT=6380` in `.env` **and** use those ports in `backend/.env`. Use `127.0.0.1` (not `localhost`) in `DATABASE_URL`/`REDIS_URL`: Docker binds IPv4 loopback only and Windows tries IPv6 `localhost` first.
 - Never commit `.env` files. Ask a teammate for AI keys through a password manager, not chat.
+
+### Shared environment files
+
+The team uses the **same two files** so everyone runs the same providers and
+settings:
+
+| File | Holds | Shared? |
+| ---- | ----- | ------- |
+| root `.env` | Docker ports, `DATABASE_URL`/`REDIS_URL`, `VITE_*` build config, `CORS_ORIGINS` | Yes, identical for everyone on the default ports |
+| `backend/.env` | **All secrets**: every AI key, `LLM_PROVIDER`, `EMBEDDING_PROVIDER`, `JWT_SECRET_KEY`, plus API/worker settings | Yes, the same file for everyone |
+
+- **AI keys live only in `backend/.env`.** The API reads the root `.env` first
+  and `backend/.env` second, so a key in both places is silently overridden.
+- Use the exact names from `backend/.env.example` (`OPENAI_API_KEY`,
+  `GROQ_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENROUTER_API_KEY_2`,
+  ...). A misspelt name (`OPENROUTER_API_KEY2`) is ignored without an error.
+- Share the two files through a password manager's shared vault (secure note
+  or attachment). Not chat, email or the repository. When a key changes, the
+  person who changed it updates the vault copy.
+- Everyone on the same keys shares the same credit and rate limits; a provider
+  running out of credit affects the whole team.
+- After updating the files, restart the API and worker. Check what the app
+  picked up, without printing keys:
+  ```bash
+  node scripts/run-python.mjs -c "from app.core.config import get_settings as g; from app.services.llm_pool import build_backends as b; print([x.name for x in b(g())])"
+  ```
+- If your machine needs different ports (5433/6380), change only the port
+  lines locally and keep everything else identical.
 
 ## 3. Install dependencies
 
@@ -101,7 +129,7 @@ Two developers' local setups **never** share data. Use the shared remote environ
 | `port is already allocated` on `docker compose up` | Another local Postgres/Redis. Change `POSTGRES_PORT`/`REDIS_PORT` (and `backend/.env`). |
 | Extension says it can't reach the server | It was built with a different `VITE_API_BASE_URL`. Rebuild after editing the root `.env` and reload it in `chrome://extensions`. |
 | Extension doesn't pick up the web sign-in | You opened the app on a different origin than `VITE_APP_URL` (e.g. `127.0.0.1` vs `localhost`). |
-| YouTube capture says the transcript could not be fetched | Known limitation under investigation (BUG_REGISTER OPEN-01). Webpage and PDF capture are unaffected. |
+| YouTube capture says the transcript could not be fetched | Known limitation under investigation (archived BUG_REGISTER OPEN-01; REBUILD_PLAN S8 verifies it in real Chrome). Webpage and PDF capture are unaffected. |
 | Semantic search is lexical only | No embedding key. Set `OPENAI_API_KEY` or `GEMINI_API_KEY` in `backend/.env` and restart the API and worker. |
 | Web app says "Could not reach the Sentiora server" | The request got no response: the API is not running at `VITE_API_BASE_URL`, or the page origin is missing from `CORS_ORIGINS`. Check `http://localhost:8000/health` and the browser console. |
 | "Too many requests" (HTTP 429) | A per-minute limit was hit (`RATE_LIMIT_*` in `backend/.env`). Wait a minute, or raise the limit for local testing. |

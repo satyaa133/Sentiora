@@ -19,10 +19,21 @@ from sqlalchemy import Select, case, func, literal, select
 from sqlalchemy.orm import Session as DBSession
 
 from app.core.config import get_settings
+from app.core.metrics import observe_stage
 from app.models.memory_chunk import MemoryChunk
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
-from app.services.embedding_service import get_embedding_adapter
+from app.models.memory_question import MemoryQuestion
+from app.services.embedding_service import (
+    chunk_vector,
+    current_embedding_model,
+    get_embedding_adapter,
+    has_vector_for,
+    is_local_model,
+    vector_column,
+)
 from app.services.retrieval import selection
+from app.services.retrieval.reranker import get_reranker, passage_text
+from app.services.usage import usage_for
 
 _TSQUERY_SAFE = re.compile(r"[^a-z0-9]")
 
@@ -154,6 +165,11 @@ def _query_tokens(query: str) -> list[str]:
     ]
 
 
+def has_keywords(query: str) -> bool:
+    """False for questions like "what did I save?" (retrieval returns recent saves)."""
+    return bool(_query_tokens(query))
+
+
 def keyword_coverage(query: str, *texts: str) -> float:
     """Share of the query's keywords that appear in the given texts (0.0–1.0)."""
     tokens = _query_tokens(query)
@@ -188,11 +204,21 @@ def _lexical_rank(title: str, content: str, tokens: list[str]) -> float:
 
 
 class RetrievalService:
+    # Third RRF list: the questions enrichment wrote for each save (S6). The
+    # eval turns it off to measure what it adds.
+    use_question_bank: bool = True
+
     def __init__(self, db: DBSession) -> None:
         self.db = db
         self.settings = get_settings()
         # True once a query embedding succeeded (the vector leg is active).
         self._vector_ready = False
+        # The embedded query, reused by the question-bank leg.
+        self._query_vector: list[float] | None = None
+
+        # model_id of the adapter that embedded the query; picks the vector
+        # column (embedding or embedding_local) used for MMR.
+        self._model_id: str | None = None
 
     def retrieve_relevant_memories(
         self,
@@ -209,8 +235,25 @@ class RetrievalService:
         Returns [] when nothing clears the relevance bar (the question is not
         covered by the user's memory).
         """
+        # Embedding calls made for this search count against this user.
+        with usage_for(user_id):
+            return self._retrieve(
+                user_id, query, top_k, source_type, memory_id, date_from, date_to
+            )
+
+    def _retrieve(
+        self,
+        user_id: UUID,
+        query: str,
+        top_k: int | None,
+        source_type: SourceType | None,
+        memory_id: UUID | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> list[RetrievedChunk]:
         scope = _Scope(source_type, memory_id, date_from, date_to)
         self._vector_ready = False
+        self._query_vector = None
         document = needs_document_context(query)
         limit = top_k or int(self._setting("rag_final_k", 6))
         if document:
@@ -225,20 +268,59 @@ class RetrievalService:
         pool = int(self._setting("rag_candidates", 30))
         semantic = self._semantic_search(user_id, query, pool, scope)
         fulltext = self._fulltext_search(user_id, tokens, pool, scope)
+        questions = self._question_search(user_id, pool, scope)
         per_memory = (
             limit
             if memory_id is not None or document
             else int(self._setting("rag_max_chunks_per_memory", 2))
         )
-        chosen = self._select(semantic, fulltext, limit=limit, per_memory=per_memory)
+        chosen = self._select(
+            semantic,
+            fulltext,
+            limit=limit,
+            per_memory=per_memory,
+            query=query,
+            questions=questions,
+        )
         if document and chosen:
             chosen = self._expand_primary_memory(user_id, chosen, limit=limit, scope=scope)[:limit]
-        self._log_retrieval(query, semantic, fulltext, chosen)
+        self._log_retrieval(query, semantic, fulltext, chosen, questions)
         return chosen
 
     def _setting(self, name: str, default: float | int | str) -> float | int | str:
         value = getattr(self.settings, name, None)
         return default if value is None else value
+
+    def _rerank(
+        self, query: str, ranked: list[RetrievedChunk], limit: int
+    ) -> tuple[list[RetrievedChunk], dict[UUID, float]] | None:
+        """Re-order the top fused candidates with the cross-encoder.
+
+        Returns the candidates by reranker score with scores scaled to 0–1 (for
+        MMR), or None to keep the fused order (reranker off or failed).
+        """
+        reranker = get_reranker()
+        if reranker is None or not ranked:
+            return None
+        count = max(limit, int(self._setting("rag_rerank_candidates", 10)))
+        candidates = ranked[:count]
+        try:
+            with observe_stage("rerank"):
+                raw = reranker.score(
+                    query,
+                    [passage_text(c.title, c.heading, c.content) for c in candidates],
+                )
+        except Exception:
+            logger.warning("Reranking failed; using fused order", exc_info=True)
+            return None
+        low, high = min(raw), max(raw)
+        span = (high - low) or 1.0
+        scaled = {c.chunk_id: (s - low) / span for c, s in zip(candidates, raw, strict=True)}
+        # The top candidate scores 1.0; MMR divides by the top score.
+        if high == low:
+            scaled = dict.fromkeys(scaled, 1.0)
+        order = sorted(candidates, key=lambda c: -scaled[c.chunk_id])
+        return order, scaled
 
     def _select(
         self,
@@ -247,20 +329,51 @@ class RetrievalService:
         *,
         limit: int,
         per_memory: int,
+        query: str = "",
+        questions: list[RetrievedChunk] | None = None,
     ) -> list[RetrievedChunk]:
-        """RRF-fuse both legs, drop near-duplicates, then pick with MMR."""
-        if not semantic and not fulltext:
+        """RRF-fuse the legs, drop near-duplicates, rerank, then pick with MMR.
+
+        Legs: vector over chunks, full-text over chunks and titles, and the
+        question bank (chunks whose stored questions are close to the query).
+        """
+        questions = questions or []
+        if not semantic and not fulltext and not questions:
             return []
-        scores = selection.rrf([[c.chunk_id for c in semantic], [c.chunk_id for c in fulltext]])
+        scores = selection.rrf(
+            [
+                [c.chunk_id for c in semantic],
+                [c.chunk_id for c in fulltext],
+                [c.chunk_id for c in questions],
+            ]
+        )
         # One entry per chunk: keep the vector distance and the full-text rank.
-        by_id: dict[UUID, RetrievedChunk] = {c.chunk_id: c for c in fulltext}
+        # A question-bank hit carries its question's distance unless the
+        # chunk's own vector hit replaces it.
+        by_id: dict[UUID, RetrievedChunk] = {c.chunk_id: c for c in questions}
+        for chunk in fulltext:
+            bank_hit = by_id.get(chunk.chunk_id)
+            by_id[chunk.chunk_id] = (
+                replace(chunk, distance=bank_hit.distance) if bank_hit else chunk
+            )
         for chunk in semantic:
             text_hit = by_id.get(chunk.chunk_id)
-            by_id[chunk.chunk_id] = (
-                replace(chunk, rank=text_hit.rank, lexical=True) if text_hit else chunk
-            )
+            if text_hit is not None and text_hit.lexical:
+                by_id[chunk.chunk_id] = replace(chunk, rank=text_hit.rank, lexical=True)
+            else:
+                by_id[chunk.chunk_id] = chunk
         ranked = sorted(by_id.values(), key=lambda c: -scores[c.chunk_id])
         ranked = selection.drop_near_duplicates(ranked, lambda c: c.content)
+        reranked = self._rerank(query, ranked, limit)
+        if reranked is not None:
+            ranked, scores = reranked
+        leaders = {c.memory_id for c in ranked[:limit]}
+        if len(leaders) == 1 and per_memory < limit:
+            # One save holds every top candidate: it is the match. Use more of
+            # it, and drop weak stragglers from other saves instead of padding
+            # the answer with them.
+            ranked = [c for c in ranked if c.memory_id in leaders]
+            per_memory = max(per_memory, int(self._setting("rag_single_memory_chunks", 4)))
         top = max(scores.values())
         shingle_cache: dict[UUID, frozenset[str]] = {}
 
@@ -270,6 +383,12 @@ class RetrievalService:
             return shingle_cache[chunk.chunk_id]
 
         def similarity(a: RetrievedChunk, b: RetrievedChunk) -> float:
+            # Sections of one page share its topic, so their vectors are close
+            # even when their text says different things; judging them by
+            # vector made MMR drop the section that held the answer. Within a
+            # memory, redundancy is text overlap; across memories, vectors.
+            if a.memory_id == b.memory_id:
+                return selection.jaccard(shingles(a), shingles(b))
             cos = selection.cosine(a.vector, b.vector)
             return cos if cos is not None else selection.jaccard(shingles(a), shingles(b))
 
@@ -289,15 +408,17 @@ class RetrievalService:
         semantic: list[RetrievedChunk],
         fulltext: list[RetrievedChunk],
         chosen: list[RetrievedChunk],
+        questions: list[RetrievedChunk] | None = None,
     ) -> None:
         """Development-only trace of what retrieval saw and picked."""
         if str(self._setting("app_environment", "")).lower() != "development":
             return
         logger.info(
-            "retrieval query=%r semantic=%s fulltext=%s chosen=%s",
+            "retrieval query=%r semantic=%s fulltext=%s questions=%s chosen=%s",
             query[:200],
             [(c.title[:40], round(1 - (c.distance or 0), 3)) for c in semantic[:8]],
             [(c.title[:40], round(c.rank, 3)) for c in fulltext[:8]],
+            [(c.title[:40], round(1 - (c.distance or 0), 3)) for c in (questions or [])[:8]],
             [
                 (
                     c.title[:40],
@@ -354,8 +475,14 @@ class RetrievalService:
             rank=rank,
             start_sec=chunk.start_sec,
             end_sec=chunk.end_sec,
-            vector=tuple(chunk.embedding) if chunk.embedding is not None else None,
+            vector=self._chunk_vector(chunk),
         )
+
+    def _chunk_vector(self, chunk: MemoryChunk) -> tuple[float, ...] | None:
+        if self._model_id is None:
+            self._model_id = current_embedding_model()
+        vector = chunk_vector(chunk, self._model_id)
+        return tuple(vector) if vector is not None else None
 
     def _semantic_search(
         self,
@@ -369,38 +496,91 @@ class RetrievalService:
             return []
 
         try:
-            vectors = adapter.embed_texts([query])
+            with observe_stage("embed"):
+                query_vector = adapter.embed_query(query)
         except Exception:
+            logger.warning("Query embedding failed; continuing with full-text search")
             return []
-        if not vectors:
-            return []
-
-        query_vector = vectors[0]
         if not query_vector:
             return []
         self._vector_ready = True
+        self._query_vector = list(query_vector)
         # Only compare against vectors from the model that embedded the query.
         model_id = getattr(adapter, "model_id", None)
+        self._model_id = model_id
         try:
-            distance = MemoryChunk.embedding.cosine_distance(query_vector)
+            distance = vector_column(model_id).cosine_distance(query_vector)
             stmt = (
                 self._base_query(user_id, scope)
                 .add_columns(distance.label("distance"))
-                .where(MemoryChunk.embedding.is_not(None))
-                .where(MemoryChunk.embedding_model.is_not_distinct_from(model_id))
+                .where(has_vector_for(model_id))
                 .order_by(distance)
                 .limit(top_k)
             )
-            rows = cast(list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all())
+            with observe_stage("vector_search"):
+                rows = cast(
+                    list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all()
+                )
         except Exception:
             logger.exception("Semantic retrieval failed; continuing with lexical search")
             return []
         # Below this cosine similarity a vector neighbour is not relevant.
         max_distance = 1.0 - float(self._setting("rag_min_similarity", 0.25))
+        # Iterative HNSW scans (relaxed_order, see app/core/db.py) may return
+        # rows slightly out of order; rank by the exact distance.
+        rows.sort(key=lambda row: float("inf") if row[2] is None else float(row[2]))
         results: list[RetrievedChunk] = []
         for chunk, item, dist in rows:
             if dist is None or float(dist) > max_distance:
                 continue
+            results.append(self._to_retrieved(chunk, item, float(dist), lexical=False))
+        return results
+
+    def _question_search(
+        self, user_id: UUID, top_k: int, scope: _Scope
+    ) -> list[RetrievedChunk]:
+        """Chunks whose enrichment questions are nearest the query (S6).
+
+        Stored questions are embedded with the local model only, so this leg
+        runs only when the query was embedded with it. A question must clear
+        ``RAG_QUESTION_MIN_SIMILARITY`` (D14); each chunk appears once, with
+        its closest question's distance.
+        """
+        if (
+            not self.use_question_bank
+            or self._query_vector is None
+            or not is_local_model(self._model_id)
+        ):
+            return []
+        distance = MemoryQuestion.embedding_local.cosine_distance(self._query_vector)
+        stmt = (
+            self._base_query(user_id, scope)
+            .join(MemoryQuestion, MemoryQuestion.chunk_id == MemoryChunk.id)
+            .add_columns(distance.label("distance"))
+            .where(
+                MemoryQuestion.user_id == user_id,
+                MemoryQuestion.embedding_local.is_not(None),
+            )
+            .order_by(distance)
+            .limit(top_k)
+        )
+        try:
+            with observe_stage("question_search"):
+                rows = cast(
+                    list[tuple[MemoryChunk, MemoryItem, float]], self.db.execute(stmt).all()
+                )
+        except Exception:
+            logger.exception("Question-bank retrieval failed; using the other legs")
+            self.db.rollback()
+            return []
+        max_distance = 1.0 - float(self._setting("rag_question_min_similarity", 0.60))
+        rows.sort(key=lambda row: float("inf") if row[2] is None else float(row[2]))
+        seen: set[UUID] = set()
+        results: list[RetrievedChunk] = []
+        for chunk, item, dist in rows:
+            if dist is None or float(dist) > max_distance or chunk.id in seen:
+                continue
+            seen.add(chunk.id)
             results.append(self._to_retrieved(chunk, item, float(dist), lexical=False))
         return results
 
@@ -442,9 +622,10 @@ class RetrievalService:
             .limit(top_k)
         )
         try:
-            rows = cast(
-                list[tuple[MemoryChunk, MemoryItem, float, int]], self.db.execute(stmt).all()
-            )
+            with observe_stage("fulltext_search"):
+                rows = cast(
+                    list[tuple[MemoryChunk, MemoryItem, float, int]], self.db.execute(stmt).all()
+                )
         except Exception:
             logger.exception("Full-text retrieval failed")
             self.db.rollback()

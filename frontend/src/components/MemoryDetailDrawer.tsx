@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Button,
   Drawer,
@@ -7,12 +7,16 @@ import {
   IconCopy,
   IconExternalLink,
   IconMessage,
+  IconPencil,
   IconTrash,
   SourceBadge,
   Tag,
   buttonClasses,
 } from "@shared/ui";
+import { fetchMemoryItem } from "../services/memoryService";
 import type { MemoryItem } from "../types/memory";
+import { MemorySummary } from "./MemorySummary";
+import { RenameMemoryForm } from "./RenameMemoryForm";
 import { formatExtractedContent } from "../utils/contentFormatter";
 import { sourceHref } from "../utils/safeHref";
 
@@ -21,22 +25,79 @@ interface MemoryDetailDrawerProps {
   onClose: () => void;
   onDelete: (id: string) => Promise<void>;
   onAskAnything?: (item: MemoryItem) => void;
+  /** A newer copy of the save (renamed, summary requested or written). */
+  onItemChanged?: (item: MemoryItem) => void;
 }
+
+// While a summary is being written, check for it this often, this many times.
+const SUMMARY_POLL_MS = 4000;
+const SUMMARY_POLLS = 30;
 
 export default function MemoryDetailDrawer({
   item,
   onClose,
   onDelete,
   onAskAnything,
+  onItemChanged,
 }: MemoryDetailDrawerProps) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  // The save as the API returns it now (summary, key points, new title).
+  const [detail, setDetail] = useState<MemoryItem | null>(null);
+  const itemId = item?.id ?? null;
+  const current = detail && detail.id === itemId ? detail : item;
+  const summarising = current?.enrichment_status === "queued";
 
-  if (!item) return null;
+  // Opening a save fetches it, which also queues its summary (S5).
+  useEffect(() => {
+    setRenaming(false);
+    setDetail(null);
+    if (!itemId) return;
+    let cancelled = false;
+    fetchMemoryItem(itemId)
+      .then((fresh) => {
+        if (!cancelled) setDetail(fresh);
+      })
+      .catch(() => {
+        // The list copy is still shown.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [itemId]);
+
+  // Show the summary as soon as it's written.
+  useEffect(() => {
+    if (!itemId || !summarising) return;
+    let polls = 0;
+    const timer = window.setInterval(() => {
+      polls += 1;
+      if (polls > SUMMARY_POLLS) {
+        window.clearInterval(timer);
+        return;
+      }
+      fetchMemoryItem(itemId)
+        .then((fresh) => {
+          setDetail(fresh);
+          if (fresh.enrichment_status !== "queued") onItemChanged?.(fresh);
+        })
+        .catch(() => undefined);
+    }, SUMMARY_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [itemId, summarising, onItemChanged]);
+
+  if (!item || !current) return null;
+
+  function changed(next: MemoryItem) {
+    setDetail(next);
+    onItemChanged?.(next);
+  }
 
   function close() {
     setConfirmingDelete(false);
+    setRenaming(false);
     onClose();
   }
 
@@ -58,17 +119,18 @@ export default function MemoryDetailDrawer({
     setTimeout(() => setCopied(false), 2000);
   }
 
-  const originalHref = sourceHref(item.url);
+  const shown = current;
+  const originalHref = sourceHref(shown.url);
   let domain = "";
   try {
-    domain = new URL(item.url).hostname;
+    domain = new URL(shown.url).hostname;
   } catch {
-    domain = item.url;
+    domain = shown.url;
   }
 
-  const readingTimeMin = Math.max(1, Math.ceil(item.reading_time_seconds / 60));
-  const formatted = formatExtractedContent(item);
-  const capturedOn = new Date(item.captured_at).toLocaleDateString(undefined, {
+  const readingTimeMin = Math.max(1, Math.ceil(shown.reading_time_seconds / 60));
+  const formatted = formatExtractedContent(shown);
+  const capturedOn = new Date(shown.captured_at).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -101,11 +163,11 @@ export default function MemoryDetailDrawer({
   ) : (
     <div className="flex w-full flex-wrap items-center justify-between gap-2">
       <div className="flex flex-wrap gap-2">
-        {onAskAnything && item.status === "ready" && (
+        {onAskAnything && shown.status === "ready" && (
           <Button
             variant="inverse"
             leadingIcon={<IconMessage size={18} />}
-            onClick={() => onAskAnything(item)}
+            onClick={() => onAskAnything(shown)}
           >
             Ask about this
           </Button>
@@ -139,13 +201,13 @@ export default function MemoryDetailDrawer({
       open
       size="lg"
       onClose={close}
-      title={item.title}
+      title={shown.title}
       eyebrow={
         <span className="flex flex-wrap items-center gap-2 normal-case">
-          <SourceBadge type={item.source_type} />
-          {item.status === "failed" ? (
+          <SourceBadge type={shown.source_type} />
+          {shown.status === "failed" ? (
             <Tag>Failed</Tag>
-          ) : item.status !== "ready" ? (
+          ) : shown.status !== "ready" ? (
             <Tag>Processing</Tag>
           ) : null}
         </span>
@@ -153,6 +215,26 @@ export default function MemoryDetailDrawer({
       footer={footer}
     >
       <div className="space-y-6">
+        {renaming ? (
+          <RenameMemoryForm
+            item={shown}
+            onCancel={() => setRenaming(false)}
+            onRenamed={(next) => {
+              setRenaming(false);
+              changed(next);
+            }}
+          />
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            leadingIcon={<IconPencil size={16} />}
+            onClick={() => setRenaming(true)}
+          >
+            Rename
+          </Button>
+        )}
+
         {originalHref ? (
           <a
             href={originalHref}
@@ -168,14 +250,14 @@ export default function MemoryDetailDrawer({
           <p className="truncate text-[15px] text-muted">{domain}</p>
         )}
 
-        {item.status === "failed" && (
+        {shown.status === "failed" && (
           <p
             role="alert"
             className="flex items-start gap-2 rounded-btn bg-accent-soft px-4 py-3 text-[15px] text-accent-soft-fg"
           >
             <IconAlert size={18} className="mt-0.5 shrink-0" />
             <span>
-              {item.processing_error || "This memory could not be indexed."} It is not
+              {shown.processing_error || "This memory could not be indexed."} It is not
               searchable; capture it again to retry.
             </span>
           </p>
@@ -184,7 +266,7 @@ export default function MemoryDetailDrawer({
         <dl className="grid grid-cols-3 gap-3 rounded-card bg-raised p-4 text-center">
           <div>
             <dt className="font-mono text-eyebrow uppercase text-muted">Words</dt>
-            <dd className="mt-1 font-semibold text-fg">{item.word_count}</dd>
+            <dd className="mt-1 font-semibold text-fg">{shown.word_count}</dd>
           </div>
           <div>
             <dt className="font-mono text-eyebrow uppercase text-muted">Reading</dt>
@@ -196,9 +278,11 @@ export default function MemoryDetailDrawer({
           </div>
         </dl>
 
-        {item.thumbnail_url && (
+        <MemorySummary item={shown} onChanged={changed} />
+
+        {shown.thumbnail_url && (
           <img
-            src={item.thumbnail_url}
+            src={shown.thumbnail_url}
             alt=""
             className="max-h-64 w-full rounded-card border border-line object-cover"
           />
@@ -215,7 +299,7 @@ export default function MemoryDetailDrawer({
                 {formatted.sourceLabel}
               </span>
             </h3>
-            {item.content ? (
+            {shown.content ? (
               <Button
                 variant="ghost"
                 size="sm"

@@ -5,6 +5,7 @@ const LABELS: Record<StreamMode, string> = {
   memory: "From your memory",
   general: "General knowledge",
   mixed: "Mixed: memory + general",
+  instant: "Quoted from your saves",
 };
 
 interface ModeBadgeProps {

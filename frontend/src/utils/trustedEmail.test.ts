@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { isTrustedEmail } from "./trustedEmail";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("isTrustedEmail", () => {
   it("approves popular email providers", () => {
@@ -12,6 +16,13 @@ describe("isTrustedEmail", () => {
     expect(isTrustedEmail("user@proton.me")).toBe(true);
     expect(isTrustedEmail("user@protonmail.com")).toBe(true);
     expect(isTrustedEmail("user@zoho.com")).toBe(true);
+  });
+
+  it("rejects reserved example domains unless a test build allows them", () => {
+    vi.stubEnv("VITE_ALLOW_TEST_EMAIL_DOMAINS", "");
+    expect(isTrustedEmail("user@example.com")).toBe(false);
+    expect(isTrustedEmail("user@example.dev")).toBe(false);
+    vi.stubEnv("VITE_ALLOW_TEST_EMAIL_DOMAINS", "true");
     expect(isTrustedEmail("user@example.com")).toBe(true);
   });
 

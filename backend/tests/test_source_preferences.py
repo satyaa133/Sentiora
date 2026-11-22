@@ -26,6 +26,7 @@ def _register_and_login(email: str) -> str:
         "email": email,
         "password": "Password123!",
         "full_name": "Test User",
+        "privacy_consent_version": "2026-11-20",
     }
     resp = client.post("/api/v1/auth/register", json=reg_payload)
     assert resp.status_code == 201

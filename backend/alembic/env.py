@@ -8,6 +8,7 @@ from app.core.db import Base
 from app.models import (  # noqa: F401
     MemoryChunk,
     MemoryItem,
+    MemoryQuestion,
     RefreshToken,
     Session,
     User,

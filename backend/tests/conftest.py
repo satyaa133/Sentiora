@@ -29,12 +29,26 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # real keys exist in the local .env files.
 os.environ["EMBEDDING_PROVIDER"] = "none"
 os.environ["REQUIRE_EMAIL_VERIFICATION"] = "false"
-for _key in ("OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"):
+# No real cross-encoder in tests; reranker tests install a fake one.
+os.environ["RERANKER_MODEL"] = "none"
+# Retrieval tests assume the default threshold, whatever a developer's .env says.
+os.environ["RAG_MIN_SIMILARITY"] = "0.25"
+# Tests register accounts on the reserved example.com / example.dev domains.
+os.environ["ALLOW_TEST_EMAIL_DOMAINS"] = "true"
+for _key in (
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_API_KEY_2",
+):
     os.environ[_key] = ""
 
 from app.core.config import get_settings  # noqa: E402
 from app.core.login_backoff import login_backoff  # noqa: E402
 from app.core.rate_limit import limiter  # noqa: E402
+from app.core.redis_client import shared_redis  # noqa: E402
+from app.services.ai_gate import ai_gate  # noqa: E402
 from app.services.llm_pool import key_pool  # noqa: E402
 
 # OPENROUTER_API_KEY_<n> from local .env files must not reach tests either.
@@ -64,6 +78,10 @@ def disable_rq_enqueue(monkeypatch: pytest.MonkeyPatch) -> None:
         raise RuntimeError("rq disabled in tests")
 
     monkeypatch.setattr("app.services.memory_service.create_queues", _unavailable)
+    # Embedding retries are scheduled from the capture job; never on a live queue.
+    monkeypatch.setattr("app.workers.jobs.process_capture.create_queues", _unavailable)
+    # Enrichment jobs (S5) never go to a live queue either.
+    monkeypatch.setattr("app.services.enrichment_service.enrich_queue", _unavailable)
 
 
 @pytest.fixture(autouse=True)
@@ -77,9 +95,12 @@ def disable_live_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def reset_security_limiters(monkeypatch: pytest.MonkeyPatch) -> None:
+    # In-process state only, unless a test plugs in a fake Redis itself.
+    shared_redis.use(None)
     limiter.reset()
     login_backoff.reset()
     key_pool.reset()
+    ai_gate.reset()
     settings = get_settings()
     monkeypatch.setattr(settings, "rate_limit_login_per_minute", 1000)
     monkeypatch.setattr(settings, "rate_limit_register_per_minute", 1000)
@@ -89,27 +110,3 @@ def reset_security_limiters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "rate_limit_search_per_user_per_minute", 1000)
     monkeypatch.setattr(settings, "failed_login_max_attempts", 1000)
     monkeypatch.setattr(settings, "require_email_verification", False)
-
-
-@pytest.fixture(autouse=True)
-def disable_live_answer_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The structured {mode, usedSources, followUps} call never leaves the test
-    process; answers fall back to metadata derived from their [S#] markers.
-    Tests that exercise it patch RagService._call_structured themselves."""
-
-    def offline(*args: object, **kwargs: object) -> str:
-        raise RuntimeError("structured metadata calls are disabled in tests")
-
-    monkeypatch.setattr("app.services.rag_service.RagService._call_structured", offline)
-
-
-@pytest.fixture(autouse=True)
-def block_live_llm_clients(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No chat request leaves the test process, even when a test configures fake
-    keys and only mocks part of the pipeline (e.g. query rewriting)."""
-
-    class _Offline:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            raise RuntimeError("live LLM clients are disabled in tests")
-
-    monkeypatch.setattr("app.services.rag_service.OpenAI", _Offline)

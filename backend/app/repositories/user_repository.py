@@ -31,12 +31,17 @@ class UserRepository:
         email: str,
         password_hash: str | None,
         full_name: str | None = None,
+        privacy_consent_version: str | None = None,
     ) -> User:
+        from datetime import UTC, datetime
+
         user = User(
             email=email.lower(),
             password_hash=password_hash,
             is_email_verified=False,
             is_active=True,
+            privacy_consent_version=privacy_consent_version,
+            privacy_consented_at=datetime.now(UTC) if privacy_consent_version else None,
         )
         self.db.add(user)
         self.db.flush()

@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Button, IconAlert, TextField, cx } from "@shared/ui";
+import { Button, IconAlert, PRIVACY_NOTICE_TEXT, TextField, cx } from "@shared/ui";
 import AuthLayout from "../components/AuthLayout";
 import PasswordField from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
@@ -61,7 +61,7 @@ export default function SignUp() {
       errs.password = "Password must contain at least one number.";
     }
     if (!agreedToTerms) {
-      errs.terms = "You must agree to the Terms of Service.";
+      errs.terms = "Please agree to the privacy notice to create an account.";
     }
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -173,6 +173,17 @@ export default function SignUp() {
         </div>
 
         <div>
+          <section
+            aria-labelledby="signup-notice-title"
+            className="mb-3 rounded-card border border-line bg-raised px-4 py-3"
+          >
+            <h2 id="signup-notice-title" className="text-[15px] font-semibold text-fg">
+              Privacy notice
+            </h2>
+            <p id="signup-notice" className="mt-1 text-[15px] leading-relaxed text-muted">
+              {PRIVACY_NOTICE_TEXT}
+            </p>
+          </section>
           <label
             htmlFor="signup-terms"
             className="flex min-h-touch cursor-pointer items-start gap-3 text-[15px] text-fg"
@@ -183,12 +194,12 @@ export default function SignUp() {
               checked={agreedToTerms}
               onChange={(e) => setAgreedToTerms(e.target.checked)}
               aria-invalid={errors.terms ? true : undefined}
-              aria-describedby={errors.terms ? "signup-terms-error" : undefined}
+              aria-describedby={errors.terms ? "signup-notice signup-terms-error" : "signup-notice"}
               className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer accent-accent"
             />
             <span>
               {/* TODO: link the real Terms of Service and Privacy Policy pages. */}I
-              agree to the{" "}
+              agree to the privacy notice above, the{" "}
               <a href="#" className="text-link underline">
                 Terms of Service
               </a>{" "}

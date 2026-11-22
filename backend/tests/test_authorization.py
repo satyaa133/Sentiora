@@ -16,7 +16,7 @@ CONTENT = (
 def _register_and_login(email: str) -> dict:
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": PASSWORD, "full_name": "Authz Tester"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": PASSWORD, "full_name": "Authz Tester"},
     )
     return client.post("/api/v1/auth/login", json={"email": email, "password": PASSWORD}).json()["data"]
 

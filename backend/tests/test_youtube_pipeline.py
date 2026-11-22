@@ -68,7 +68,7 @@ def _auth_headers(email: str) -> dict[str, str]:
     password = "MemoryPassword123!"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "YouTube Tester"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "YouTube Tester"},
     )
     login = client.post("/api/v1/auth/login", json={"email": email, "password": password})
     return {"Authorization": f"Bearer {login.json()['data']['access_token']}"}
@@ -77,6 +77,9 @@ def _auth_headers(email: str) -> dict[str, str]:
 class _HashedAdapter:
     """Deterministic bag-of-words embeddings (stable across processes)."""
     model_id = "test:hashed"
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         vectors = []
@@ -90,6 +93,9 @@ class _HashedAdapter:
 
 
 class _FailingAdapter:
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_texts([text])[0]
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         raise RuntimeError("provider timeout")
 
@@ -321,7 +327,7 @@ def test_grounded_answer_cites_captured_video(monkeypatch: pytest.MonkeyPatch) -
     process_capture(item["id"])
     resp = client.post(
         "/api/v1/chat",
-        json={"question": "How much whale oil did the Zephyrine Point keeper use in January?"},
+        json={"answer_mode": "ai", "question": "How much whale oil did the Zephyrine Point keeper use in January?"},
         headers=headers,
     )
     assert resp.status_code == 200
@@ -339,7 +345,7 @@ def test_question_outside_transcript_is_not_answered_from_it() -> None:
     process_capture(item["id"])
     resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is the boiling point of liquid nitrogen in kelvin?"},
+        json={"answer_mode": "ai", "question": "What is the boiling point of liquid nitrogen in kelvin?"},
         headers=headers,
     )
     data = resp.json()["data"]

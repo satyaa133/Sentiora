@@ -67,6 +67,7 @@ class AuthService:
             email=req.email,
             password_hash=hashed_pwd,
             full_name=req.full_name,
+            privacy_consent_version=req.privacy_consent_version,
         )
 
         try:

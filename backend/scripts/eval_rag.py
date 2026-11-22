@@ -9,10 +9,29 @@ one user, prints the chunks it picked with their scores, and reports:
   noise   share of returned chunks that are not from an expected memory
   reject  not-covered questions (expected: []) that correctly returned nothing
 
+A question with ``passage`` (long-page cases) only counts a chunk as a hit
+when it is from an expected memory AND contains that text (case and spacing
+ignored), so it checks that the best passage of a long save was found, not
+just the save.
+
+``--compare-question-bank`` also runs retrieval without the question-bank leg
+(S6) so its effect is visible. ``--instant`` builds the instant answer for each
+question and reports, per ``RAG_EXTRACT_MIN_SCORE`` (``--extract-sweep``):
+
+  answered  answerable questions that got a quoted answer citing an expected
+            save (passage cases: the chunk holding the passage)
+  wrong     answerable questions answered from no expected save
+  silent    answerable questions answered "not in your saves"
+  reject    not-covered questions that got no quoted answer
+
+Follow-ups are rewritten with the same heuristic Ask uses (no model call).
+
 Usage (from the repo root):
 
     node scripts/run-python.mjs -m scripts.eval_rag --user you@example.com
     node scripts/run-python.mjs -m scripts.eval_rag --user you@example.com --sweep 0.2,0.25,0.3,0.35
+    npm run eval:rag -- --user you@example.com --quiet --compare-question-bank
+    npm run eval:rag -- --user you@example.com --quiet --instant --extract-sweep -0.5,0,0.5
     npm run eval:rag -- --user you@example.com --quiet --json eval.json
 
 Query embeddings are cached for the run, so a threshold sweep costs one
@@ -39,7 +58,7 @@ from app.models.user import User
 from app.schemas.ask import AskTurn
 from app.services import retrieval_service
 from app.services.chunking import format_timestamp
-from app.services.rag_service import RagService
+from app.services.answer.extractive import extract_answer, is_overview_question
 from app.services.retrieval.query_rewriter import rewrite_query
 from app.services.retrieval_service import RetrievalService, RetrievedChunk
 
@@ -54,6 +73,7 @@ class Case:
     question: str
     expected: list[str]
     history: list[AskTurn] = field(default_factory=list)
+    passage: str | None = None
 
 
 @dataclass
@@ -73,7 +93,15 @@ class Outcome:
 
     def matches(self, chunk: RetrievedChunk) -> bool:
         title = chunk.title.lower()
-        return any(part.lower() in title for part in self.case.expected)
+        if not any(part.lower() in title for part in self.case.expected):
+            return False
+        if self.case.passage is None:
+            return True
+        return _normalize(self.case.passage) in _normalize(chunk.content)
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.lower().split())
 
 
 class CachingAdapter:
@@ -82,7 +110,14 @@ class CachingAdapter:
     def __init__(self, inner: Any) -> None:
         self.inner = inner
         self.model_id = getattr(inner, "model_id", None)
+        self.dimensions = getattr(inner, "dimensions", None)
         self.cache: dict[str, list[float]] = {}
+        self.query_cache: dict[str, list[float]] = {}
+
+    def embed_query(self, text: str) -> list[float]:
+        if text not in self.query_cache:
+            self.query_cache[text] = self.inner.embed_query(text)
+        return self.query_cache[text]
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
         missing = [t for t in texts if t not in self.cache]
@@ -100,7 +135,13 @@ def load_cases(path: Path) -> list[Case]:
     for raw in data["questions"]:
         history = [AskTurn(**turn) for turn in raw.get("history", [])]
         cases.append(
-            Case(raw["id"], raw["question"], list(raw.get("expected", [])), history)
+            Case(
+                raw["id"],
+                raw["question"],
+                list(raw.get("expected", [])),
+                history,
+                raw.get("passage"),
+            )
         )
     return cases
 
@@ -191,6 +232,90 @@ def print_summary(label: str, summary: dict[str, float | int]) -> None:
     )
 
 
+def print_passages(outcomes: Sequence[Outcome]) -> None:
+    passages = [o for o in outcomes if o.case.passage is not None]
+    if passages:
+        found = sum(o.rank is not None for o in passages)
+        print(f"long-page cases: {found}/{len(passages)} found the passage")
+
+
+class CachingScorer:
+    """Scores each (question, sentence) once, so a threshold sweep is cheap."""
+
+    def __init__(self) -> None:
+        from app.services.retrieval.reranker import get_reranker
+
+        self.reranker = get_reranker()
+        self.cache: dict[tuple[str, str], float] = {}
+
+    def __call__(self, question: str, sentences: Sequence[str]) -> list[float]:
+        if self.reranker is None:
+            raise SystemExit("--instant needs the reranker (RERANKER_MODEL)")
+        missing = [s for s in sentences if (question, s) not in self.cache]
+        if missing:
+            for text, score in zip(
+                missing, self.reranker.score_sentences(question, missing), strict=True
+            ):
+                self.cache[(question, text)] = score
+        return [self.cache[(question, s)] for s in sentences]
+
+
+def evaluate_instant(
+    outcomes: Sequence[Outcome], thresholds: Sequence[float], *, quiet: bool
+) -> None:
+    """Instant-answer quality per extraction threshold (see module docstring)."""
+    import time
+
+    scorer = CachingScorer()
+    timings: list[float] = []
+    for round_index, threshold in enumerate(thresholds):
+        counts = {"answered": 0, "wrong": 0, "silent": 0, "reject": 0}
+        covered = [o for o in outcomes if o.covered]
+        uncovered = [o for o in outcomes if not o.covered]
+        for o in outcomes:
+            if is_overview_question(o.case.question) or not o.chunks:
+                answer = None
+                used: list[str] = []
+                if o.chunks and is_overview_question(o.case.question):
+                    # Overviews quote the best save's opening lines.
+                    used = ["S1"]
+                    answer = "overview"
+            else:
+                started = time.perf_counter()
+                result = extract_answer(o.case.question, o.chunks, threshold, scorer)
+                if round_index == 0:  # later rounds hit the score cache
+                    timings.append(time.perf_counter() - started)
+                answer, used = result.text, result.used_sources
+            if not o.covered:
+                counts["reject"] += answer is None
+                continue
+            if answer is None:
+                counts["silent"] += 1
+                status = "silent"
+            elif any(o.matches(o.chunks[int(sid[1:]) - 1]) for sid in used):
+                counts["answered"] += 1
+                status = "answered"
+            else:
+                counts["wrong"] += 1
+                status = "WRONG"
+            if not quiet and len(thresholds) == 1:
+                print(f"  instant {status:<8} {o.case.id}: {(answer or '')[:150]!r}")
+        n = len(covered) or 1
+        print(
+            f"instant min_score={threshold:+.2f}  answered={counts['answered'] / n:.2f}  "
+            f"wrong={counts['wrong'] / n:.2f}  silent={counts['silent'] / n:.2f}  "
+            f"reject={counts['reject'] / (len(uncovered) or 1):.2f}"
+        )
+    if timings:
+        ordered = sorted(timings)
+        p50 = ordered[len(ordered) // 2]
+        p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
+        print(
+            f"sentence scoring (uncached): p50 {p50 * 1000:.0f} ms, "
+            f"p95 {p95 * 1000:.0f} ms"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -206,9 +331,16 @@ def main(argv: list[str] | None = None) -> int:
         "--sweep", help="comma-separated RAG_MIN_SIMILARITY values to compare"
     )
     parser.add_argument(
-        "--no-llm-rewrite",
+        "--compare-question-bank",
         action="store_true",
-        help="use the heuristic follow-up rewrite",
+        help="also evaluate without the question-bank leg",
+    )
+    parser.add_argument(
+        "--instant", action="store_true", help="evaluate the instant answer too"
+    )
+    parser.add_argument(
+        "--extract-sweep",
+        help="comma-separated RAG_EXTRACT_MIN_SCORE values for --instant",
     )
     parser.add_argument("--quiet", action="store_true", help="only print the summary")
     parser.add_argument("--json", help="write per-question results to this file")
@@ -235,15 +367,8 @@ def main(argv: list[str] | None = None) -> int:
 
     with SessionLocal() as db:
         user_id = resolve_user(db, args.user)
-        rag = RagService(RetrievalService(db))
-        complete = (
-            None
-            if args.no_llm_rewrite or not rag._llm_configured()
-            else rag._complete_raw
-        )
         queries = {
-            case.id: rewrite_query(case.question, case.history, complete)
-            for case in cases
+            case.id: rewrite_query(case.question, case.history, None) for case in cases
         }
 
         baseline = settings.rag_min_similarity
@@ -252,6 +377,25 @@ def main(argv: list[str] | None = None) -> int:
             print_outcomes(outcomes)
         print(f"\nRetrieval eval over {len(cases)} questions, k={k}")
         print_summary(f"min_similarity={baseline:.2f}", summarize(outcomes))
+
+        if args.compare_question_bank:
+            RetrievalService.use_question_bank = False
+            try:
+                print_summary(
+                    "without question bank",
+                    summarize(evaluate(db, user_id, cases, queries, k)),
+                )
+            finally:
+                RetrievalService.use_question_bank = True
+        print_passages(outcomes)
+
+        if args.instant:
+            values = (
+                [float(v) for v in args.extract_sweep.split(",") if v.strip()]
+                if args.extract_sweep
+                else [settings.rag_extract_min_score]
+            )
+            evaluate_instant(outcomes, values, quiet=args.quiet)
 
         if args.sweep:
             try:

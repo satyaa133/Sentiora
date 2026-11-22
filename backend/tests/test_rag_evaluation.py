@@ -1,5 +1,5 @@
-from app.services.llm.prompts import ANSWER_SYSTEM_PROMPT, META_SYSTEM_PROMPT
-from app.services.llm.structured import ANSWER_META_SCHEMA, RESPONSE_FORMAT
+from app.services.llm.prompts import ANSWER_SYSTEM_PROMPT
+from app.services.llm.structured import TRAILER_MARKER
 
 
 def test_answer_prompt_has_the_rag_v2_rules() -> None:
@@ -12,15 +12,9 @@ def test_answer_prompt_has_the_rag_v2_rules() -> None:
     assert "untrusted" in prompt
 
 
-def test_metadata_schema_is_strict() -> None:
-    assert RESPONSE_FORMAT["type"] == "json_schema"
-    assert RESPONSE_FORMAT["json_schema"]["strict"] is True
-    assert ANSWER_META_SCHEMA["additionalProperties"] is False
-    assert set(ANSWER_META_SCHEMA["required"]) == {"mode", "usedSources", "followUps"}
-    assert ANSWER_META_SCHEMA["properties"]["mode"]["enum"] == [
-        "memory",
-        "general",
-        "mixed",
-    ]
-    assert ANSWER_META_SCHEMA["properties"]["followUps"]["maxItems"] == 3
-    assert "complete, natural, standalone question" in META_SYSTEM_PROMPT
+def test_answer_prompt_asks_for_the_metadata_trailer() -> None:
+    """S6: one call returns the answer, its mode and follow-ups."""
+    assert TRAILER_MARKER in ANSWER_SYSTEM_PROMPT
+    assert '"mode: memory"' in ANSWER_SYSTEM_PROMPT
+    assert "up to 3 follow-up questions" in ANSWER_SYSTEM_PROMPT
+    assert "complete standalone question" in ANSWER_SYSTEM_PROMPT

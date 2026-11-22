@@ -15,6 +15,12 @@ from app.schemas.memory_item import (
 )
 from app.core.sensitive_domains import is_sensitive_url
 from app.services.content_normalizer import extract_domain, canonicalize_url, compute_content_hash, normalize_content
+from app.services.privacy_service import CONSENT_REQUIRED_DETAIL
+from app.services.enrichment_service import (
+    EnrichmentService,
+    RequestResult,
+    forget_enrichment,
+)
 from app.workers.queue import create_queues
 
 logger = logging.getLogger(__name__)
@@ -78,6 +84,8 @@ class MemoryService:
             .first()
         )
         if existing:
+            if payload.enrich:
+                EnrichmentService(self.db).request(existing, force=True)
             return MemoryItemResponse.model_validate(existing)
 
         # Client vs server timestamps
@@ -108,6 +116,9 @@ class MemoryService:
             received_at=server_received_at,
         )
         item = self.repo.create(item)
+        if payload.enrich:
+            # Marked queued now; the capture job starts it once the save is ready.
+            EnrichmentService(self.db).request(item, force=True)
 
         # Enqueue via RQ (primary path). Inline process only if Redis/RQ is down.
         try:
@@ -148,7 +159,7 @@ class MemoryService:
             has_more=(page * per_page) < total,
         )
 
-    def get_item(self, item_id: UUID, user_id: UUID) -> MemoryItemResponse:
+    def _owned(self, item_id: UUID, user_id: UUID) -> MemoryItem:
         item = self.repo.get_by_id(item_id, user_id)
         if not item:
             raise HTTPException(
@@ -156,6 +167,55 @@ class MemoryService:
                 detail={
                     "code": "MEMORY_ITEM_NOT_FOUND",
                     "message": "Memory item not found or you do not have access.",
+                },
+            )
+        return item
+
+    def get_item(self, item_id: UUID, user_id: UUID) -> MemoryItemResponse:
+        item = self._owned(item_id, user_id)
+        # Opening a save in the app is a sign it matters: enrich it (lazily,
+        # within the daily cap; never blocks or fails the request).
+        EnrichmentService(self.db).request_for_memories(user_id, [item.id])
+        return MemoryItemResponse.model_validate(item)
+
+    def rename_item(self, item_id: UUID, user_id: UUID, title: str) -> MemoryItemResponse:
+        """New title for one of the user's saves (searchable at once: title_tsv)."""
+        item = self._owned(item_id, user_id)
+        item.title = title
+        self.db.commit()
+        self.db.refresh(item)
+        return MemoryItemResponse.model_validate(item)
+
+    def enrich_item(self, item_id: UUID, user_id: UUID) -> MemoryItemResponse:
+        """Queue enrichment the user asked for (Summarise button, Save now)."""
+        item = self._owned(item_id, user_id)
+        result = EnrichmentService(self.db).request(item, force=True)
+        if result == RequestResult.already_queued:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "ENRICHMENT_ALREADY_QUEUED",
+                    "message": "This save is already being summarised.",
+                },
+            )
+        if result == RequestResult.over_daily_limit:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": "RATE_LIMITED",
+                    "message": "Daily summary limit reached. Try again tomorrow.",
+                },
+            )
+        if result == RequestResult.consent_required:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=CONSENT_REQUIRED_DETAIL
+            )
+        if result == RequestResult.not_available:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "VALIDATION_ERROR",
+                    "message": "This save has no content to summarise.",
                 },
             )
         return MemoryItemResponse.model_validate(item)
@@ -170,5 +230,6 @@ class MemoryService:
                     "message": "Memory item not found or you do not have access.",
                 },
             )
+        forget_enrichment(self.db, item)
         self.chunk_repo.delete_for_memory(item.id, user_id)
         self.repo.soft_delete(item)

@@ -186,7 +186,8 @@ describe("popup", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Save now" }));
 
     expect(await screen.findByText("Saved. Echo's got it.")).toBeInTheDocument();
-    expect(screen.getByText("Searchable in a few seconds.")).toBeInTheDocument();
+    expect(screen.getByText("Processing. Searchable in a few seconds.")).toBeInTheDocument();
+    // Save now asks for a summary; automatic saves never do (checked in background tests).
 
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Undo" }));
@@ -196,6 +197,37 @@ describe("popup", () => {
       method: "DELETE",
     });
     expect(await screen.findByText("Removed from your memory.")).toBeInTheDocument();
+  });
+
+  it("follows a saved page from processing to ready", async () => {
+    signedIn();
+    installChrome({
+      url: "https://blog.example.dev/post",
+      title: "Understanding containers",
+      forceCapture: {
+        success: true,
+        payload: {
+          source_type: "webpage",
+          url: "https://blog.example.dev/post",
+          title: "Understanding containers",
+          content: "Body",
+        },
+      },
+      captureResult: { success: true, status: "pending", memoryId: "new-2" },
+    });
+    api.extApiFetch.mockImplementation(async (path: string) =>
+      path === "/memory-items/new-2"
+        ? { data: { status: "ready" } }
+        : path.startsWith("/memory-items?")
+          ? { data: RECENT }
+          : { data: {} },
+    );
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Save now" }));
+    expect(await screen.findByText("Processing. Searchable in a few seconds.")).toBeInTheDocument();
+    expect(await screen.findByText("Ready. Searchable now.", {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(api.extApiFetch).toHaveBeenCalledWith("/memory-items/new-2");
   });
 
   it("hides Undo when the save was deduplicated", async () => {

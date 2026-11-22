@@ -1,3 +1,5 @@
+import { PRIVACY_NOTICE_VERSION } from "@shared/ui";
+import { resetPrivacyConsentCache } from "../hooks/usePrivacyConsent";
 import {
   createContext,
   useCallback,
@@ -83,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearSession = useCallback(() => {
     clearAuthStorage();
+    resetPrivacyConsentCache();
     broadcastAuthLogout();
     setUser(null);
   }, []);
@@ -252,6 +255,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
         full_name: fullName,
+        // The notice shown on the sign-up page (D10); the API stores it.
+        privacy_consent_version: PRIVACY_NOTICE_VERSION,
       });
     },
     [],

@@ -48,6 +48,8 @@ export interface AskRequest {
   history?: AskTurn[];
   /** IANA time zone for "today" / "yesterday" questions. */
   tz?: string;
+  /** "instant" (default): quoted from the saves, no AI. "ai": Explain with AI. */
+  answer_mode?: "instant" | "ai";
 }
 
 /** What Ask is limited to: one saved memory, or one source type. */
@@ -98,6 +100,8 @@ export class AskApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly code?: string,
+    /** Seconds to wait before retrying (AI_BUSY, rate limits). */
+    public readonly retryAfter?: number,
   ) {
     super(message);
     this.name = "AskApiError";

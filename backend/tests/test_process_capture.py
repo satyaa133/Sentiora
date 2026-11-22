@@ -32,7 +32,7 @@ def _auth_headers(email: str) -> dict[str, str]:
     password = "MemoryPassword123!"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "Chunk Tester"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "Chunk Tester"},
     )
     login_resp = client.post("/api/v1/auth/login", json={"email": email, "password": password})
     token = login_resp.json()["data"]["access_token"]
@@ -79,7 +79,8 @@ def test_process_capture_creates_owned_chunks_without_duplicates() -> None:
             .order_by(MemoryChunk.chunk_index)
             .all()
         )
-        assert len(chunks) >= 2
+        # Short headed sections merge into one chunk (MIN_SECTION_CHARS).
+        assert len(chunks) >= 1
         indexes = [chunk.chunk_index for chunk in chunks]
         assert indexes == list(range(len(chunks)))
         assert {str(chunk.user_id) for chunk in chunks} == {item["user_id"]}
@@ -160,6 +161,9 @@ def test_process_capture_fails_when_extraction_is_empty() -> None:
 
 def test_process_capture_stays_ready_when_embeddings_fail(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class BoomAdapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             raise RuntimeError("quota exceeded")
 

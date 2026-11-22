@@ -6,12 +6,14 @@ from sqlalchemy.orm import Session as DBSession
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.schemas.envelope import response_meta
+from app.schemas.privacy import PrivacyConsentRequest
 from app.schemas.source_preference import (
     BulkSourcePreferencesRequest,
     OnboardingCompleteRequest,
     SourceId,
     UpdateSourcePreferenceRequest,
 )
+from app.services.privacy_service import consent_fields, record_consent
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -146,5 +148,25 @@ def complete_onboarding(
             "sources": {key: value.value for key, value in prefs.sources.items()},
             "onboarding_completed": prefs.onboarding_completed,
         },
+        "meta": response_meta(request).model_dump(),
+    }
+
+
+@router.post(
+    "/me/privacy-consent",
+    status_code=status.HTTP_200_OK,
+    summary="Accept the current privacy notice (needed for AI features)",
+    responses={422: {"description": "VALIDATION_ERROR: not the current notice version"}},
+)
+def accept_privacy_notice(
+    req: PrivacyConsentRequest,
+    request: Request,
+    db: Annotated[DBSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    user = record_consent(db, current_user, req.version)
+    return {
+        "success": True,
+        "data": consent_fields(user),
         "meta": response_meta(request).model_dump(),
     }

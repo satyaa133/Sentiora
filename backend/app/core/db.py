@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Generator
 from functools import lru_cache
 from typing import Any
@@ -8,11 +9,25 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 def _register_pgvector(dbapi_connection: Any, _connection_record: Any) -> None:
     from pgvector.psycopg import register_vector
 
     register_vector(dbapi_connection)
+    # The HNSW index spans every user's chunks and the user filter runs after
+    # it. Without iterative scans the index returns its first ef_search (40)
+    # neighbours across all users, and a user whose chunks are not among them
+    # gets no vector results at all. relaxed_order keeps scanning until enough
+    # rows pass the filter (pgvector 0.8+); callers re-sort by distance.
+    try:
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute("SET hnsw.iterative_scan = relaxed_order")
+        dbapi_connection.commit()  # keep the setting past the pool's rollback
+    except Exception:
+        dbapi_connection.rollback()
+        logger.warning("Could not enable pgvector iterative scans", exc_info=True)
 
 
 @lru_cache(maxsize=1)

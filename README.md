@@ -170,7 +170,15 @@ Set `LLM_PROVIDER` (`openai`, `gemini`, or `openrouter`) plus its key in `backen
 
 **More than one chat key.** Ask rotates across every chat key that is set (`OPENROUTER_API_KEY`, the optional `OPENROUTER_API_KEY_2`, `GEMINI_API_KEY`, `OPENAI_API_KEY`), starting with the `LLM_PROVIDER` one. A key that is out of credits, revoked or rate-limited is skipped for `LLM_KEY_COOLDOWN_SECONDS` (default 300), an overloaded one for 30 seconds, so answers never wait on a dead key. `backend/.env` is git-ignored; never put keys in `.env.example`.
 
-**Semantic search needs an embedding key.** OpenRouter provides chat only, so with `LLM_PROVIDER=openrouter` set `OPENAI_API_KEY` or `GEMINI_API_KEY` as well. `EMBEDDING_PROVIDER=auto` (default) picks the provider; `GEMINI_EMBEDDING_MODEL` must output 1536 dimensions (`gemini-embedding-001`). Restart the API and worker after changing keys. Vectors are model-specific, so re-capture after switching embedding models.
+**Semantic search runs on your machine.** With `EMBEDDING_PROVIDER=local` (as in `.env.example`) saves and questions are embedded on the CPU with quantized `nomic-embed-text-v1.5` (fastembed): no key, nothing sent anywhere. The model (~130 MB) downloads into `backend/.models` the first time the API or worker embeds; the Docker image has it built in. After upgrading the database, fill the local vectors for existing saves once (about 0.25 s per chunk):
+
+```bash
+node scripts/run-python.mjs -m scripts.reprocess_memories --embed
+```
+
+The remote providers (`openrouter`, `openai`, `gemini`, `auto`) still work and keep their own vectors (`memory_chunks.embedding`), so switching back is a setting; each provider needs its own `RAG_MIN_SIMILARITY` (local: 0.65, remote: 0.25). Restart the API and worker after changing either.
+
+**Reranking also runs on your machine.** After search picks candidates, a small cross-encoder (`jinaai/jina-reranker-v1-tiny-en`, ~130 MB, downloaded on first use) re-reads the top `RAG_RERANK_CANDIDATES` (10) with the question and puts the passage that answers it first. It adds about 0.25 s per question on a laptop CPU; `RERANKER_MODEL=none` turns it off.
 
 Without a provider key:
 
@@ -198,7 +206,29 @@ In a separate terminal, start the background worker to process captures:
 npm run dev:worker
 ```
 
-The worker reconnects on its own if Redis restarts, and re-queues captures left pending.
+The worker reconnects on its own if Redis restarts, and re-queues captures left pending. When a capture's embedding call fails, the worker retries it 1, 5 and 30 minutes later; until then the save is searchable by keyword.
+
+To process captures in parallel (for example when testing many saves at once), run `npm run dev:worker` in a second terminal as well; workers share the queue and only one of them queues the scheduled retries. Production runs `WORKER_COUNT` workers (default 2, `docker-compose.prod.yml`).
+
+The worker listens to two queues: `sentiora.capture` (processing saves, always first) and `sentiora.enrich` (AI summaries, key points and the question bank). To dedicate a worker to one, pass it: `npm run dev:worker -- capture` or `npm run dev:worker -- enrich`. Enrichment only runs for saves that matter (Save now, opened in the app, a source of an Ask answer), at most `ENRICH_DAILY_LIMIT` (50) per user per day. It uses Groq only (no paid fallback) and retries after 1, 5, 30 minutes and 6 hours when Groq is down or rate-limited. To enrich existing saves (one AI call each, with a pause between calls):
+
+```bash
+node scripts/run-python.mjs -m scripts.reprocess_memories --enrich --user you@example.com --delay 8
+```
+
+If the API won't start because port 8000 is in use, check for the containerised backend with `docker ps` and stop it with `docker compose --profile app stop backend worker`.
+
+### See What the App Is Doing
+
+- **Logs:** every line carries the request ID (`req_…`, also in the `X-Request-ID` header) or `job_<id>` in the worker. Set `LOG_FORMAT=json` for one JSON object per line.
+- **Metrics:** http://localhost:8000/metrics (Prometheus format): request latency per route, time per Ask stage (`sentiora_ask_stage_seconds`), AI provider errors, capture queue lengths. In production it isn't exposed through nginx.
+- **AI cost:** every AI call is a row in `llm_usage` (tokens, cost reported by OpenRouter, latency, success). For example, spend per day:
+  ```sql
+  SELECT date_trunc('day', created_at) AS day, purpose, count(*), sum(cost_usd)
+  FROM llm_usage GROUP BY 1, 2 ORDER BY 1 DESC;
+  ```
+- **Answer ratings:** Helpful / Not helpful clicks land in `answer_feedback` (question stored as a hash).
+- **Errors:** set `SENTRY_DSN` in `backend/.env` to report API and worker errors to Sentry (no request bodies, auth headers or local variables are sent).
 
 ### Load the Chrome Extension
 
@@ -378,21 +408,19 @@ General-knowledge answers go beyond PRD §15, which limits Ask to saved memory. 
 
 ## Documentation
 
-All canonical engineering specifications live in `docs/`:
+Engineering documentation lives in `docs/` (index: `docs/README.md`):
 
 | File | Description |
 |---|---|
+| `docs/REBUILD_PLAN.md` | **Current work:** the v3 rebuild plan (stages, decisions, planned changes) |
 | `docs/TASKS.md` | Live engineering progress tracker and deliverables |
-| `docs/qa-audit/TEAM_SETUP.md` | Team setup walkthrough and **troubleshooting** table |
+| `docs/API.md` | API conventions, endpoints and error codes; schemas in `docs/api/openapi.json` (`npm run docs:api`) |
+| `docs/DATABASE.md` | Database tables, indexes and migrations |
+| `docs/RAG_v2_ADDENDUM.md` | Current Ask and retrieval design |
+| `docs/TEAM_SETUP.md` | Team setup walkthrough and **troubleshooting** table |
 | `docs/DESIGN.md` | UI design system and redesign handoff (screenshots in `docs/design/`) |
 | `docs/Capture_Module_v2_Technical_Design.pdf` | Capture module v2 technical design |
 | `docs/RELEASE.md` | Production deployment, Chrome Web Store packaging, YouTube capture limits |
-| `docs/01_PRD_v2.1_FINAL.pdf` | Product Requirements Document |
-| `docs/02_SRS_v1.0.pdf` | Software Requirements Specification |
-| `docs/03_Backend_Technical_Specification_v1.2.pdf` | Backend technical architecture |
-| `docs/04_Technical_Specification_v1.2.pdf` | Full system architecture specification |
-| `docs/05_API_Specification_v1.0.pdf` | API endpoint contracts |
-| `docs/06_Database_Schema_Design_v1.2.pdf` | Database schema design |
-| `docs/07_Development_Implementation_Plan.pdf` | Implementation phase breakdown |
-| `docs/08_UIUX_Specification_v1.0_FINAL.pdf` | UI/UX design specifications |
+| `docs/01_PRD_v2.1_FINAL.pdf` | Product vision (scope superseded by the rebuild plan) |
+| `docs/archive/` | Superseded specifications (SRS, backend/technical specs, API and database PDFs, implementation plan, UI/UX PDF, Oct 2026 QA reports) |
 

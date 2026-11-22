@@ -2,8 +2,11 @@ import { API_BASE_URL, refreshAccessToken } from "./apiClient";
 import { clearAuthStorage, getAccessToken } from "./authStorage";
 import { AskApiError, type AskCitation, type AskRequest } from "./askService";
 
-/** How the answer used the user's memory (POST /chat/stream `final.mode`). */
-export type StreamMode = "memory" | "general" | "mixed";
+/**
+ * How the answer used the user's memory (POST /chat/stream `final.mode`).
+ * "instant": quoted from the user's saves without an AI call (the default since S6).
+ */
+export type StreamMode = "memory" | "general" | "mixed" | "instant";
 
 /** A numbered source the answer may cite as [S1], [S2], ... */
 export interface StreamSource extends AskCitation {
@@ -18,6 +21,8 @@ export interface StreamFinal {
   followUps: string[];
   insufficient_context: boolean;
   used_fallback: boolean;
+  /** "Explain with AI" can add to this answer (S6; the button arrives in S7). */
+  aiAvailable?: boolean;
 }
 
 export interface AskStreamHandlers {
@@ -48,14 +53,23 @@ function parseEvent(block: string): StreamEvent | null {
 async function errorFrom(response: Response): Promise<AskApiError> {
   let code: string | undefined;
   let message = "Sentiora could not answer right now.";
+  let retryAfter: number | undefined;
   try {
-    const body = (await response.json()) as { error?: { code?: string; message?: string } };
+    const body = (await response.json()) as {
+      error?: { code?: string; message?: string; details?: { retry_after?: unknown } | null };
+    };
     code = body.error?.code;
     message = body.error?.message ?? message;
+    const fromBody = body.error?.details?.retry_after;
+    if (typeof fromBody === "number") retryAfter = fromBody;
   } catch {
     // Not JSON (e.g. a proxy error page): keep the generic message.
   }
-  return new AskApiError(message, response.status, code);
+  if (retryAfter === undefined) {
+    const header = Number(response.headers?.get?.("Retry-After"));
+    if (Number.isFinite(header) && header > 0) retryAfter = header;
+  }
+  return new AskApiError(message, response.status, code, retryAfter);
 }
 
 function post(payload: AskRequest, token: string | null, signal?: AbortSignal) {

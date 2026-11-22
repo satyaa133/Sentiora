@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.models.memory_item import SourceType
 
 AnswerMode = Literal["memory", "general", "combined"]
+# How Ask answers (S6): "instant" quotes the user's saves without an AI call;
+# "ai" is the written AI answer ("Explain with AI").
+ChatMode = Literal["instant", "ai"]
 
 
 class AskTurn(BaseModel):
@@ -25,6 +28,8 @@ class AskRequest(BaseModel):
     history: list[AskTurn] = Field(default_factory=list, max_length=4)
     # IANA zone used for "today" / "yesterday" questions. Defaults to UTC.
     tz: str | None = Field(default=None, max_length=64)
+    # Unset: ASK_DEFAULT_MODE (instant).
+    answer_mode: ChatMode | None = None
 
     @field_validator("tz")
     @classmethod

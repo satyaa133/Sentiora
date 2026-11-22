@@ -24,7 +24,7 @@ def _auth_headers(email: str) -> dict[str, str]:
     password = "MemoryPassword123!"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "Ask Tester"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "Ask Tester"},
     )
     login_resp = client.post("/api/v1/auth/login", json={"email": email, "password": password})
     return {"Authorization": f"Bearer {login_resp.json()['data']['access_token']}"}
@@ -76,6 +76,9 @@ def _index_memory(email: str, title: str, url: str, content: str) -> tuple[dict[
 
 def test_search_finds_semantically_related_chunk(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -101,6 +104,9 @@ def test_search_finds_semantically_related_chunk(monkeypatch) -> None:  # type: 
 
 def test_chat_returns_grounded_answer_and_citations(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -136,7 +142,7 @@ def test_chat_returns_grounded_answer_and_citations(monkeypatch) -> None:  # typ
 
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What did I learn about binary search?"},
+        json={"answer_mode": "ai", "question": "What did I learn about binary search?"},
         headers=headers,
     )
     assert chat_resp.status_code == 200
@@ -150,6 +156,9 @@ def test_chat_returns_grounded_answer_and_citations(monkeypatch) -> None:  # typ
 
 def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -186,7 +195,7 @@ def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  #
     )
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What did I save about quantum computing superconductors?"},
+        json={"answer_mode": "ai", "question": "What did I save about quantum computing superconductors?"},
         headers=headers,
     )
     assert chat_resp.status_code == 200
@@ -198,6 +207,9 @@ def test_chat_insufficient_context_does_not_hallucinate(monkeypatch) -> None:  #
 
 def test_chat_is_isolated_by_authenticated_user(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -250,7 +262,7 @@ def test_chat_uses_grounded_fallback_when_llm_not_configured(monkeypatch) -> Non
     )
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is binary search?"},
+        json={"answer_mode": "ai", "question": "What is binary search?"},
         headers=headers,
     )
     assert chat_resp.status_code == 200
@@ -295,7 +307,7 @@ def test_chat_generic_question_answers_from_ready_memory(monkeypatch) -> None:  
     )
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is this article about?"},
+        json={"answer_mode": "ai", "question": "What is this article about?"},
         headers=headers,
     )
     assert chat_resp.status_code == 200
@@ -340,7 +352,7 @@ def test_chat_falls_back_when_llm_completion_fails(monkeypatch) -> None:  # type
     )
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is binary search?"},
+        json={"answer_mode": "ai", "question": "What is binary search?"},
         headers=headers,
     )
     # Matching memory was found, so the question is answered from it locally.
@@ -513,7 +525,7 @@ def test_chat_selects_relevant_memory_among_many(monkeypatch) -> None:  # type: 
 
     react = client.post(
         "/api/v1/chat",
-        json={"question": "What is the React article about?"},
+        json={"answer_mode": "ai", "question": "What is the React article about?"},
         headers=headers,
     ).json()["data"]
     assert react["insufficient_context"] is False
@@ -524,7 +536,7 @@ def test_chat_selects_relevant_memory_among_many(monkeypatch) -> None:  # type: 
 
     docker = client.post(
         "/api/v1/chat",
-        json={"question": "What did I save about Docker networking?"},
+        json={"answer_mode": "ai", "question": "What did I save about Docker networking?"},
         headers=headers,
     ).json()["data"]
     assert docker["citations"][0]["memory_id"] == docker_id
@@ -533,7 +545,7 @@ def test_chat_selects_relevant_memory_among_many(monkeypatch) -> None:  # type: 
 
     postgres = client.post(
         "/api/v1/chat",
-        json={"question": "What did I save about PostgreSQL indexing?"},
+        json={"answer_mode": "ai", "question": "What did I save about PostgreSQL indexing?"},
         headers=headers,
     ).json()["data"]
     assert postgres["citations"][0]["memory_id"] == postgres_id
@@ -542,7 +554,7 @@ def test_chat_selects_relevant_memory_among_many(monkeypatch) -> None:  # type: 
 
     compare = client.post(
         "/api/v1/chat",
-        json={"question": "Compare the Docker and PostgreSQL notes."},
+        json={"answer_mode": "ai", "question": "Compare the Docker and PostgreSQL notes."},
         headers=headers,
     ).json()["data"]
     cited = {item["memory_id"] for item in compare["citations"]}
@@ -554,7 +566,7 @@ def test_chat_selects_relevant_memory_among_many(monkeypatch) -> None:  # type: 
 
     missing = client.post(
         "/api/v1/chat",
-        json={"question": "Tell me something about Redis."},
+        json={"answer_mode": "ai", "question": "Tell me something about Redis."},
         headers=headers,
     ).json()["data"]
     assert missing["insufficient_context"] is True
@@ -582,7 +594,7 @@ def test_chat_generic_question_uses_latest_when_vault_has_many(monkeypatch) -> N
     )
     generic = client.post(
         "/api/v1/chat",
-        json={"question": "What is this article about?"},
+        json={"answer_mode": "ai", "question": "What is this article about?"},
         headers=headers,
     ).json()["data"]
     assert generic["insufficient_context"] is False
@@ -592,6 +604,9 @@ def test_chat_generic_question_uses_latest_when_vault_has_many(monkeypatch) -> N
 
 def test_chat_hybrid_retrieval_does_not_prefer_unrelated_semantic_hit(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     class Adapter:
+        def embed_query(self, text: str) -> list[float]:
+            return self.embed_texts([text])[0]
+
         def embed_texts(self, texts: list[str]) -> list[list[float]]:
             return _hashed_embed(texts)
 
@@ -615,7 +630,7 @@ def test_chat_hybrid_retrieval_does_not_prefer_unrelated_semantic_hit(monkeypatc
     )
     chat = client.post(
         "/api/v1/chat",
-        json={"question": "What is the React article about?"},
+        json={"answer_mode": "ai", "question": "What is the React article about?"},
         headers=headers,
     ).json()["data"]
     assert chat["citations"][0]["memory_id"] == react_id
@@ -626,7 +641,7 @@ def test_chat_with_no_ready_memories_is_insufficient() -> None:
     headers = _auth_headers("ask_noready@example.com")
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is binary search?"},
+        json={"answer_mode": "ai", "question": "What is binary search?"},
         headers=headers,
     )
     assert chat_resp.status_code == 200
@@ -661,7 +676,7 @@ def test_chat_treats_injected_webpage_content_as_untrusted_data(monkeypatch) -> 
     )
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is binary search?"},
+        json={"answer_mode": "ai", "question": "What is binary search?"},
         headers=headers,
     )
     assert chat_resp.status_code == 200
@@ -685,7 +700,7 @@ def test_chat_deleted_memory_is_not_retrievable(monkeypatch) -> None:  # type: i
     assert del_resp.status_code == 200
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is binary search?", "memory_id": item_id},
+        json={"answer_mode": "ai", "question": "What is binary search?", "memory_id": item_id},
         headers=headers,
     )
     payload = chat_resp.json()["data"]
@@ -720,7 +735,7 @@ def test_chat_file_source_is_marked_unavailable(monkeypatch) -> None:  # type: i
     process_capture(item_id)
     chat_resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is TCS NQT?"},
+        json={"answer_mode": "ai", "question": "What is TCS NQT?"},
         headers=headers,
     )
     payload = chat_resp.json()["data"]
@@ -776,7 +791,7 @@ def test_summarize_merge_k_sorted_arrays_is_multi_point(monkeypatch) -> None:  #
     )
     chat = client.post(
         "/api/v1/chat",
-        json={"question": "Summarize Merge k Sorted Arrays"},
+        json={"answer_mode": "ai", "question": "Summarize Merge k Sorted Arrays"},
         headers=headers,
     )
     assert chat.status_code == 200
@@ -804,7 +819,7 @@ def test_key_details_from_resume_are_structured(monkeypatch) -> None:  # type: i
     )
     chat = client.post(
         "/api/v1/chat",
-        json={"question": "Key details from Vansh Resume CRM"},
+        json={"answer_mode": "ai", "question": "Key details from Vansh Resume CRM"},
         headers=headers,
     )
     payload = chat.json()["data"]
@@ -830,7 +845,7 @@ def test_technical_explanation_uses_reasoning_from_memory(monkeypatch) -> None: 
     )
     chat = client.post(
         "/api/v1/chat",
-        json={"question": "Explain Merge k Sorted Arrays"},
+        json={"answer_mode": "ai", "question": "Explain Merge k Sorted Arrays"},
         headers=headers,
     )
     payload = chat.json()["data"]
@@ -856,7 +871,7 @@ def test_injected_memory_is_still_summarized_without_following_jailbreak(
     )
     chat = client.post(
         "/api/v1/chat",
-        json={"question": "Summarize Binary Search Explained"},
+        json={"answer_mode": "ai", "question": "Summarize Binary Search Explained"},
         headers=headers,
     )
     payload = chat.json()["data"]
@@ -881,7 +896,7 @@ def test_very_small_memory_is_not_artificially_padded(monkeypatch) -> None:  # t
     )
     chat = client.post(
         "/api/v1/chat",
-        json={"question": "What is Tiny Note about?"},
+        json={"answer_mode": "ai", "question": "What is Tiny Note about?"},
         headers=headers,
     )
     payload = chat.json()["data"]
@@ -905,7 +920,7 @@ def test_large_memory_is_synthesized_not_dumped(monkeypatch) -> None:  # type: i
     )
     chat = client.post(
         "/api/v1/chat",
-        json={"question": "Summarize Merge k Sorted Arrays"},
+        json={"answer_mode": "ai", "question": "Summarize Merge k Sorted Arrays"},
         headers=headers,
     )
     payload = chat.json()["data"]

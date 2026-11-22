@@ -45,6 +45,11 @@ class User(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    # Privacy notice (REBUILD_PLAN D10): the version the user accepted, and when.
+    privacy_consent_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    privacy_consented_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     profile: Mapped["UserProfile | None"] = relationship(
         "UserProfile",

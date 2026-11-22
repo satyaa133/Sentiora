@@ -153,7 +153,7 @@ def test_reclean_script_rechunks_ready_memory(tmp_path) -> None:
     password = "MemoryPassword123!"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "Reclean Tester"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "Reclean Tester"},
     )
     token = client.post(
         "/api/v1/auth/login", json={"email": email, "password": password}

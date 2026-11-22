@@ -65,6 +65,8 @@ ENV/
 .eggs/
 backend/.venv/
 backend/.venv312/
+# Local embedding / reranker model files (downloaded once; baked into the image)
+backend/.models/
 
 # Temporary & Backup files
 *.tmp

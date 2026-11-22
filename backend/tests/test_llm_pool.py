@@ -97,7 +97,7 @@ def test_out_of_credits_key_fails_over_and_cools_down(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(RagService, "_call_backend", fake_call)
 
-    first = rag.ask(user_id=USER, question="How do containers work?")
+    first = rag.ask(answer_mode="ai", user_id=USER, question="How do containers work?")
     assert first.used_fallback is False
     assert "Answer from Gemini" in first.answer
     assert calls == ["openrouter", "gemini"]
@@ -105,13 +105,17 @@ def test_out_of_credits_key_fails_over_and_cools_down(monkeypatch: pytest.Monkey
     # The exhausted key is now cooling down: the next question skips it, even
     # though rotation would have started with it.
     calls.clear()
-    rag.ask(user_id=USER, question="And virtual machines?")
-    rag.ask(user_id=USER, question="And images?")
+    rag.ask(answer_mode="ai", user_id=USER, question="And virtual machines?")
+    rag.ask(answer_mode="ai", user_id=USER, question="And images?")
     assert calls == ["gemini", "gemini"]
 
 
 def test_gemini_bad_key_400_cools_the_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    rag = _rag(monkeypatch, _settings(gemini_api_key="gm-1", openrouter_api_key="or-1"))
+    # Gemini is the primary here, so every question starts on it until it cools.
+    rag = _rag(
+        monkeypatch,
+        _settings(llm_provider="gemini", gemini_api_key="gm-1", openrouter_api_key="or-1"),
+    )
     calls: list[str] = []
 
     class _BadKeyError(Exception):
@@ -125,9 +129,40 @@ def test_gemini_bad_key_400_cools_the_key(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(RagService, "_call_backend", fake_call)
     for _ in range(3):
-        rag.ask(user_id=USER, question="How do containers work?")
-    # Tried once, then skipped while cooling, even when rotation starts on it.
-    assert calls.count("gemini") == 1
+        rag.ask(answer_mode="ai", user_id=USER, question="How do containers work?")
+    # Tried once, then skipped while cooling.
+    assert calls == ["gemini", "openrouter", "openrouter", "openrouter"]
+
+
+def test_backup_provider_answers_only_when_the_primary_keys_cannot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _settings(
+        openrouter_api_key="or-1", openrouter_api_key_2="or-2", gemini_api_key="gm-1"
+    )
+    backends = build_backends(settings)
+    # The two OpenRouter keys take turns; Gemini (backup) is always last.
+    orders = [[b.name for b in key_pool.order(backends)] for _ in range(4)]
+    assert orders == [
+        ["openrouter", "openrouter-2", "gemini"],
+        ["openrouter-2", "openrouter", "gemini"],
+        ["openrouter", "openrouter-2", "gemini"],
+        ["openrouter-2", "openrouter", "gemini"],
+    ]
+
+    rag = _rag(monkeypatch, settings)
+    calls: list[str] = []
+
+    def fake_call(self: RagService, backend: LLMBackend, prompt: str, system_prompt: str) -> str:
+        calls.append(backend.name)
+        if backend.provider == "openrouter":
+            raise _ProviderError(402)  # out of credits
+        return "Answer from the backup [1]."
+
+    monkeypatch.setattr(RagService, "_call_backend", fake_call)
+    answer = rag.ask(answer_mode="ai", user_id=USER, question="How do containers work?")
+    assert "backup" in answer.answer
+    assert calls[-1] == "gemini" and set(calls[:-1]) == {"openrouter", "openrouter-2"}
 
 
 def test_non_key_errors_do_not_cool_a_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,7 +193,42 @@ def test_every_key_failing_still_answers_from_memory(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(RagService, "_call_backend", always_fail)
 
-    resp = rag.ask(user_id=USER, question="Do containers share the host kernel?")
+    resp = rag.ask(answer_mode="ai", user_id=USER, question="Do containers share the host kernel?")
     assert sorted(calls) == ["openrouter", "openrouter-2"]
     assert resp.used_fallback is True
     assert "host kernel" in resp.answer
+
+
+def test_groq_is_the_first_backup_after_the_primary() -> None:
+    settings = _settings(
+        openrouter_api_key="or-1",
+        gemini_api_key="gm-1",
+        groq_api_key="gq-1",
+        groq_chat_model="openai/gpt-oss-120b",
+    )
+    backends = build_backends(settings)
+    assert [b.name for b in backends] == ["openrouter", "groq", "gemini"]
+    assert backends[1].model == "openai/gpt-oss-120b"
+
+    groq_first = _settings(llm_provider="groq", groq_api_key="gq-1", openrouter_api_key="or-1")
+    assert [b.name for b in build_backends(groq_first)] == ["groq", "openrouter"]
+
+
+def test_groq_calls_use_its_endpoint_and_short_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, Any] = {}
+
+    class _FakeOpenAI:
+        def __init__(self, **kwargs: Any) -> None:
+            created.update(kwargs)
+
+    monkeypatch.setattr("app.services.rag_service.OpenAI", _FakeOpenAI)
+    rag = _rag(monkeypatch, _settings(groq_api_key="gq-1"))
+    groq = LLMBackend(name="groq", provider="groq", api_key="gq-1", model="openai/gpt-oss-120b")
+    _, extra = rag._openai_client(groq, 10.0)
+    assert created["base_url"] == "https://api.groq.com/openai/v1"
+    assert created["api_key"] == "gq-1" and created["max_retries"] == 0
+    assert extra.body == {"reasoning_effort": "low"}
+    assert extra.headers is None  # OpenRouter's headers and usage flag aren't sent
+
+    other = LLMBackend(name="groq", provider="groq", api_key="gq-1", model="llama-3.3-70b-versatile")
+    assert rag._openai_client(other, 10.0)[1].body is None

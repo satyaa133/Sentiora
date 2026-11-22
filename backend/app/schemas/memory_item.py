@@ -56,6 +56,9 @@ class MemoryItemCreate(BaseModel):
     # New fields for Capture v2
     structured_content: list[StructuredNode] | None = Field(default=None, max_length=5000)
     extraction: ExtractionMetadata | None = None
+    # The user asked for this save (extension "Save now"): enrich it once it is
+    # processed (summary, key points, question bank). Auto-saves send false.
+    enrich: bool = False
 
     @field_validator("url", mode="before")
     @classmethod
@@ -97,6 +100,20 @@ class MemoryItemCreate(BaseModel):
         return val
 
 
+class MemoryItemUpdate(BaseModel):
+    """Fields a user may change on a save (S7: the title)."""
+
+    title: str = Field(min_length=1, max_length=300)
+
+    @field_validator("title")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("title must not be blank")
+        return cleaned
+
+
 class MemoryItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -129,6 +146,10 @@ class MemoryItemResponse(BaseModel):
     extraction_quality_reasons: list[str] | None = None
     raw_content_length: int = 0
     received_at: datetime | None = None
+
+    # Enrichment (S5): written in the background for saves that matter.
+    key_points: list[str] | None = None
+    enrichment_status: Literal["none", "queued", "ready", "failed"] = "none"
 
 
 class MemoryItemListResponse(BaseModel):

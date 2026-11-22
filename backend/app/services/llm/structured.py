@@ -1,10 +1,9 @@
-"""Structured answer metadata: schema, validation and graceful fallback.
+"""Answer metadata: validation, citation checks and the one-call trailer.
 
-After the answer text is generated, a separate non-streaming call asks the
-model for ``{mode, usedSources, followUps}`` using OpenRouter Structured
-Outputs (``response_format: json_schema``, ``strict: true``,
-``provider.require_parameters: true``). The reply is validated here; on any
-failure the metadata is derived from the answer's ``[S#]`` markers instead and
+Since S6 the AI answer call returns its metadata in a trailer after the answer
+text (``<<<META>>>``, a mode line, follow-up questions) instead of a second
+structured call. The trailer is validated here; when it is missing or
+malformed the metadata is derived from the answer's ``[S#]`` markers and
 follow-ups are left empty.
 """
 
@@ -12,31 +11,11 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 MetaMode = Literal["memory", "general", "mixed"]
-
-ANSWER_META_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "mode": {"type": "string", "enum": ["memory", "general", "mixed"]},
-        "usedSources": {"type": "array", "items": {"type": "string"}},
-        "followUps": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
-    },
-    "required": ["mode", "usedSources", "followUps"],
-    "additionalProperties": False,
-}
-
-RESPONSE_FORMAT: dict[str, Any] = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "answer_meta",
-        "strict": True,
-        "schema": ANSWER_META_SCHEMA,
-    },
-}
 
 _MARKER_RE = re.compile(r"\[S(\d+)\]")
 _MAX_FOLLOWUP_CHARS = 140
@@ -136,3 +115,86 @@ def normalize_markers(answer: str) -> str:
     return _LEGACY_MARKER_RE.sub(
         lambda m: "".join(f"[S{n}]" for n in re.findall(r"\d+", m.group(1))), answer
     )
+
+
+# -- one-call answers (S6) ----------------------------------------------------
+# The AI answer ends with a trailer instead of a second metadata call:
+#
+#   <answer text>
+#   <<<META>>>
+#   mode: memory | general | mixed
+#   - follow-up question?
+#
+# The trailer is never streamed to the client.
+TRAILER_MARKER = "<<<META>>>"
+_MODE_LINE_RE = re.compile(r"^\s*mode\s*[:=]\s*(memory|general|mixed)\b", re.IGNORECASE)
+_FOLLOWUP_LINE_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s*(.+)$")
+
+
+class TrailerSplitter:
+    """Splits streamed model output into answer text and the metadata trailer.
+
+    ``feed`` returns the text that is safe to show now: it holds back a tail
+    that could be the start of the marker, and everything after the marker.
+    """
+
+    def __init__(self) -> None:
+        self._pending = ""
+        self._trailer: str | None = None
+
+    def feed(self, piece: str) -> str:
+        if self._trailer is not None:
+            self._trailer += piece
+            return ""
+        text = self._pending + piece
+        at = text.find(TRAILER_MARKER)
+        if at >= 0:
+            self._trailer = text[at + len(TRAILER_MARKER) :]
+            self._pending = ""
+            return text[:at]
+        keep = 0
+        for size in range(min(len(TRAILER_MARKER) - 1, len(text)), 0, -1):
+            if TRAILER_MARKER.startswith(text[-size:]):
+                keep = size
+                break
+        self._pending = text[len(text) - keep :] if keep else ""
+        return text[: len(text) - keep]
+
+    def finish(self) -> str:
+        """Text still held back (a marker prefix that never completed)."""
+        rest, self._pending = self._pending, ""
+        return rest if self._trailer is None else ""
+
+    @property
+    def trailer(self) -> str | None:
+        return self._trailer
+
+
+def split_trailer(text: str) -> tuple[str, str | None]:
+    """``(answer, trailer)`` for a complete, non-streamed reply."""
+    at = text.find(TRAILER_MARKER)
+    if at < 0:
+        return text, None
+    return text[:at], text[at + len(TRAILER_MARKER) :]
+
+
+def parse_trailer(trailer: str | None) -> AnswerMeta | None:
+    """Mode and follow-ups from the trailer; None when it is missing or unusable."""
+    if not trailer or not trailer.strip():
+        return None
+    mode: MetaMode | None = None
+    followups: list[str] = []
+    for line in trailer.splitlines():
+        found = _MODE_LINE_RE.match(line)
+        if found:
+            mode = found.group(1).lower()  # type: ignore[assignment]
+            continue
+        item = _FOLLOWUP_LINE_RE.match(line)
+        if item:
+            followups.append(item.group(1).strip())
+    if mode is None:
+        return None
+    try:
+        return AnswerMeta(mode=mode, usedSources=[], followUps=followups)
+    except ValidationError:
+        return AnswerMeta(mode=mode, usedSources=[], followUps=[])

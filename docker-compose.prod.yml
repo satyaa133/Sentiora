@@ -16,11 +16,20 @@ x-backend-env: &backend-env
   DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentiora}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-sentiora}
   REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
   JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required (32+ chars)}
+  # Error tracking for the API and worker; off when empty.
+  SENTRY_DSN: ${SENTRY_DSN:-}
   CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required, e.g. ["https://app.example.com"]}
   # The web container's fixed address on the internal network (see below).
   TRUSTED_PROXY_IPS: '["172.30.0.10"]'
   LLM_PROVIDER: ${LLM_PROVIDER:-openai}
-  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-auto}
+  # local = on the server's CPU; the model is baked into the image (S3).
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-local}
+  LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-nomic-ai/nomic-embed-text-v1.5-Q}
+  # Per embedding model: 0.65 for local nomic, 0.25 for remote embeddings.
+  RAG_MIN_SIMILARITY: ${RAG_MIN_SIMILARITY:-0.65}
+  RAG_QUESTION_MIN_SIMILARITY: ${RAG_QUESTION_MIN_SIMILARITY:-0.60}
+  # Cross-encoder reranker, baked into the image (S4).
+  RERANKER_MODEL: ${RERANKER_MODEL:-jinaai/jina-reranker-v1-tiny-en}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-gemini-embedding-001}
@@ -90,7 +99,12 @@ services:
     image: sentiora-backend:prod
     restart: unless-stopped
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${API_WORKERS:-2}"]
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      # One /metrics scrape covers every uvicorn worker (fresh on each start).
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus
+    tmpfs:
+      - /tmp/prometheus:mode=1777
     networks: [internal]
     depends_on:
       migrate:
@@ -102,6 +116,9 @@ services:
     image: sentiora-backend:prod
     restart: unless-stopped
     command: ["python", "-m", "app.workers.worker"]
+    # Captures and embedding retries are processed in parallel across workers.
+    deploy:
+      replicas: ${WORKER_COUNT:-2}
     environment: *backend-env
     networks: [internal]
     depends_on:

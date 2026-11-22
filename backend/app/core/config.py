@@ -4,16 +4,27 @@ import re
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from dotenv import dotenv_values
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLM_PROVIDERS = ("openai", "gemini", "openrouter")
-EMBEDDING_PROVIDER_CHOICES = ("auto", "openrouter", "openai", "gemini", "none")
+LLM_PROVIDERS = ("openai", "gemini", "openrouter", "groq")
+EMBEDDING_PROVIDER_CHOICES = ("auto", "openrouter", "openai", "gemini", "local", "none")
 # memory_chunks.embedding is vector(1536) in the migrations.
 VECTOR_DIMENSIONS = 1536
+# Local (fastembed) models Sentiora knows, with their output size. A model
+# can only be used when its size matches memory_chunks.embedding_local
+# (LOCAL_VECTOR_DIMENSIONS); a different size needs a migration.
+LOCAL_EMBEDDING_DIMENSIONS = {
+    "nomic-ai/nomic-embed-text-v1.5-Q": 768,
+    "nomic-ai/nomic-embed-text-v1.5": 768,
+    "BAAI/bge-small-en-v1.5": 384,
+}
+# memory_chunks.embedding_local is vector(768) in the migrations.
+LOCAL_VECTOR_DIMENSIONS = 768
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 _OPENROUTER_MODEL_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._:-]+$")
 
 logger = logging.getLogger(__name__)
@@ -35,6 +46,18 @@ class Settings(BaseSettings):
     app_name: str = "Sentiora Backend"
     app_environment: str = "development"
     app_version: str = "0.1.0"
+    # "json" (one object per line) or "text". Unset: text in development,
+    # json everywhere else.
+    log_format: Literal["json", "text"] | None = None
+    # Error tracking (Sentry) for the API and worker; off when unset.
+    sentry_dsn: str | None = None
+    # Share of requests traced for performance (0 = errors only).
+    sentry_traces_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    # Serve Prometheus metrics at /metrics (outside /api/, not proxied by nginx).
+    metrics_enabled: bool = True
+    # Accept the reserved example.com / example.dev sign-up domains. On only
+    # in the test suite and the e2e stack; never in a real deployment.
+    allow_test_email_domains: bool = False
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://127.0.0.1:6379/0"
@@ -60,7 +83,9 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 30
     llm_provider: str = "openai"
     # Embedding provider for semantic search:
-    # "auto" | "openrouter" | "openai" | "gemini" | "none".
+    # "auto" | "openrouter" | "openai" | "gemini" | "local" | "none".
+    # "local" embeds on this machine's CPU (fastembed) and needs no key or
+    # network once the model is downloaded; its vectors go in embedding_local.
     # "auto" uses OpenRouter when an OpenRouter key is set; otherwise it follows
     # LLM_PROVIDER (openai/gemini), then the first configured embedding key.
     embedding_provider: str = "auto"
@@ -69,6 +94,12 @@ class Settings(BaseSettings):
     # embedding backfill: queries only match chunks embedded with this model.
     embedding_model: str | None = None
     openrouter_embedding_model: str = "openai/text-embedding-3-small"
+    # Model for EMBEDDING_PROVIDER=local (see LOCAL_EMBEDDING_DIMENSIONS);
+    # chosen by the S3 eval (quantized nomic-embed-text-v1.5). Changing it
+    # requires the embedding backfill with --force.
+    local_embedding_model: str = "nomic-ai/nomic-embed-text-v1.5-Q"
+    # Where local model files are stored; a relative path is under backend/.
+    model_cache_dir: str = ".models"
     openai_api_key: str | None = None
     openai_embedding_model: str = "text-embedding-3-small"
     openai_chat_model: str = "gpt-4o-mini"
@@ -76,6 +107,9 @@ class Settings(BaseSettings):
     # Must support EMBEDDING_DIMENSIONS output (text-embedding-004 caps at 768).
     gemini_embedding_model: str = "gemini-embedding-001"
     gemini_chat_model: str = "gemini-2.5-flash"
+    # Groq (OpenAI-compatible, chat only): a fast backup in development (D11).
+    groq_api_key: str | None = None
+    groq_chat_model: str = "openai/gpt-oss-120b"
     # OpenRouter keys: OPENROUTER_API_KEY and/or OPENROUTER_API_KEY_1..N (any
     # count, auto-detected from the environment and .env files). Ask and
     # embeddings rotate across all of them; use openrouter_keys() to read them.
@@ -94,20 +128,63 @@ class Settings(BaseSettings):
     llm_cooldown_max_seconds: int = Field(default=3600, ge=1)
     # At most this many backends (keys) are tried for one model call.
     llm_max_attempts: int = Field(default=4, ge=1, le=20)
+    # Most an answer waits for its first token, across every key it tries.
+    # One-piece responses (Gemini, POST /chat, the follow-up rewrite) must finish
+    # within it; Gemini's SDK also sends it as the server-side deadline.
+    llm_chat_timeout_seconds: float = Field(default=10, gt=0, le=120)
+    # Per-key limit for the structured answer-metadata call.
+    llm_meta_timeout_seconds: float = Field(default=8, gt=0, le=120)
+    # Per-request limit for embedding calls (capture and question embeddings).
+    embedding_timeout_seconds: float = Field(default=10, gt=0, le=120)
     # RAG retrieval tuning
     rag_top_k: int = 15
     # Chunks handed to the model per question (summary questions take up to 8).
     rag_final_k: int = 6
     # Candidates fetched from each retrieval leg (vector, full-text) before fusion.
     rag_candidates: int = 30
+    # Cross-encoder that re-orders the fused candidates (fastembed, on CPU);
+    # "none" turns reranking off. Downloaded into MODEL_CACHE_DIR once.
+    # Chosen by the S4 eval (owner, 2026-11-21).
+    reranker_model: str = "jinaai/jina-reranker-v1-tiny-en"
+    # Enrichment (summary, key points, question bank) per user per day (UTC);
+    # protects AI cost. Saves over the cap stay searchable, just not enriched.
+    enrich_daily_limit: int = Field(default=50, ge=0)
+    # Chat model for enrichment. Empty = each configured provider's chat model
+    # (LLM_PROVIDER first); set a cheaper one of the primary provider here.
+    enrich_model: str = ""
+    # Ask v3 (S6). "instant": answer quoted from the user's saves, no AI call;
+    # "ai": the written AI answer (v2 behaviour, for rollback). A request's
+    # answer_mode overrides it.
+    ask_default_mode: Literal["instant", "ai"] = "instant"
+    # Version of the privacy notice users accept at sign-up (D10). Changing it
+    # asks every signed-in user to accept the new text before AI features.
+    privacy_notice_version: str = "2026-11-20"
+    # Reranker score a sentence needs to be quoted in an instant answer. Below
+    # it for every sentence, the question counts as not covered by the saves.
+    rag_extract_min_score: float = 0.0
+    # AI answers running at once across every API process (Redis semaphore);
+    # past it a request gets AI_BUSY with a retry time.
+    llm_max_concurrent: int = Field(default=10, ge=1, le=1000)
+    # How long an answer is reused for the same question, scope and library.
+    answer_cache_ttl_seconds: int = Field(default=86400, ge=0)
+    # Fused candidates the reranker scores; the rest are dropped. Each costs
+    # ~25 ms of CPU on every question (S4: 10 -> p95 ~0.32 s, 20 -> ~0.61 s).
+    rag_rerank_candidates: int = Field(default=10, ge=1, le=100)
     # Cosine similarity a vector hit needs to count as relevant. When no hit
     # clears it and no full-text hit matches, the question is "not covered".
     rag_min_similarity: float = Field(default=0.25, ge=0.0, le=1.0)
+    # Cosine similarity a stored enrichment question needs for its chunk to join
+    # the question-bank leg (D14). Question-to-question scores run lower than
+    # question-to-passage ones with the local model; 0.55 let unrelated
+    # questions through in the S6 eval.
+    rag_question_min_similarity: float = Field(default=0.60, ge=0.0, le=1.0)
     # MMR trade-off between relevance (1.0) and diversity (0.0).
     rag_mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0)
     # At most this many chunks from one memory, unless the question is scoped
     # to that memory or asks for a summary.
     rag_max_chunks_per_memory: int = 2
+    # When only one memory matches, up to this many of its chunks are used.
+    rag_single_memory_chunks: int = 4
     # "Which sources mention X" answers: a meaning-only hit must be at least
     # this close (cosine distance) to be listed as mentioning X.
     rag_strong_distance: float = 0.4
@@ -159,6 +236,18 @@ class Settings(BaseSettings):
                 f"EMBEDDING_PROVIDER={self.embedding_provider!r} must be one of "
                 f"{', '.join(EMBEDDING_PROVIDER_CHOICES)}"
             )
+        local_dims = LOCAL_EMBEDDING_DIMENSIONS.get(self.local_embedding_model)
+        if local_dims is None:
+            problems.append(
+                f"LOCAL_EMBEDDING_MODEL={self.local_embedding_model!r} must be one of "
+                f"{', '.join(LOCAL_EMBEDDING_DIMENSIONS)}"
+            )
+        elif local_dims != LOCAL_VECTOR_DIMENSIONS:
+            problems.append(
+                f"LOCAL_EMBEDDING_MODEL={self.local_embedding_model!r} makes "
+                f"{local_dims}-dimension vectors but memory_chunks.embedding_local "
+                f"is vector({LOCAL_VECTOR_DIMENSIONS}); it needs a migration"
+            )
         if self.embedding_dimensions != VECTOR_DIMENSIONS:
             problems.append(
                 f"EMBEDDING_DIMENSIONS must be {VECTOR_DIMENSIONS}: memory_chunks.embedding "
@@ -177,6 +266,17 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError("; ".join(problems))
         return self
+
+    @property
+    def model_cache_path(self) -> Path:
+        path = Path(self.model_cache_dir)
+        return path if path.is_absolute() else BACKEND_DIR / path
+
+    @property
+    def effective_log_format(self) -> str:
+        if self.log_format:
+            return self.log_format
+        return "text" if self.app_environment == "development" else "json"
 
     @model_validator(mode="after")
     def validate_non_development_secrets(self) -> Self:

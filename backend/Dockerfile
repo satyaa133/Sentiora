@@ -6,7 +6,8 @@ FROM python:3.12-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=120
 
 WORKDIR /build
 RUN python -m venv /opt/venv
@@ -31,6 +32,21 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --chown=sentiora:sentiora app ./app
 COPY --chown=sentiora:sentiora alembic ./alembic
 COPY --chown=sentiora:sentiora alembic.ini ./alembic.ini
+
+# Local embedding and reranker model files, downloaded at build time so the
+# server never fetches them at runtime (REBUILD_PLAN S3, S4). Must match
+# LOCAL_EMBEDDING_MODEL and RERANKER_MODEL.
+ARG LOCAL_EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5-Q
+ARG RERANKER_MODEL=jinaai/jina-reranker-v1-tiny-en
+ENV LOCAL_EMBEDDING_MODEL=${LOCAL_EMBEDDING_MODEL} \
+    RERANKER_MODEL=${RERANKER_MODEL} \
+    MODEL_CACHE_DIR=/app/backend/.models \
+    HF_HUB_DISABLE_TELEMETRY=1
+RUN python -c "from app.services.embedding_service import download_local_model; download_local_model()" \
+    && python -c "from app.services.retrieval.reranker import download_reranker; download_reranker()" \
+    && chown -R sentiora:sentiora /app/backend/.models
+# The model is on disk; never reach Hugging Face from a running container.
+ENV HF_HUB_OFFLINE=1
 
 USER sentiora
 EXPOSE 8000

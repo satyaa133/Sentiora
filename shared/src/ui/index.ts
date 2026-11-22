@@ -48,6 +48,8 @@ export {
   usePortalContainer,
 } from "./overlay.js";
 export { ThemeToggle } from "./ThemeToggle.js";
-export { TRUSTED_EMAIL_DOMAINS, isTrustedEmail } from "./trustedEmail.js";
+export { TEST_EMAIL_DOMAINS, TRUSTED_EMAIL_DOMAINS, isTrustedEmail } from "./trustedEmail.js";
+export { PRIVACY_NOTICE_TEXT, PRIVACY_NOTICE_VERSION } from "./privacyNotice.js";
+export type { TrustedEmailOptions } from "./trustedEmail.js";
 export type { ThemeToggleProps } from "./ThemeToggle.js";
 export { useThemePreference } from "./useThemePreference.js";

@@ -236,7 +236,9 @@ export async function handleCaptureMessage(payload: CapturePayload): Promise<Cap
       async (capturePayload) => {
         const resp = await extApiFetch<{ id?: string; status?: string }>("/memory-items", {
           method: "POST",
-          body: JSON.stringify(capturePayload),
+          // Save now (a forced capture) marks the save for a summary (S5/S7);
+          // automatic saves never are.
+          body: JSON.stringify({ ...capturePayload, enrich: Boolean(payload.is_force) }),
         });
         created = resp.data;
       },

@@ -115,7 +115,7 @@ def test_production_settings_accept_strong_configuration() -> None:
 def test_capture_rejects_script_urls(url: str) -> None:
     client.post(
         "/api/v1/auth/register",
-        json={"email": "sec_scheme@example.com", "password": "MemoryPassword123!", "full_name": "Sec"},
+        json={"privacy_consent_version": "2026-11-20", "email": "sec_scheme@example.com", "password": "MemoryPassword123!", "full_name": "Sec"},
     )
     token = client.post(
         "/api/v1/auth/login", json={"email": "sec_scheme@example.com", "password": "MemoryPassword123!"}

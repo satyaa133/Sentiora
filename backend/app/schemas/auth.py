@@ -2,7 +2,9 @@ import re
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from app.core.config import get_settings
 
 
 TRUSTED_EMAIL_DOMAINS = {
@@ -26,9 +28,11 @@ TRUSTED_EMAIL_DOMAINS = {
     "aol.com",
     "gmx.com",
     "mail.com",
-    "example.com",
-    "example.dev",
 }
+
+# Reserved example domains: accepted only when ALLOW_TEST_EMAIL_DOMAINS is on
+# (the test suite and the e2e stack), never in a normal deployment.
+TEST_EMAIL_DOMAINS = {"example.com", "example.dev"}
 
 EDU_DOMAIN_SUFFIXES = (
     ".edu",
@@ -42,6 +46,8 @@ def _check_trusted_email(v: EmailStr) -> EmailStr:
     email_str = str(v).strip().lower()
     domain = email_str.split("@")[-1]
     if domain in TRUSTED_EMAIL_DOMAINS or domain.endswith(EDU_DOMAIN_SUFFIXES):
+        return v
+    if domain in TEST_EMAIL_DOMAINS and get_settings().allow_test_email_domains:
         return v
     raise ValueError(
         "Please use a valid email address."
@@ -66,6 +72,15 @@ class RegisterRequest(BaseModel):
     email: TrustedEmail
     password: StrongPassword
     full_name: str = Field(min_length=2, max_length=80)
+    # The privacy notice the user accepted (D10); must be the current version.
+    privacy_consent_version: str = Field(min_length=1, max_length=32)
+
+    @field_validator("privacy_consent_version")
+    @classmethod
+    def _current_notice(cls, value: str) -> str:
+        if value != get_settings().privacy_notice_version:
+            raise ValueError("must be the current privacy notice version")
+        return value
 
 
 class LoginRequest(BaseModel):
