@@ -44,6 +44,9 @@ const SAVE_TIMEOUT_MS = 8_000;
 const PING_TIMEOUT_MS = 400;
 const STATUS_TIMEOUT_MS = 800;
 const SAVING_POLL_MS = 1500;
+// After Save now: follow the save until it is searchable (or failed).
+const PROCESSING_POLL_MS = 2000;
+const PROCESSING_POLLS = 30;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -385,6 +388,26 @@ export default function App() {
     };
   }, [isAuthenticated, activeTabRawUrl, activeTabId]);
 
+  // A save is processing on the server: follow it until it is ready or failed.
+  useEffect(() => {
+    if (viewState !== "saved" || !savedMemoryId) return;
+    if (savedStatus === "ready" || savedStatus === "failed") return;
+    let polls = 0;
+    const interval = window.setInterval(() => {
+      polls += 1;
+      if (polls > PROCESSING_POLLS) {
+        window.clearInterval(interval);
+        return;
+      }
+      void extApiFetch<{ status?: string }>(`/memory-items/${savedMemoryId}`)
+        .then((resp) => {
+          if (resp.data?.status) setSavedStatus(resp.data.status);
+        })
+        .catch(() => undefined);
+    }, PROCESSING_POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [viewState, savedMemoryId, savedStatus]);
+
   // An automatic save is in flight: follow it until the background finishes.
   useEffect(() => {
     if (pageStatus !== "saving" || !activeTabRawUrl) return;
@@ -629,6 +652,7 @@ export default function App() {
             title: noteTitle.trim(),
             url: `https://sentiora.app/notes/${Date.now()}`,
             content: noteContent.trim() || noteTitle.trim(),
+            enrich: true,
           }),
         },
       );
@@ -753,7 +777,7 @@ export default function App() {
         <SavedView
           title={savedTitle || activeTabTitle}
           sourceType={savedType}
-          indexed={savedStatus === "ready"}
+          status={savedStatus}
           canUndo={Boolean(savedMemoryId)}
           undoing={isUndoing}
           undoError={undoError}

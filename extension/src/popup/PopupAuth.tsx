@@ -1,5 +1,14 @@
 import React, { useState } from "react";
-import { Button, Echo, IconAlert, TextField, cx, isTrustedEmail } from "@shared/ui";
+import {
+  Button,
+  Echo,
+  IconAlert,
+  PRIVACY_NOTICE_TEXT,
+  PRIVACY_NOTICE_VERSION,
+  TextField,
+  cx,
+  isTrustedEmail,
+} from "@shared/ui";
 import { API_DISPLAY_URL, extApiFetch, ExtApiError } from "../services/extApiClient";
 import { appPageUrl } from "../shared/appUrl";
 import { setAccessToken, setRefreshToken, setCachedUser } from "../services/storage";
@@ -13,6 +22,8 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  // The privacy notice must be accepted to create an account (D10).
+  const [agreed, setAgreed] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,6 +57,10 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
         setError("Password must contain at least one number (0-9).");
         return;
       }
+      if (!agreed) {
+        setError("Please agree to the privacy notice to create an account.");
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -59,6 +74,7 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
             email,
             password,
             full_name: fullName || "Vault User",
+            privacy_consent_version: PRIVACY_NOTICE_VERSION,
           }),
         });
       }
@@ -214,6 +230,24 @@ export default function PopupAuth({ onAuthChange }: PopupAuthProps) {
           }
           required
         />
+
+        {mode === "register" && (
+          <div className="space-y-2">
+            <p id="popup-notice" className="rounded-btn bg-raised px-3 py-2 text-[14px] leading-relaxed text-muted">
+              {PRIVACY_NOTICE_TEXT}
+            </p>
+            <label className="flex min-h-touch cursor-pointer items-start gap-3 text-[15px] text-fg">
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={(e) => setAgreed(e.target.checked)}
+                aria-describedby="popup-notice"
+                className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer accent-accent"
+              />
+              <span>I agree to the privacy notice above.</span>
+            </label>
+          </div>
+        )}
 
         <Button type="submit" size="lg" fullWidth loading={isLoading}>
           {isLoading

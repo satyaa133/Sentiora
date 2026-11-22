@@ -11,7 +11,10 @@ vi.mock("../services/privacyService", () => ({
   acceptPrivacyNotice: vi.fn(),
 }));
 
-import MemoryDetailDrawer, { SUMMARY_POLL_MS } from "../components/MemoryDetailDrawer";
+import MemoryDetailDrawer from "../components/MemoryDetailDrawer";
+
+// The drawer checks for a summary being written every 4 s.
+const SUMMARY_POLL_MS = 4000;
 import { resetPrivacyConsentCache } from "../hooks/usePrivacyConsent";
 import { enrichMemoryItem, fetchMemoryItem, renameMemoryItem } from "../services/memoryService";
 import { fetchPrivacyConsent } from "../services/privacyService";

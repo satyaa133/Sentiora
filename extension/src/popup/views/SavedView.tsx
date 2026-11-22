@@ -3,8 +3,8 @@ import { Button, Echo, IconUndo, SourceBadge } from "@shared/ui";
 interface SavedViewProps {
   title: string;
   sourceType: string;
-  /** True once the server reports the memory as indexed. */
-  indexed: boolean;
+  /** Server processing status: pending / processing, then ready or failed. */
+  status: string | null;
   /** Undo is offered only when this save created a new memory. */
   canUndo: boolean;
   undoing: boolean;
@@ -16,7 +16,7 @@ interface SavedViewProps {
 export default function SavedView({
   title,
   sourceType,
-  indexed,
+  status,
   canUndo,
   undoing,
   undoError,
@@ -33,8 +33,12 @@ export default function SavedView({
         >
           Saved. Echo&apos;s got it.
         </h1>
-        <p className="mt-1 text-[15px] text-on-inverse-muted">
-          {indexed ? "Searchable now." : "Searchable in a few seconds."}
+        <p className="mt-1 text-[15px] text-on-inverse-muted" aria-live="polite">
+          {status === "ready"
+            ? "Ready. Searchable now."
+            : status === "failed"
+              ? "Saved, but it couldn't be processed. Try saving it again."
+              : "Processing. Searchable in a few seconds."}
         </p>
       </section>
       <section className="space-y-4 px-5 pb-5 pt-5">

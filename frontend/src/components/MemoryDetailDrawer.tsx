@@ -30,7 +30,7 @@ interface MemoryDetailDrawerProps {
 }
 
 // While a summary is being written, check for it this often, this many times.
-export const SUMMARY_POLL_MS = 4000;
+const SUMMARY_POLL_MS = 4000;
 const SUMMARY_POLLS = 30;
 
 export default function MemoryDetailDrawer({

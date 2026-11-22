@@ -102,6 +102,15 @@ describe("background capture messaging", () => {
     expect(body.structured_content[0].metadata.start_seconds).toBe(0);
     expect(body.extraction.method).toBe("youtube_transcript");
     expect(body.is_force).toBeUndefined(); // client-only flag is not sent to the API
+    expect(body.enrich).toBe(true); // Save now asks for a summary (S7)
+  });
+
+  it("never asks for a summary of an automatic save", async () => {
+    await loadWorker();
+    apiFetch.mockResolvedValue({ success: true, data: { id: "m2", status: "pending" } });
+    await send({ type: "CAPTURE_YOUTUBE", payload: youtubePayload(false) });
+    const [, init] = apiFetch.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body).enrich).toBe(false);
   });
 
   it("does not create duplicate captures for concurrent messages about one video", async () => {
