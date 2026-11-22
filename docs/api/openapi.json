@@ -939,7 +939,7 @@
           "Ask Sentiora"
         ],
         "summary": "Ask a question and stream the answer as server-sent events",
-        "description": "Events: ``sources``, ``delta`` (text pieces), then ``final`` or ``error``.\n\nRetrieval runs before the response starts, so database and validation\nerrors are normal HTTP errors; only model failures arrive as ``error``.",
+        "description": "Events: ``sources``, ``delta`` (text pieces), then ``final`` or ``error``.\n\nRetrieval (and, for ``answer_mode: \"ai\"``, taking an AI slot) runs before\nthe response starts, so database, validation and ``AI_BUSY`` errors are\nnormal HTTP errors; only model failures arrive as ``error``.",
         "operationId": "ask_memories_stream_api_v1_chat_stream_post",
         "requestBody": {
           "content": {
@@ -1576,6 +1576,21 @@
               }
             ],
             "title": "Tz"
+          },
+          "answer_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "instant",
+                  "ai"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer Mode"
           }
         },
         "type": "object",

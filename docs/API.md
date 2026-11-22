@@ -177,7 +177,23 @@ and `404 MEMORY_ITEM_NOT_FOUND`. It also re-enriches a `ready` or `failed` memor
 
 Ask request: `question` (2–2000 chars), optional `source_type`, `memory_id`,
 `top_k` (1–8, default 5), `history` (up to 4 earlier turns), `tz` (IANA zone for
-"today" / "yesterday").
+"today" / "yesterday"), `answer_mode` (`"instant"` | `"ai"`, default
+`ASK_DEFAULT_MODE`, which is `instant`).
+
+**Answer modes (S6).** `instant` answers without any AI call: the best sentences
+of the retrieved saves, quoted and cited `[S#]` (video lines start with their
+time), or a stored summary for "summarise this save" questions on an enriched
+save. When no sentence clears `RAG_EXTRACT_MIN_SCORE` the answer is the "not in
+your saves" text. `ai` ("Explain with AI") makes one model call that returns the
+answer and its follow-ups; it reuses the sources the instant answer for the same
+question showed. Before an `ai` answer calls a model it takes one of
+`LLM_MAX_CONCURRENT` slots shared by every API process; when none is free the
+request fails with `429 AI_BUSY`, `details.retry_after` (seconds) and a
+`Retry-After` header. Listing and "which sources mention" answers never call a
+model in either mode. Finished answers are cached per user, question, scope,
+earlier turns and library version for `ANSWER_CACHE_TTL_SECONDS`.
+
+`POST /chat` keeps its shape: an `instant` answer reports `mode: "memory"`.
 
 **`/chat/stream` events** (details in `RAG_v2_ADDENDUM.md` R5):
 
@@ -185,12 +201,12 @@ Ask request: `question` (2–2000 chars), optional `source_type`, `memory_id`,
 | ----- | ---- |
 | `sources` | `{"sources": [{"id": "S1", …citation fields, start_sec/end_sec}]}` |
 | `delta` | `{"text": "…"}` answer pieces in order |
-| `final` | `{"answer", "mode": "memory" \| "general" \| "mixed", "usedSources", "followUps", "insufficient_context", "used_fallback"}`; `answer` replaces the streamed text |
+| `final` | `{"answer", "mode": "instant" \| "memory" \| "general" \| "mixed", "usedSources", "followUps", "insufficient_context", "used_fallback", "aiAvailable"}`; `answer` replaces the streamed text. `mode` is `instant` for every `instant`-mode answer. `aiAvailable`: an AI answer could add to this one (a model is configured and not cooling down; false for AI answers and save listings). `followUps` of instant answers come from the matched saves' stored questions |
 | `error` | `{"code", "message", "status"}` |
 
-Validation, auth and retrieval errors on `/chat/stream` are normal HTTP errors
-before the stream starts; model failures after it starts arrive as `error`
-events.
+Validation, auth, retrieval and `AI_BUSY` errors on `/chat/stream` are normal
+HTTP errors before the stream starts; model failures after it starts arrive as
+`error` events.
 
 ### Answer feedback (`/api/v1/answers`)
 
@@ -237,6 +253,7 @@ UUIDs). Returns `{id, rating, created_at}`.
 | `ASK_LLM_FAILED` | 502 | The AI model call failed |
 | `ASK_SYSTEM_FAILED` | 502 | Retrieval or another Ask step failed |
 | `ASK_STREAM_INTERRUPTED` | — | SSE `error` event: the answer stopped after partial text |
+| `AI_BUSY` | 429 | `answer_mode: "ai"` while every AI slot (`LLM_MAX_CONCURRENT`) is in use; `details.retry_after` and `Retry-After` give the wait in seconds |
 
 New codes come only from `REBUILD_PLAN.md` section 8 (for example `AI_BUSY`,
 `PRIVACY_CONSENT_REQUIRED`).
