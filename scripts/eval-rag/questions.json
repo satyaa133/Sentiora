@@ -1,5 +1,5 @@
 {
-  "description": "Ask Sentiora retrieval eval. PLACEHOLDERS: written from the dev account's saved titles; replace or extend with real questions. 'expected' lists substrings of memory titles that count as a hit (case-insensitive); an empty list means the question is NOT covered by memory and retrieval should return nothing. 'history' holds earlier turns for vague follow-ups. Long-page cases add 'passage': text the answering chunk must contain. 'expected_answer' (optional) lists substrings, one of which the instant answer must quote (answer hit, --answers).",
+  "description": "Ask Sentiora retrieval eval. PLACEHOLDERS: written from the dev account's saved titles; replace or extend with real questions. 'expected' lists substrings of memory titles that count as a hit (case-insensitive); an empty list means the question is NOT covered by memory and retrieval should return nothing (the none-yolo* and none-load-balancing cases were answerable until their saves were deleted on 2026-11-22). 'history' holds earlier turns for vague follow-ups. Long-page cases add 'passage': text the answering chunk must contain. 'expected_answer' (optional) lists substrings, one of which the instant answer must quote (answer hit, --answers).",
   "questions": [
     { "id": "pascal-cover", "question": "What does the Pascal Triangle video cover?", "expected": ["Pascal Triangle"] },
     { "id": "ncr-fast", "question": "What's the quickest way to compute n choose r?", "expected": ["Pascal Triangle"] },
@@ -11,8 +11,8 @@
     { "id": "flip-zeros", "question": "Longest run of 1s if I'm allowed to flip at most k zeros", "expected": ["Max Consecutive Ones"], "expected_answer": ["flip at most"] },
     { "id": "fruit-baskets", "question": "Picking fruits with only two baskets, how is it solved?", "expected": ["Fruit Into Baskets"], "expected_answer": ["two baskets"] },
     { "id": "cards-points", "question": "Maximum score from taking cards from either end", "expected": ["Maximum Points"] },
-    { "id": "yolo", "question": "How does YOLO detect objects in a single pass?", "expected": ["YOLO"], "expected_answer": ["object detection"] },
-    { "id": "load-balancing", "question": "What did I learn about load balancers and CDNs?", "expected": ["System Design"] },
+    { "id": "none-yolo", "question": "How does YOLO detect objects in a single pass?", "expected": [] },
+    { "id": "none-load-balancing", "question": "What did I learn about load balancers and CDNs?", "expected": [] },
     { "id": "backprop", "question": "Explain backpropagation from my neural network notes", "expected": ["Neural_Networks", "Deep_Networks"], "expected_answer": ["Backpropagation"] },
     { "id": "vanishing-gradient", "question": "Why do gradients vanish in deep networks?", "expected": ["Deep_Networks", "Neural_Networks"], "expected_answer": ["vanishing gradients"] },
     { "id": "llm-intro", "question": "What is a large language model?", "expected": ["Large Language Model"], "expected_answer": ["Large Language Models"] },
@@ -48,8 +48,8 @@
     { "id": "long-api-auth-limit", "question": "How many sign-in attempts can someone make before they get blocked?", "expected": ["Sentiora_API_Specification"], "passage": "Auth (login, register, forgot-password) 10 requests" },
     { "id": "long-adam-bias", "question": "Why does Adam divide its moving averages by one minus beta to the power t?", "expected": ["Unit2_Deep_Networks"], "passage": "Note the effect of bias correction" },
     { "id": "long-early-stopping", "question": "When should training be halted so the network doesn't just memorise the training data?", "expected": ["Unit2_Deep_Networks"], "passage": "stop training once validation loss stops improving" },
-    { "id": "long-yolo-anchor", "question": "How can YOLO find two different objects whose centres land in the same cell?", "expected": ["What is YOLO algorithm"], "passage": "two anchor boxes", "expected_answer": ["same grid cell"] },
-    { "id": "long-yolo-grid", "question": "How does YOLO split up the picture before it predicts anything?", "expected": ["A beginners introduction to YOLO"], "passage": "divide the image into certain number of grids" },
+    { "id": "none-yolo-anchor", "question": "How can YOLO find two different objects whose centres land in the same cell?", "expected": [] },
+    { "id": "none-yolo-grid", "question": "How does YOLO split up the picture before it predicts anything?", "expected": [] },
     { "id": "long-sliding-shrink", "question": "In the two-pointer window pattern, which end moves when the window breaks the rule?", "expected": ["Introduction to Sliding Window"], "passage": "shrinking happens for the left edge" },
     { "id": "long-ncr-overflow", "question": "Which integer type should I pick so computing combinations doesn't wrap around?", "expected": ["Pascal Triangle"], "passage": "long long so that there is no overflow" },
     { "id": "long-oop-drawbacks", "question": "Why can object-oriented code be hard for people who are just starting out?", "expected": ["Object Oriented Programming"], "passage": "Steeper Learning Curve" },
