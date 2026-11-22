@@ -93,7 +93,7 @@ def _without_llm(monkeypatch) -> None:  # type: ignore[no-untyped-def]
 
 
 def _ask(headers: dict[str, str], question: str, **extra: Any) -> dict[str, Any]:
-    resp = client.post("/api/v1/chat", json={"question": question, **extra}, headers=headers)
+    resp = client.post("/api/v1/chat", json={"answer_mode": "ai", "question": question, **extra}, headers=headers)
     assert resp.status_code == 200, resp.text
     return dict(resp.json()["data"])
 
@@ -214,15 +214,9 @@ def test_combined_answer_is_one_unified_cited_answer(monkeypatch) -> None:  # ty
         "Binary search finds a value in a sorted array by halving the interval each step "
         "[Source 1], as your article describes; it also cites [Source 4]. More generally, "
         "it runs in O(log n) time."
+        "\n<<<META>>>\nmode: mixed\n- How is binary search different from linear search?"
     )
     _with_llm(monkeypatch, reply)
-    monkeypatch.setattr(
-        "app.services.rag_service.RagService._call_structured",
-        lambda self, backend, prompt, system: (
-            '{"mode":"mixed","usedSources":["S1"],"followUps":'
-            '["How is binary search different from linear search?"]}'
-        ),
-    )
     headers = _auth_headers("echo_combined@example.com")
     item_id = _create(headers, "Binary Search Explained", ARTICLE)
     data = _ask(headers, "Explain binary search based on the article I saved")
@@ -324,12 +318,12 @@ def test_scoped_question_only_uses_that_memory(monkeypatch) -> None:  # type: ig
 def test_ask_rejects_unknown_time_zone_and_long_history() -> None:
     headers = _auth_headers("echo_validation@example.com")
     bad_tz = client.post(
-        "/api/v1/chat", json={"question": "What is a heap?", "tz": "Mars/Olympus"}, headers=headers
+        "/api/v1/chat", json={"answer_mode": "ai", "question": "What is a heap?", "tz": "Mars/Olympus"}, headers=headers
     )
     assert bad_tz.status_code == 422
     too_long = client.post(
         "/api/v1/chat",
-        json={"question": "and?", "history": [{"role": "user", "content": "x"}] * 5},
+        json={"answer_mode": "ai", "question": "and?", "history": [{"role": "user", "content": "x"}] * 5},
         headers=headers,
     )
     assert too_long.status_code == 422
@@ -414,12 +408,8 @@ def test_dashboard_statistics_counts_real_data_per_user() -> None:
     assert client.get("/api/v1/dashboard/statistics").status_code in (401, 403)
 
 
-def test_invalid_structured_metadata_degrades_to_marker_metadata(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    _with_llm(monkeypatch, "It halves the interval [S1].")
-    monkeypatch.setattr(
-        "app.services.rag_service.RagService._call_structured",
-        lambda self, backend, prompt, system: '{"mode": "memory", "unexpected": true}',
-    )
+def test_invalid_metadata_trailer_degrades_to_marker_metadata(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    _with_llm(monkeypatch, "It halves the interval [S1].\n<<<META>>>\nnot a mode line")
     headers = _auth_headers("echo_bad_meta@example.com")
     item_id = _create(headers, "Binary Search Explained", ARTICLE)
     data = _ask(headers, "How does binary search halve the interval?")
@@ -478,7 +468,7 @@ def _failing_llm(monkeypatch, status_code: int | None) -> None:  # type: ignore[
 def test_out_of_credits_general_question_reports_provider_unavailable(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _failing_llm(monkeypatch, 402)
     headers = _auth_headers("echo_credits@example.com")
-    resp = client.post("/api/v1/chat", json={"question": "What is a binary heap?"}, headers=headers)
+    resp = client.post("/api/v1/chat", json={"answer_mode": "ai", "question": "What is a binary heap?"}, headers=headers)
     assert resp.status_code == 503
     error = resp.json()["error"]
     assert error["code"] == "AI_PROVIDER_UNAVAILABLE"
@@ -488,7 +478,7 @@ def test_out_of_credits_general_question_reports_provider_unavailable(monkeypatc
 def test_one_off_provider_failure_without_memory_is_ask_llm_failed(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     _failing_llm(monkeypatch, None)
     headers = _auth_headers("echo_timeout@example.com")
-    resp = client.post("/api/v1/chat", json={"question": "What is a binary heap?"}, headers=headers)
+    resp = client.post("/api/v1/chat", json={"answer_mode": "ai", "question": "What is a binary heap?"}, headers=headers)
     assert resp.status_code == 502
     assert resp.json()["error"]["code"] == "ASK_LLM_FAILED"
 
@@ -507,7 +497,7 @@ def test_provider_failure_does_not_answer_a_general_question_with_unrelated_memo
     headers = _auth_headers("echo_credits_unrelated@example.com")
     _create(headers, "Memory vault guide", "Search your saved pages using natural language phrases. " * 3)
     resp = client.post(
-        "/api/v1/chat", json={"question": "What is a large language model?"}, headers=headers
+        "/api/v1/chat", json={"answer_mode": "ai", "question": "What is a large language model?"}, headers=headers
     )
     assert resp.status_code == 503
     assert resp.json()["error"]["code"] == "AI_PROVIDER_UNAVAILABLE"

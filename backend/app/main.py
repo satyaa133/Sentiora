@@ -130,9 +130,11 @@ def _meta(request: Request) -> dict[str, str]:
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     detail = exc.detail
+    details = None
     if isinstance(detail, dict):
         code = detail.get("code", "HTTP_ERROR")
         message = detail.get("message", str(exc.detail))
+        details = detail.get("details")
     else:
         code = "HTTP_ERROR"
         message = str(detail)
@@ -141,7 +143,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         status_code=exc.status_code,
         content={
             "success": False,
-            "error": {"code": code, "message": message, "details": None},
+            "error": {"code": code, "message": message, "details": details},
             "meta": _meta(request),
         },
         headers=dict(exc.headers or {}),

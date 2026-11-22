@@ -3,7 +3,6 @@ from uuid import uuid4
 
 from app.models.memory_item import SourceType
 from app.services.llm.prompts import ANSWER_SYSTEM_PROMPT, build_context
-from app.services.rag_service import _local_fallback_answer
 from app.services.retrieval_service import RetrievedChunk
 
 
@@ -38,10 +37,3 @@ def test_build_context_numbers_each_chunk_and_keeps_the_leading_one() -> None:
     assert packed.count("A") >= 1200
     assert packed.startswith("[S1]\nTitle: First")
     assert "[S2]" in packed and "[S9]" not in packed
-
-
-def test_local_fallback_stays_short_for_tiny_memory() -> None:
-    chunk = _chunk("Tiny Note", "Binary search halves the remaining interval.")
-    answer = _local_fallback_answer([chunk])
-    assert answer.count("\n") <= 2
-    assert "halves the remaining interval" in answer.lower()

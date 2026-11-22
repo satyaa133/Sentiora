@@ -6,6 +6,7 @@ Error hierarchy:
   LLMProviderError       → HTTP 503  AI_PROVIDER_UNAVAILABLE (credits, key, quota, overload)
                          → HTTP 502  ASK_LLM_FAILED (anything else)
     (raised only when no matching memory could answer locally)
+  AIBusyError            → HTTP 429  AI_BUSY (every AI slot taken; details.retry_after)
   Any other exception    → HTTP 502  ASK_SYSTEM_FAILED
 """
 
@@ -26,6 +27,7 @@ from app.models.user import User
 from app.schemas.ask import AskRequest, AskResponse, SearchHit
 from app.schemas.envelope import APIResponse, response_meta
 from app.core.rate_limit import limit_chat, limit_search
+from app.services.ai_gate import AIBusyError
 from app.services.rag_service import LLMNotConfiguredError, LLMProviderError, RagService
 from app.services.retrieval_service import RetrievalService
 
@@ -61,6 +63,19 @@ _SYSTEM_FAILED = {
 
 def _ask_error(exc: Exception) -> HTTPException:
     """Map an Ask failure to the documented HTTP error (details stay in the log)."""
+    if isinstance(exc, AIBusyError):
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "code": "AI_BUSY",
+                "message": (
+                    "Sentiora's AI is busy answering other questions. The quoted "
+                    f"answer still works; try again in {exc.retry_after} s."
+                ),
+                "details": {"retry_after": exc.retry_after},
+            },
+            headers={"Retry-After": str(exc.retry_after)},
+        )
     if isinstance(exc, LLMNotConfiguredError):
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -109,6 +124,7 @@ def ask_memories(
             memory_id=req.memory_id,
             history=req.history,
             tz=req.tz,
+            answer_mode=req.answer_mode,
         )
     except Exception as exc:
         raise _ask_error(exc) from None
@@ -133,8 +149,9 @@ def ask_memories_stream(
 ) -> StreamingResponse:
     """Events: ``sources``, ``delta`` (text pieces), then ``final`` or ``error``.
 
-    Retrieval runs before the response starts, so database and validation
-    errors are normal HTTP errors; only model failures arrive as ``error``.
+    Retrieval (and, for ``answer_mode: "ai"``, taking an AI slot) runs before
+    the response starts, so database, validation and ``AI_BUSY`` errors are
+    normal HTTP errors; only model failures arrive as ``error``.
     """
     service = RagService(RetrievalService(db))
     limit_chat(request, str(current_user.id))
@@ -147,6 +164,7 @@ def ask_memories_stream(
             memory_id=req.memory_id,
             history=req.history,
             tz=req.tz,
+            answer_mode=req.answer_mode,
         )
     except Exception as exc:
         raise _ask_error(exc) from None

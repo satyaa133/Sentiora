@@ -315,7 +315,7 @@ def test_other_users_memories_are_never_returned(concepts: None) -> None:
     assert _retrieve(other_id, "how do car engines burn fuel") == []
 
 
-def test_ask_retrieves_with_the_rewritten_follow_up(
+def test_ask_retrieves_with_the_heuristic_follow_up_and_no_rewrite_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     seen: list[str] = []
@@ -333,10 +333,12 @@ def test_ask_retrieves_with_the_rewritten_follow_up(
     monkeypatch.setattr(RagService, "_llm_configured", lambda self: True)
     monkeypatch.setattr(RagService, "_complete_raw", fake_complete)
     with SessionLocal() as db:
-        RagService(RetrievalService(db)).ask(
+        RagService(RetrievalService(db)).ask(answer_mode="ai", 
             user_id=UUID(int=1), question="what about the optimal one?", history=HISTORY
         )
-    assert seen == ["optimal approach to rotate an array by K places"]
+    # S6: no rewrite call; the previous question gives the follow-up its topic.
+    assert seen == [heuristic_query("what about the optimal one?", HISTORY)]
+    assert "Rotate Array" in seen[0]
 
 
 def test_min_similarity_setting_is_respected(

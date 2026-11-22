@@ -97,7 +97,7 @@ def test_out_of_credits_key_fails_over_and_cools_down(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr(RagService, "_call_backend", fake_call)
 
-    first = rag.ask(user_id=USER, question="How do containers work?")
+    first = rag.ask(answer_mode="ai", user_id=USER, question="How do containers work?")
     assert first.used_fallback is False
     assert "Answer from Gemini" in first.answer
     assert calls == ["openrouter", "gemini"]
@@ -105,8 +105,8 @@ def test_out_of_credits_key_fails_over_and_cools_down(monkeypatch: pytest.Monkey
     # The exhausted key is now cooling down: the next question skips it, even
     # though rotation would have started with it.
     calls.clear()
-    rag.ask(user_id=USER, question="And virtual machines?")
-    rag.ask(user_id=USER, question="And images?")
+    rag.ask(answer_mode="ai", user_id=USER, question="And virtual machines?")
+    rag.ask(answer_mode="ai", user_id=USER, question="And images?")
     assert calls == ["gemini", "gemini"]
 
 
@@ -129,7 +129,7 @@ def test_gemini_bad_key_400_cools_the_key(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(RagService, "_call_backend", fake_call)
     for _ in range(3):
-        rag.ask(user_id=USER, question="How do containers work?")
+        rag.ask(answer_mode="ai", user_id=USER, question="How do containers work?")
     # Tried once, then skipped while cooling.
     assert calls == ["gemini", "openrouter", "openrouter", "openrouter"]
 
@@ -160,7 +160,7 @@ def test_backup_provider_answers_only_when_the_primary_keys_cannot(
         return "Answer from the backup [1]."
 
     monkeypatch.setattr(RagService, "_call_backend", fake_call)
-    answer = rag.ask(user_id=USER, question="How do containers work?")
+    answer = rag.ask(answer_mode="ai", user_id=USER, question="How do containers work?")
     assert "backup" in answer.answer
     assert calls[-1] == "gemini" and set(calls[:-1]) == {"openrouter", "openrouter-2"}
 
@@ -193,7 +193,7 @@ def test_every_key_failing_still_answers_from_memory(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(RagService, "_call_backend", always_fail)
 
-    resp = rag.ask(user_id=USER, question="Do containers share the host kernel?")
+    resp = rag.ask(answer_mode="ai", user_id=USER, question="Do containers share the host kernel?")
     assert sorted(calls) == ["openrouter", "openrouter-2"]
     assert resp.used_fallback is True
     assert "host kernel" in resp.answer

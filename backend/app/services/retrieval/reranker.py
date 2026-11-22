@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 # Characters of each passage the cross-encoder reads (title and heading first).
 _MAX_PASSAGE_CHARS = 1200
 _DISABLED = {"", "none", "off"}
+# Sentences scored per batch for instant answers.
+_SENTENCE_BATCH = 16
 
 _models: dict[tuple[str, str], Any] = {}
 _models_lock = threading.Lock()
@@ -84,6 +86,24 @@ class RerankerService:
         if len(scores) != len(passages):
             raise RuntimeError(
                 f"Reranker returned {len(scores)} scores for {len(passages)} passages."
+            )
+        return scores
+
+    def score_sentences(self, query: str, sentences: Sequence[str]) -> list[float]:
+        """Scores for short texts of similar length (instant answers), batched.
+
+        Passages are scored one at a time because a batch is padded to its
+        longest member; sentences are short and alike, so batching is cheaper.
+        """
+        if not sentences:
+            return []
+        scores = [
+            float(s)
+            for s in self._model.rerank(query, list(sentences), batch_size=_SENTENCE_BATCH)
+        ]
+        if len(scores) != len(sentences):
+            raise RuntimeError(
+                f"Reranker returned {len(scores)} scores for {len(sentences)} sentences."
             )
         return scores
 

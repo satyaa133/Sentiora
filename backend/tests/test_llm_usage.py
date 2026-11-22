@@ -119,7 +119,7 @@ def test_a_failed_call_is_recorded_with_its_error(
     assert row.tokens_in is None and row.cost_usd is None
 
 
-def test_follow_up_rewrites_are_recorded_as_rewrite(
+def test_follow_ups_are_rewritten_without_a_model_call(
     monkeypatch: pytest.MonkeyPatch, rag: RagService
 ) -> None:
     user_id = _user("usage_rewrite@example.com")
@@ -145,7 +145,9 @@ def test_follow_up_rewrites_are_recorded_as_rewrite(
     finally:
         db.close()
 
-    assert [row.purpose for row in _rows(user_id)] == ["rewrite"]
+    # S6: the heuristic rewrite runs locally; the AI answer call reads the
+    # conversation itself, so a follow-up costs no extra call.
+    assert [row.purpose for row in _rows(user_id)] == []
     assert rag._usage_purpose == "answer"
 
 

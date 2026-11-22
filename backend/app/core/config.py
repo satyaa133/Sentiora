@@ -143,6 +143,18 @@ class Settings(BaseSettings):
     # Chat model for enrichment. Empty = each configured provider's chat model
     # (LLM_PROVIDER first); set a cheaper one of the primary provider here.
     enrich_model: str = ""
+    # Ask v3 (S6). "instant": answer quoted from the user's saves, no AI call;
+    # "ai": the written AI answer (v2 behaviour, for rollback). A request's
+    # answer_mode overrides it.
+    ask_default_mode: Literal["instant", "ai"] = "instant"
+    # Reranker score a sentence needs to be quoted in an instant answer. Below
+    # it for every sentence, the question counts as not covered by the saves.
+    rag_extract_min_score: float = 0.0
+    # AI answers running at once across every API process (Redis semaphore);
+    # past it a request gets AI_BUSY with a retry time.
+    llm_max_concurrent: int = Field(default=10, ge=1, le=1000)
+    # How long an answer is reused for the same question, scope and library.
+    answer_cache_ttl_seconds: int = Field(default=86400, ge=0)
     # Fused candidates the reranker scores; the rest are dropped. Each costs
     # ~25 ms of CPU on every question (S4: 10 -> p95 ~0.32 s, 20 -> ~0.61 s).
     rag_rerank_candidates: int = Field(default=10, ge=1, le=100)

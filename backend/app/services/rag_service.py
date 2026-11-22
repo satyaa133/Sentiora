@@ -1,12 +1,18 @@
-"""RAG service: retrieves memory for a question and generates one cited answer.
+"""RAG service: retrieves memory for a question and answers it (REBUILD_PLAN S6).
 
-Pipeline (docs/RAG_v2_ADDENDUM.md):
-  prepare  question -> intent + scope -> query rewrite -> hybrid retrieval.
+Pipeline:
+  prepare  answer cache -> intent + scope -> heuristic follow-up rewrite ->
+           hybrid retrieval (vector, full-text, question bank, reranked).
            Listing, "which sources mention" and not-found answers are fixed
-           text; everything else needs the model. All database work is here.
-  run      numbered sources [S1..Sn] -> one unified answer (streamed or not)
-           -> structured metadata call {mode, usedSources, followUps}.
-Without a reachable model, memory answers use a local extractive fallback.
+           text. In ``instant`` mode (the default) the answer is quoted from the
+           retrieved sentences here, with no model call. In ``ai`` mode an AI
+           slot is taken (``AI_BUSY`` when none is free). All database work is
+           here.
+  run      ``instant``: the prepared answer. ``ai``: numbered sources
+           [S1..Sn] -> one model call (streamed or not) returning the answer and
+           a metadata trailer (mode, follow-ups) -> citation check. Finished
+           answers go to the answer cache.
+Without a reachable model, ``ai`` requests get the instant answer instead.
 """
 
 from __future__ import annotations
@@ -17,17 +23,31 @@ import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import tzinfo
-from typing import Any, cast
+from typing import Any
 from uuid import UUID
 
 from openai import OpenAI
-from openai.types.shared_params import ResponseFormatJSONSchema
+from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.metrics import ASK_STAGE_SECONDS, observe_stage
 from app.models.memory_item import ItemStatus, MemoryItem, SourceType
+from app.models.memory_question import MemoryQuestion
 from app.repositories.memory_repository import MemoryFilters, MemoryRepository
-from app.schemas.ask import AnswerMode, AskCitation, AskResponse, AskTurn
+from app.schemas.ask import AnswerMode, AskCitation, AskResponse, AskTurn, ChatMode
+from app.services.ai_gate import AIBusyError, AISlot, ai_gate
+from app.services.answer.extractive import (
+    extract_answer,
+    is_overview_question,
+    overview_answer,
+)
+from app.services.answer_cache import (
+    CacheKey,
+    answer_cache,
+    cache_key,
+    library_version,
+    normalize_question,
+)
 from app.services.ask_intent import (
     AskIntent,
     classify,
@@ -38,13 +58,14 @@ from app.services.enrichment_service import EnrichmentService
 from app.services.llm import prompts
 from app.services.llm.clients import Extra, openai_compatible_client
 from app.services.llm.structured import (
-    RESPONSE_FORMAT,
     AnswerMeta,
     MetaMode,
+    TrailerSplitter,
     cited_sources,
     normalize_markers,
-    parse_meta,
+    parse_trailer,
     reconcile,
+    split_trailer,
     strip_unknown_markers,
 )
 from app.services.llm_pool import (
@@ -61,20 +82,23 @@ from app.services.rag_sanitize import (
     strip_instruction_like_lines,
 )
 from app.services.retrieval.query_rewriter import rewrite_query
+from app.services.retrieval_service import (
+    RetrievalService,
+    RetrievedChunk,
+    has_keywords,
+    keyword_coverage,
+    needs_document_context,
+)
 from app.services.usage import (
     UsageReport,
     record_usage,
     report_from_gemini,
     report_from_openai,
 )
-from app.services.retrieval_service import (
-    RetrievalService,
-    RetrievedChunk,
-    keyword_coverage,
-    needs_document_context,
-)
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["AIBusyError", "LLMNotConfiguredError", "LLMProviderError", "RagService"]
 
 INSUFFICIENT_ANSWER = (
     "I couldn't find enough information in your saved memories to answer that."
@@ -86,16 +110,22 @@ NO_MODEL_FOR_GENERAL = (
 )
 INSUFFICIENT_FOLLOWUP = "What did I capture this week?"
 LISTING_LIMIT = 20
+# Follow-up suggestions taken from the matched saves' stored questions.
+FOLLOWUP_LIMIT = 3
+# A stored question this close to the asked one (cosine distance) is the same.
+_SAME_QUESTION_DISTANCE = 0.08
 # Kept for callers that import it; the unified prompt replaced the per-mode ones.
 SYSTEM_PROMPT = prompts.ANSWER_SYSTEM_PROMPT
 COMBINED_HINT = (
     "\n\nThe user is also asking about their saved material: say what the sources "
     "contain about it, or plainly that nothing relevant is saved."
 )
-_LEGACY_MODES: dict[MetaMode, AnswerMode] = {
+_LEGACY_MODES: dict[str, AnswerMode] = {
     "memory": "memory",
     "general": "general",
     "mixed": "combined",
+    # POST /chat keeps its shape: an instant answer is a memory answer.
+    "instant": "memory",
 }
 
 
@@ -105,7 +135,7 @@ class LLMNotConfiguredError(RuntimeError):
 
 # Defaults when settings lack the values (tests pass partial settings objects).
 DEFAULT_CHAT_TIMEOUT_SECONDS = 10.0
-DEFAULT_META_TIMEOUT_SECONDS = 8.0
+DEFAULT_EXTRACT_MIN_SCORE = 0.0
 # A key is not tried with less time than this left in the answer's budget.
 MIN_ATTEMPT_SECONDS = 1.0
 # Gemini rejects a deadline under 10 s (400 INVALID_ARGUMENT); its SDK sends the
@@ -144,6 +174,7 @@ class PreparedAnswer:
     question: str
     history: tuple[AskTurn, ...]
     sources: list[AskCitation]
+    answer_mode: ChatMode = "instant"
     # Chunks for the model, aligned with ``sources``; empty for fixed answers.
     chunks: list[RetrievedChunk] = field(default_factory=list)
     # Fixed answer text (with [S#] markers); None when the model must answer.
@@ -155,6 +186,18 @@ class PreparedAnswer:
     insufficient: bool = False
     used_fallback: bool = False
     followups: list[str] = field(default_factory=list)
+    # "Explain with AI" can improve on this answer (final.aiAvailable).
+    ai_available: bool = False
+    # Held AI slot (ai mode with a model call); released when run() ends.
+    slot: AISlot | None = None
+    # Answer cache entry: where to store the result, or the cached result.
+    cache: CacheKey | None = None
+    cached: dict[str, Any] | None = None
+
+    def release(self) -> None:
+        if self.slot is not None:
+            self.slot.release()
+            self.slot = None
 
 
 def _group_by_memory(chunks: Sequence[RetrievedChunk]) -> list[list[RetrievedChunk]]:
@@ -187,17 +230,6 @@ def _citation(chunk: RetrievedChunk) -> AskCitation:
 def _citations_from_chunks(chunks: list[RetrievedChunk]) -> list[AskCitation]:
     """One citation per memory (its best chunk), for fixed answers."""
     return [_citation(group[0]) for group in _group_by_memory(chunks)]
-
-
-def _first_per_memory(chunks: Sequence[RetrievedChunk]) -> list[str]:
-    """``S#`` ids of each memory's first chunk, for fallback answers that cite no markers."""
-    seen: set[UUID] = set()
-    ids: list[str] = []
-    for index, chunk in enumerate(chunks, start=1):
-        if chunk.memory_id not in seen:
-            seen.add(chunk.memory_id)
-            ids.append(prompts.source_id(index))
-    return ids
 
 
 def _to_legacy_markers(answer: str, used: list[str]) -> tuple[str, list[int]]:
@@ -301,60 +333,6 @@ def _unique_sentences(text: str, limit: int = 5) -> list[str]:
     return points
 
 
-def _local_fallback_answer(chunks: list[RetrievedChunk]) -> str:
-    """Deterministic answer from retrieved memory only. Does not invent facts."""
-    if not chunks:
-        return "I couldn't find relevant saved memory for that question."
-
-    by_memory: dict[UUID, list[RetrievedChunk]] = {}
-    memory_order: list[UUID] = []
-    for chunk in chunks:
-        if chunk.memory_id not in by_memory:
-            if len(memory_order) >= 4:
-                continue
-            by_memory[chunk.memory_id] = []
-            memory_order.append(chunk.memory_id)
-        by_memory[chunk.memory_id].append(chunk)
-
-    if len(memory_order) == 1:
-        primary = by_memory[memory_order[0]][0]
-        title = (primary.title or "Untitled memory").strip()
-        cleaned = "\n\n".join(
-            strip_instruction_like_lines(part.content)
-            for part in by_memory[memory_order[0]]
-        )
-        points = _unique_sentences(cleaned, limit=5)
-        if len(points) <= 1:
-            body = _excerpt(cleaned)
-            return f"Your saved memory '{title}' discusses {body}."
-        bullets = "\n".join(f"- {point}" for point in points)
-        return f"{title} covers the following from your saved memory:\n\n{bullets}"
-
-    parts: list[str] = []
-    for memory_id in memory_order:
-        chunk_parts = by_memory[memory_id]
-        primary = chunk_parts[0]
-        title = (primary.title or "Untitled memory").strip()
-        cleaned = "\n\n".join(
-            strip_instruction_like_lines(part.content) for part in chunk_parts
-        )
-        points = _unique_sentences(cleaned, limit=3)
-        if not points:
-            continue
-        if len(points) == 1:
-            parts.append(f"- {title}: {points[0]}")
-        else:
-            nested = "; ".join(points[:3])
-            parts.append(f"- {title}: {nested}")
-    if not parts:
-        first_chunks = by_memory[memory_order[0]]
-        merged = "\n\n".join(
-            strip_instruction_like_lines(part.content) for part in first_chunks
-        )
-        return _excerpt(merged)
-    return "From your saved memories:\n\n" + "\n".join(parts)
-
-
 def _matching_sentence(chunks: list[RetrievedChunk], topic: str) -> str | None:
     """First sentence that contains the topic words, for 'which sources mention X'."""
     words = [word for word in re.findall(r"[a-z0-9]+", topic.lower()) if len(word) >= 3]
@@ -435,10 +413,6 @@ class RagService:
         value = getattr(self.settings, "llm_chat_timeout_seconds", None)
         return float(value) if value else DEFAULT_CHAT_TIMEOUT_SECONDS
 
-    def _meta_timeout(self) -> float:
-        value = getattr(self.settings, "llm_meta_timeout_seconds", None)
-        return float(value) if value else DEFAULT_META_TIMEOUT_SECONDS
-
     def _attempts(self, backends: list[LLMBackend]) -> Iterator[LLMBackend]:
         """Backends to try within one budget of ``llm_chat_timeout_seconds``.
 
@@ -462,6 +436,14 @@ class RagService:
     def _llm_configured(self) -> bool:
         return bool(build_backends(self.settings))
 
+    def _default_mode(self) -> ChatMode:
+        mode = getattr(self.settings, "ask_default_mode", "instant")
+        return "ai" if mode == "ai" else "instant"
+
+    def _extract_min_score(self) -> float:
+        value = getattr(self.settings, "rag_extract_min_score", None)
+        return DEFAULT_EXTRACT_MIN_SCORE if value is None else float(value)
+
     # -- public API ---------------------------------------------------------
 
     def ask(
@@ -473,10 +455,11 @@ class RagService:
         memory_id: UUID | None = None,
         history: Sequence[AskTurn] = (),
         tz: str | None = None,
+        answer_mode: ChatMode | None = None,
     ) -> AskResponse:
         """Non-streaming answer in the ``POST /chat`` shape."""
         prepared = self.prepare(
-            user_id, question, source_type, top_k, memory_id, history, tz
+            user_id, question, source_type, top_k, memory_id, history, tz, answer_mode
         )
         final: dict[str, Any] = {}
         for event in self.run(prepared, stream=False):
@@ -497,14 +480,30 @@ class RagService:
         memory_id: UUID | None = None,
         history: Sequence[AskTurn] = (),
         tz: str | None = None,
+        answer_mode: ChatMode | None = None,
     ) -> PreparedAnswer:
-        """Intent, query rewrite and retrieval. The only step that uses the database."""
+        """Cache, intent, retrieval and (instant mode) the answer. The only DB step.
+
+        In ``ai`` mode a model answer takes an AI slot here and raises
+        ``AIBusyError`` when none is free; ``run`` gives the slot back.
+        """
         self._usage_user_id = user_id
+        mode: ChatMode = answer_mode or self._default_mode()
         zone = resolve_timezone(tz)
+        base = PreparedAnswer(
+            question=question, history=tuple(history), sources=[], answer_mode=mode
+        )
+        base.cache = self._cache_key(
+            user_id, question, source_type, memory_id, top_k, history, zone
+        )
+        if base.cache is not None:
+            base.cached = answer_cache.get_answer(base.cache, mode)
+            if base.cached is not None:
+                return base
+
         intent = classify(question, zone)
         if memory_id or source_type:
             intent = scoped_intent(intent, question)
-        base = PreparedAnswer(question=question, history=tuple(history), sources=[])
 
         if intent.listing and intent.date_window and memory_id is None:
             return self._list_captures(user_id, base, intent, source_type, zone)
@@ -515,27 +514,27 @@ class RagService:
             effective_top_k = max(top_k or configured, min(8, configured))
 
         llm = self._llm_configured()
-        if intent.mention_topic:
-            query = intent.mention_topic
-        else:
-            self._usage_purpose = "rewrite"
-            try:
-                with observe_stage("rewrite"):
-                    query = rewrite_query(
-                        question, history, self._complete_raw if llm else None
-                    )
-            finally:
-                self._usage_purpose = "answer"
-        # Date filters only apply to questions about the user's own saves.
-        window = intent.date_window if intent.kind != "open" else None
-        chunks = self.retrieval.retrieve_relevant_memories(
-            user_id=user_id,
-            query=query,
-            top_k=effective_top_k,
-            source_type=source_type or intent.source_type,
-            memory_id=memory_id,
-            **({"date_from": window.start, "date_to": window.end} if window else {}),
+        # Follow-ups are resolved without a model call; in ai mode the answer
+        # call itself reads the conversation (one call per answer).
+        query = intent.mention_topic or rewrite_query(question, history, None)
+        chunks = (
+            answer_cache.get_sources(base.cache)
+            if mode == "ai" and base.cache is not None and not intent.mention_topic
+            else None
         )
+        if chunks is None:
+            # Date filters only apply to questions about the user's own saves.
+            window = intent.date_window if intent.kind != "open" else None
+            chunks = self.retrieval.retrieve_relevant_memories(
+                user_id=user_id,
+                query=query,
+                top_k=effective_top_k,
+                source_type=source_type or intent.source_type,
+                memory_id=memory_id,
+                **({"date_from": window.start, "date_to": window.end} if window else {}),
+            )
+            if base.cache is not None and not intent.mention_topic:
+                answer_cache.set_sources(base.cache, chunks)
 
         self._request_enrichment(user_id, chunks)
         if intent.mention_topic:
@@ -545,16 +544,51 @@ class RagService:
         base.combined = intent.kind == "combined"
         if base.personal and not chunks:
             return self._fixed(base, INSUFFICIENT_ANSWER, insufficient=True)
+        base.followups = self._stored_followups(user_id, chunks, question)
+
+        if mode == "instant":
+            return self._instant(base, chunks, memory_id, llm)
         if not llm:
             if chunks:
-                return self._fallback(base, chunks)
+                return self._fallback(base, chunks, memory_id)
             return self._fixed(
                 base, NO_MODEL_FOR_GENERAL, mode="general", insufficient=True
             )
 
         base.chunks = list(chunks)
         base.sources = [_citation(chunk) for chunk in chunks]
+        base.slot = ai_gate.acquire()
         return base
+
+    def _cache_key(
+        self,
+        user_id: UUID,
+        question: str,
+        source_type: SourceType | None,
+        memory_id: UUID | None,
+        top_k: int | None,
+        history: Sequence[AskTurn],
+        zone: tzinfo,
+    ) -> CacheKey | None:
+        db = getattr(self.retrieval, "db", None)
+        if db is None or not int(getattr(self.settings, "answer_cache_ttl_seconds", 0)):
+            return None
+        try:
+            version = library_version(db, user_id)
+        except Exception:
+            logger.warning("Library version lookup failed; not caching", exc_info=True)
+            db.rollback()
+            return None
+        return cache_key(
+            user_id=user_id,
+            question=question,
+            source_type=source_type,
+            memory_id=memory_id,
+            top_k=top_k,
+            history=history,
+            zone=zone,
+            version=version,
+        )
 
     def _request_enrichment(self, user_id: UUID, chunks: Sequence[RetrievedChunk]) -> None:
         """Saves that answer a question matter: enrich them in the background (S5)."""
@@ -565,6 +599,56 @@ class RagService:
             user_id, [chunk.memory_id for chunk in chunks]
         )
 
+    def _stored_followups(
+        self, user_id: UUID, chunks: Sequence[RetrievedChunk], question: str
+    ) -> list[str]:
+        """Questions the matched saves answer (from enrichment), nearest first.
+
+        No model call: they were written when the saves were enriched. Without
+        the query vector they come in source order.
+        """
+        db = getattr(self.retrieval, "db", None)
+        memory_ids = list(dict.fromkeys(chunk.memory_id for chunk in chunks))
+        if db is None or not memory_ids:
+            return []
+        vector = getattr(self.retrieval, "_query_vector", None)
+        stmt = select(MemoryQuestion.question, MemoryQuestion.memory_id).where(
+            MemoryQuestion.user_id == user_id,
+            MemoryQuestion.memory_id.in_(memory_ids),
+        )
+        if vector is not None:
+            distance = MemoryQuestion.embedding_local.cosine_distance(vector)
+            stmt = stmt.add_columns(distance.label("distance")).order_by(
+                distance.asc().nulls_last()
+            )
+        else:
+            stmt = stmt.order_by(MemoryQuestion.created_at.asc())
+        try:
+            rows = db.execute(stmt.limit(FOLLOWUP_LIMIT * 4)).all()
+        except Exception:
+            logger.warning("Stored follow-up lookup failed", exc_info=True)
+            db.rollback()
+            return []
+        if vector is None:
+            rank = {memory_id: i for i, memory_id in enumerate(memory_ids)}
+            rows = sorted(rows, key=lambda row: rank.get(row[1], len(rank)))
+        asked = normalize_question(question)
+        picked: list[str] = []
+        for row in rows:
+            text = " ".join(str(row[0]).split())
+            distance = row[2] if len(row) > 2 else None
+            if (
+                not text
+                or normalize_question(text) == asked
+                or (distance is not None and float(distance) < _SAME_QUESTION_DISTANCE)
+                or normalize_question(text) in {normalize_question(p) for p in picked}
+            ):
+                continue
+            picked.append(text if text.endswith("?") else f"{text}?")
+            if len(picked) >= FOLLOWUP_LIMIT:
+                break
+        return picked
+
     def run(
         self, prepared: PreparedAnswer, *, stream: bool = True
     ) -> Iterator[AskEvent]:
@@ -572,7 +656,21 @@ class RagService:
 
         Uses no database access, so it can run while a response is streaming.
         """
-        yield _event_sources(prepared.sources)
+        try:
+            yield from self._run(prepared, stream=stream)
+        finally:
+            prepared.release()
+
+    def _run(self, prepared: PreparedAnswer, *, stream: bool) -> Iterator[AskEvent]:
+        if prepared.cached is not None:
+            yield AskEvent("sources", {"sources": prepared.cached.get("sources", [])})
+            final = dict(prepared.cached.get("final") or {})
+            yield AskEvent("delta", {"text": str(final.get("answer", ""))})
+            yield AskEvent("final", final)
+            return
+
+        sources_event = _event_sources(prepared.sources)
+        yield sources_event
         if prepared.fixed_answer is not None:
             yield AskEvent("delta", {"text": prepared.fixed_answer})
             used = (
@@ -580,7 +678,7 @@ class RagService:
                 if prepared.fixed_used is not None
                 else cited_sources(prepared.fixed_answer, len(prepared.sources))
             )
-            yield self._final(
+            final_event = self._final(
                 prepared,
                 prepared.fixed_answer,
                 AnswerMeta(
@@ -589,21 +687,33 @@ class RagService:
                     followUps=prepared.followups,
                 ),
             )
+            self._store(prepared, sources_event, final_event)
+            yield final_event
             return
 
         text = ""
+        trailer: str | None = None
         try:
             if stream:
+                splitter = TrailerSplitter()
                 for piece in self._stream_answer(prepared):
-                    text += piece
-                    yield AskEvent("delta", {"text": piece})
+                    visible = splitter.feed(piece)
+                    if visible:
+                        text += visible
+                        yield AskEvent("delta", {"text": visible})
+                rest = splitter.finish()
+                if rest:
+                    text += rest
+                    yield AskEvent("delta", {"text": rest})
+                trailer = splitter.trailer
             else:
-                text = self._generate(
+                raw = self._generate(
                     prepared.question,
                     prepared.chunks,
                     self._system_prompt(prepared),
                     prepared.history,
                 )
+                text, trailer = split_trailer(raw)
                 yield AskEvent("delta", {"text": text})
         except LLMProviderError as exc:
             if text:
@@ -632,10 +742,26 @@ class RagService:
 
         count = len(prepared.chunks)
         answer = strip_unknown_markers(normalize_markers(text), count)
-        meta = reconcile(
-            self._answer_meta(prepared, answer), answer, count, prepared.question
+        if not answer:
+            raise LLMProviderError("The language model returned an empty response.")
+        meta = reconcile(parse_trailer(trailer), answer, count, prepared.question)
+        if not meta.followUps and prepared.followups:
+            meta = meta.model_copy(update={"followUps": prepared.followups})
+        final_event = self._final(prepared, answer, meta)
+        self._store(prepared, sources_event, final_event)
+        yield final_event
+
+    def _store(
+        self, prepared: PreparedAnswer, sources: AskEvent, final: AskEvent
+    ) -> None:
+        """Cache a finished answer (never a fallback after a provider failure)."""
+        if prepared.cache is None or prepared.used_fallback:
+            return
+        answer_cache.set_answer(
+            prepared.cache,
+            prepared.answer_mode,
+            {"sources": sources.data["sources"], "final": final.data},
         )
-        yield self._final(prepared, answer, meta)
 
     def to_response(
         self, prepared: PreparedAnswer, final: dict[str, Any]
@@ -644,10 +770,16 @@ class RagService:
         answer = str(final.get("answer", ""))
         used = list(final.get("usedSources") or [])
         text, order = _to_legacy_markers(answer, used)
-        citations = [
-            prepared.sources[i - 1] for i in order if 1 <= i <= len(prepared.sources)
-        ]
-        mode: MetaMode = final.get("mode", "memory")
+        sources = prepared.sources
+        if prepared.cached is not None:
+            sources = [
+                AskCitation.model_validate(
+                    {k: v for k, v in source.items() if k != "id"}
+                )
+                for source in prepared.cached.get("sources", [])
+            ]
+        citations = [sources[i - 1] for i in order if 1 <= i <= len(sources)]
+        mode = str(final.get("mode", "memory"))
         return AskResponse(
             answer=text,
             citations=citations,
@@ -656,6 +788,120 @@ class RagService:
             mode=_LEGACY_MODES.get(mode, "memory"),
             suggested_followups=list(final.get("followUps") or []),
         )
+
+    # -- instant answers ------------------------------------------------------
+
+    def _ai_ready(self) -> bool:
+        """A model is configured and at least one key is not cooling down."""
+        backends = build_backends(self.settings)
+        return any(key_pool.cooldown_remaining(b) <= 0 for b in backends)
+
+    def _instant(
+        self,
+        base: PreparedAnswer,
+        chunks: Sequence[RetrievedChunk],
+        memory_id: UUID | None,
+        llm: bool,
+    ) -> PreparedAnswer:
+        """Quoted answer from the retrieved chunks, or "not in your saves"."""
+        ai = llm and self._ai_ready()
+        recent = bool(chunks) and not has_keywords(base.question) and not (
+            is_overview_question(base.question)
+        )
+        followups = base.followups
+        if self._quote(base, chunks, memory_id, use_db=True):
+            # Listing the latest saves is nothing the AI could improve on.
+            base.ai_available = ai and not recent
+            return base
+        self._fixed(base, INSUFFICIENT_ANSWER, insufficient=True)
+        # The AI can still answer general questions, or read saves whose
+        # sentences didn't clear the bar.
+        base.ai_available = ai and (bool(chunks) or not base.personal)
+        if chunks and followups:
+            base.followups = followups
+        return base
+
+    def _quote(
+        self,
+        base: PreparedAnswer,
+        chunks: Sequence[RetrievedChunk],
+        memory_id: UUID | None,
+        *,
+        use_db: bool,
+    ) -> bool:
+        """Fill ``base`` with an answer quoted from ``chunks``; False when none fits.
+
+        No keywords ("what did I save?") -> the latest saves; "summarise X" ->
+        the stored summary (``use_db``) or the save's leading sentences;
+        anything else -> the best-scoring sentences.
+        """
+        if not chunks:
+            return False
+        overview = is_overview_question(base.question)
+        if not has_keywords(base.question) and not overview:
+            self._recent_answer(base, chunks)
+            return True
+        if use_db and self._summary_answer(base, chunks, memory_id) is not None:
+            return True
+        extracted = (
+            overview_answer(chunks)
+            if overview
+            else extract_answer(base.question, chunks, self._extract_min_score())
+        )
+        if extracted.text is None:
+            return False
+        base.fixed_answer = extracted.text
+        base.fixed_used = extracted.used_sources
+        base.sources = [_citation(chunk) for chunk in chunks]
+        base.chunks = []
+        return True
+
+    def _recent_answer(
+        self, base: PreparedAnswer, chunks: Sequence[RetrievedChunk]
+    ) -> PreparedAnswer:
+        """The user's latest saves, one line each, for questions with no keywords."""
+        citations = _citations_from_chunks(list(chunks))
+        lines = [
+            f"- **{citation.title}**"
+            + (f": {citation.excerpt}" if citation.excerpt else "")
+            + f" [{prompts.source_id(index)}]"
+            for index, citation in enumerate(citations, start=1)
+        ]
+        return self._fixed(
+            base, "Your most recent saves:\n\n" + "\n".join(lines), sources=citations
+        )
+
+    def _summary_answer(
+        self,
+        base: PreparedAnswer,
+        chunks: Sequence[RetrievedChunk],
+        memory_id: UUID | None,
+    ) -> PreparedAnswer | None:
+        """Stored summary and key points for "summarise this save" questions."""
+        if not chunks or not needs_document_context(base.question):
+            return None
+        memories = {chunk.memory_id for chunk in chunks}
+        target = memory_id or (next(iter(memories)) if len(memories) == 1 else None)
+        db = getattr(self.retrieval, "db", None)
+        if target is None or db is None:
+            return None
+        item = db.get(MemoryItem, target)
+        if item is None or not (item.summary or "").strip():
+            return None
+        mine = [chunk for chunk in chunks if chunk.memory_id == target] or list(chunks)
+        lines = [f"{sanitize_untrusted_text(item.summary or '').strip()} [S1]"]
+        points = [
+            sanitize_untrusted_text(point).strip()
+            for point in (item.key_points or [])
+            if isinstance(point, str) and point.strip()
+        ]
+        if points:
+            lines.append("")
+            lines.extend(f"- {point}" for point in points)
+        base.fixed_answer = "\n".join(lines)
+        base.fixed_used = ["S1"]
+        base.sources = [_citation(chunk) for chunk in mine]
+        return base
 
     # -- fixed answers --------------------------------------------------------
 
@@ -677,15 +923,18 @@ class RagService:
         return base
 
     def _fallback(
-        self, base: PreparedAnswer, chunks: Sequence[RetrievedChunk]
+        self,
+        base: PreparedAnswer,
+        chunks: Sequence[RetrievedChunk],
+        memory_id: UUID | None = None,
+        *,
+        use_db: bool = True,
     ) -> PreparedAnswer:
-        """Extractive answer from retrieved memory, for when no model can answer."""
-        base.fixed_answer = _local_fallback_answer(list(chunks))
+        """The instant answer, for an ai request no model can answer."""
+        if not self._quote(base, chunks, memory_id, use_db=use_db):
+            return self._fixed(base, INSUFFICIENT_ANSWER, insufficient=True)
         base.fixed_mode = "memory"
         base.used_fallback = True
-        base.sources = [_citation(chunk) for chunk in chunks]
-        base.fixed_used = _first_per_memory(chunks)
-        base.chunks = []
         return base
 
     def _fallback_after_error(self, prepared: PreparedAnswer) -> PreparedAnswer | None:
@@ -709,9 +958,11 @@ class RagService:
             question=prepared.question,
             history=prepared.history,
             sources=[],
+            answer_mode=prepared.answer_mode,
             personal=prepared.personal,
         )
-        return self._fallback(fallback, chunks)
+        result = self._fallback(fallback, chunks, use_db=False)
+        return result if result.used_fallback else None
 
     def _mention_answer(
         self, base: PreparedAnswer, topic: str, chunks: list[RetrievedChunk]
@@ -806,15 +1057,18 @@ class RagService:
         insufficient = prepared.insufficient or (
             prepared.personal and not meta.usedSources
         )
+        # Every instant-mode answer is made without a model call.
+        mode = "instant" if prepared.answer_mode == "instant" else meta.mode
         return AskEvent(
             "final",
             {
                 "answer": answer,
-                "mode": meta.mode,
+                "mode": mode,
                 "usedSources": meta.usedSources,
                 "followUps": meta.followUps,
                 "insufficient_context": insufficient,
                 "used_fallback": prepared.used_fallback,
+                "aiAvailable": prepared.ai_available,
             },
         )
 
@@ -986,36 +1240,6 @@ class RagService:
             str(last_error) or "Every chat backend failed.", status=status
         )
 
-    def _answer_meta(self, prepared: PreparedAnswer, answer: str) -> AnswerMeta | None:
-        """Structured {mode, usedSources, followUps}; None on any failure (callers degrade)."""
-        backends = [
-            b
-            for b in key_pool.order(build_backends(self.settings), rotate=False)
-            if b.provider != "gemini"
-        ][:2]
-        prompt = prompts.meta_prompt(prepared.question, answer, prepared.chunks)
-        for backend in backends:
-            self._last_usage = None
-            started = time.perf_counter()
-            try:
-                raw = self._call_structured(backend, prompt, prompts.META_SYSTEM_PROMPT)
-            except Exception as exc:
-                self._record_call(backend, started, exc, purpose="answer")
-                logger.warning(
-                    "answer metadata call failed backend=%s status=%s",
-                    backend.name,
-                    _status_of(exc),
-                )
-                if _status_of(exc) in LLMProviderError.UNAVAILABLE_STATUSES:
-                    self._mark_failed(backend, exc)
-                continue
-            self._record_call(backend, started, purpose="answer")
-            meta = parse_meta(raw)
-            if meta is not None:
-                return meta
-            logger.warning("answer metadata failed validation backend=%s", backend.name)
-        return None
-
     def _call_backend(
         self, backend: LLMBackend, prompt: str, system_prompt: str
     ) -> str:
@@ -1055,27 +1279,6 @@ class RagService:
             text = getattr(delta, "content", None)
             if text:
                 yield text
-
-    def _call_structured(
-        self, backend: LLMBackend, prompt: str, system_prompt: str
-    ) -> str:
-        client, extra = self._openai_client(
-            backend, self._meta_timeout(), structured=True
-        )
-        completion = client.chat.completions.create(
-            model=backend.model,
-            temperature=0,
-            max_tokens=300,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ],
-            response_format=cast(ResponseFormatJSONSchema, RESPONSE_FORMAT),
-            extra_headers=extra.headers,
-            extra_body=extra.body,
-        )
-        self._last_usage = report_from_openai(getattr(completion, "usage", None))
-        return completion.choices[0].message.content or ""
 
     def _openai_client(
         self, backend: LLMBackend, timeout: float, *, structured: bool = False

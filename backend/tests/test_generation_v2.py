@@ -1,4 +1,4 @@
-"""R5 generation: SSE events, streaming failover, structured metadata request."""
+"""AI answers (answer_mode "ai"): SSE events, streaming failover, one call per answer."""
 
 from __future__ import annotations
 
@@ -44,7 +44,6 @@ class FakeOpenAI:
     stream_pieces: dict[str, list[str]] = {}
     fail_keys: dict[str, int] = {}
     break_after_first: set[str] = set()
-    meta_reply = '{"mode":"memory","usedSources":["S1"],"followUps":["What is the time complexity of binary search?"]}'
 
     def __init__(self, *, api_key: str, **kwargs: Any) -> None:
         self.api_key = api_key
@@ -56,9 +55,6 @@ class FakeOpenAI:
             error = RuntimeError("upstream failure")
             error.status_code = FakeOpenAI.fail_keys[self.api_key]  # type: ignore[attr-defined]
             raise error
-        if kwargs.get("response_format"):
-            message = SimpleNamespace(content=FakeOpenAI.meta_reply)
-            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
         if kwargs.get("stream"):
             return self._stream(
                 FakeOpenAI.stream_pieces.get(self.api_key, ["Answer [S1]."])
@@ -79,11 +75,6 @@ class FakeOpenAI:
             )
 
 
-# Captured at import, before the conftest guard replaces it for each test.
-_REAL_CALL_STRUCTURED = rag_service.RagService._call_structured
-_DEFAULT_META = FakeOpenAI.meta_reply
-
-
 @pytest.fixture
 def fake_llm(monkeypatch: pytest.MonkeyPatch) -> type[FakeOpenAI]:
     monkeypatch.setattr(
@@ -93,15 +84,10 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> type[FakeOpenAI]:
         rag_service, "get_settings", lambda: SimpleNamespace(**_SETTINGS)
     )
     monkeypatch.setattr(rag_service, "OpenAI", FakeOpenAI)
-    # Undo the conftest guard: this file drives the real request-building code.
-    monkeypatch.setattr(
-        rag_service.RagService, "_call_structured", _REAL_CALL_STRUCTURED, raising=True
-    )
     FakeOpenAI.calls = []
     FakeOpenAI.stream_pieces = {}
     FakeOpenAI.fail_keys = {}
     FakeOpenAI.break_after_first = set()
-    FakeOpenAI.meta_reply = _DEFAULT_META
     key_pool.reset()
     return FakeOpenAI
 
@@ -140,10 +126,13 @@ def _events(response: Any) -> list[tuple[str, dict[str, Any]]]:
     return events
 
 
-def _stream(headers: dict[str, str], question: str) -> list[tuple[str, dict[str, Any]]]:
-    response = client.post(
-        "/api/v1/chat/stream", json={"question": question}, headers=headers
-    )
+def _stream(
+    headers: dict[str, str], question: str, mode: str | None = "ai"
+) -> list[tuple[str, dict[str, Any]]]:
+    body: dict[str, Any] = {"question": question}
+    if mode is not None:
+        body["answer_mode"] = mode
+    response = client.post("/api/v1/chat/stream", json=body, headers=headers)
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("text/event-stream")
     return _events(response)
@@ -151,7 +140,12 @@ def _stream(headers: dict[str, str], question: str) -> list[tuple[str, dict[str,
 
 def test_stream_sends_sources_deltas_then_final(fake_llm: type[FakeOpenAI]) -> None:
     fake_llm.stream_pieces = {
-        "or-key-1": ["Binary search halves ", "the interval [S1]", " and [S7]."]
+        "or-key-1": [
+            "Binary search halves ",
+            "the interval [S1]",
+            " and [S7].\n<<<",
+            "META>>>\nmode: memory\n- What is the time complexity of binary search?",
+        ]
     }
     fake_llm.stream_pieces["or-key-2"] = fake_llm.stream_pieces["or-key-1"]
     headers = _headers("stream_order@example.com")
@@ -171,27 +165,21 @@ def test_stream_sends_sources_deltas_then_final(fake_llm: type[FakeOpenAI]) -> N
     assert final["usedSources"] == ["S1"]
     assert final["mode"] == "memory"
     assert final["followUps"] == ["What is the time complexity of binary search?"]
+    assert final["aiAvailable"] is False
+    # The metadata trailer never reaches the client.
+    streamed = "".join(data["text"] for name, data in events if name == "delta")
+    assert "<<<" not in streamed and "mode:" not in streamed
 
 
-def test_structured_call_uses_strict_json_schema_and_require_parameters(
-    fake_llm: type[FakeOpenAI],
-) -> None:
+def test_one_model_call_per_ai_answer(fake_llm: type[FakeOpenAI]) -> None:
     headers = _headers("stream_meta@example.com")
     _save(headers)
     _stream(headers, "How does binary search halve the interval?")
 
-    meta_calls = [c for c in fake_llm.calls if c.get("response_format")]
-    assert len(meta_calls) == 1
-    call = meta_calls[0]
-    assert call["response_format"]["type"] == "json_schema"
-    assert call["response_format"]["json_schema"]["strict"] is True
-    assert call["extra_body"]["provider"] == {
-        "data_collection": "deny",
-        "zdr": True,
-        "require_parameters": True,
-    }
-    assert "stream" not in call
-    answer_call = next(c for c in fake_llm.calls if c.get("stream"))
+    assert len(fake_llm.calls) == 1
+    answer_call = fake_llm.calls[0]
+    assert answer_call["stream"] is True
+    assert "response_format" not in answer_call
     assert answer_call["extra_body"]["models"] == [
         "anthropic/claude-haiku-4.5",
         "openai/gpt-4o-mini",
@@ -226,10 +214,10 @@ def test_stream_break_after_first_token_sends_an_error_event(
     assert events[-1][1]["code"] == "ASK_STREAM_INTERRUPTED"
 
 
-def test_invalid_metadata_degrades_without_followups(
+def test_missing_trailer_degrades_without_followups(
     fake_llm: type[FakeOpenAI],
 ) -> None:
-    fake_llm.meta_reply = '{"mode": "memory"}'
+    fake_llm.stream_pieces = {k: ["Halves it [S1]."] for k in ("or-key-1", "or-key-2")}
     headers = _headers("stream_bad_meta@example.com")
     _save(headers)
     final = _stream(headers, "How does binary search halve the interval?")[-1][1]
@@ -271,3 +259,17 @@ def test_every_openrouter_answer_refuses_providers_that_keep_data(
     for call in fake_llm.calls:
         provider = call["extra_body"]["provider"]
         assert provider["data_collection"] == "deny" and provider["zdr"] is True
+
+
+def test_default_mode_is_instant_and_calls_no_model(
+    fake_llm: type[FakeOpenAI],
+) -> None:
+    headers = _headers("stream_instant@example.com")
+    _save(headers)
+    events = _stream(headers, "How does binary search halve the interval?", mode=None)
+    final = events[-1][1]
+    assert final["mode"] == "instant"
+    assert "halves the search interval" in final["answer"]
+    assert final["usedSources"] == ["S1"]
+    assert final["aiAvailable"] is True
+    assert fake_llm.calls == []

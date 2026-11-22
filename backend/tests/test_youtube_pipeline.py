@@ -327,7 +327,7 @@ def test_grounded_answer_cites_captured_video(monkeypatch: pytest.MonkeyPatch) -
     process_capture(item["id"])
     resp = client.post(
         "/api/v1/chat",
-        json={"question": "How much whale oil did the Zephyrine Point keeper use in January?"},
+        json={"answer_mode": "ai", "question": "How much whale oil did the Zephyrine Point keeper use in January?"},
         headers=headers,
     )
     assert resp.status_code == 200
@@ -345,7 +345,7 @@ def test_question_outside_transcript_is_not_answered_from_it() -> None:
     process_capture(item["id"])
     resp = client.post(
         "/api/v1/chat",
-        json={"question": "What is the boiling point of liquid nitrogen in kelvin?"},
+        json={"answer_mode": "ai", "question": "What is the boiling point of liquid nitrogen in kelvin?"},
         headers=headers,
     )
     data = resp.json()["data"]

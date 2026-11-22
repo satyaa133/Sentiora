@@ -48,7 +48,7 @@ def test_openrouter_routing(monkeypatch: pytest.MonkeyPatch) -> None:
             ]
 
     rag = RagService(retrieval=MockRetrieval())  # type: ignore[arg-type]
-    resp = rag.ask(user_id=UUID("00000000-0000-0000-0000-000000000000"), question="Test?")
+    resp = rag.ask(answer_mode="ai", user_id=UUID("00000000-0000-0000-0000-000000000000"), question="Test?")
     assert resp.answer == "OpenRouter mock response"
 
 
@@ -89,7 +89,11 @@ def test_openrouter_fallback_when_missing_key(monkeypatch: pytest.MonkeyPatch) -
             ]
 
     rag = RagService(retrieval=MockRetrieval())  # type: ignore[arg-type]
-    resp = rag.ask(user_id=UUID("00000000-0000-0000-0000-000000000000"), question="Test?")
+    resp = rag.ask(
+        answer_mode="ai",
+        user_id=UUID("00000000-0000-0000-0000-000000000000"),
+        question="What is the fallback data?",
+    )
     assert resp.used_fallback is True
     assert "Fallback data" in resp.answer
 
@@ -138,9 +142,9 @@ def test_openrouter_provider_error(monkeypatch: pytest.MonkeyPatch) -> None:
     rag = RagService(retrieval=MockRetrieval())  # type: ignore[arg-type]
     user = UUID("00000000-0000-0000-0000-000000000000")
     # Memory that covers the question is answered locally instead of failing.
-    resp = rag.ask(user_id=user, question="What is the fallback data?")
+    resp = rag.ask(answer_mode="ai", user_id=user, question="What is the fallback data?")
     assert resp.used_fallback is True
     assert resp.citations[0].title == "Mock"
     # A general question the memory doesn't cover still reports the failure.
     with pytest.raises(LLMProviderError, match="Provider is down"):
-        rag.ask(user_id=user, question="Test?")
+        rag.ask(answer_mode="ai", user_id=user, question="Test?")
