@@ -280,7 +280,7 @@ npm run lint && npm run typecheck && npm run test && npm run build
 
 # Individual service development
 npm run dev:frontend       # Frontend dashboard only (http://localhost:5173)
-npm run dev:backend        # Backend API server only (http://localhost:8000)
+npm run dev:backend        # Backend API server only (http://localhost:8000), restarts on code changes
 npm run dev:extension      # Watch mode for Chrome Extension build
 
 # Run unit & integration test suites
