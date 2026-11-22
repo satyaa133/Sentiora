@@ -547,6 +547,47 @@
         ]
       }
     },
+    "/api/v1/users/me/privacy-consent": {
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Accept the current privacy notice (needed for AI features)",
+        "operationId": "accept_privacy_notice_api_v1_users_me_privacy_consent_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivacyConsentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Accept Privacy Notice Api V1 Users Me Privacy Consent Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "VALIDATION_ERROR: not the current notice version"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/memory-items": {
       "post": {
         "tags": [
@@ -775,6 +816,65 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Memory Items"
+        ],
+        "summary": "Rename a memory item",
+        "operationId": "update_memory_item_api_v1_memory_items__item_id__patch",
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryItemUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIResponse_MemoryItemResponse_"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "MEMORY_ITEM_NOT_FOUND"
           },
           "422": {
             "description": "Validation Error",
@@ -2437,6 +2537,22 @@
         ],
         "title": "MemoryItemResponse"
       },
+      "MemoryItemUpdate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "MemoryItemUpdate",
+        "description": "Fields a user may change on a save (S7: the title)."
+      },
       "NodeMetadata": {
         "properties": {
           "level": {
@@ -2548,6 +2664,22 @@
         "type": "object",
         "title": "OnboardingCompleteRequest"
       },
+      "PrivacyConsentRequest": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "PrivacyConsentRequest",
+        "description": "The privacy notice version the user accepted (D10)."
+      },
       "RefreshTokenRequest": {
         "properties": {
           "refresh_token": {
@@ -2578,13 +2710,20 @@
             "maxLength": 80,
             "minLength": 2,
             "title": "Full Name"
+          },
+          "privacy_consent_version": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Privacy Consent Version"
           }
         },
         "type": "object",
         "required": [
           "email",
           "password",
-          "full_name"
+          "full_name",
+          "privacy_consent_version"
         ],
         "title": "RegisterRequest"
       },

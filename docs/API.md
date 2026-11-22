@@ -116,11 +116,11 @@ OpenAPI schema; nginx doesn't forward it).
 
 | Method | Path | Auth | Purpose |
 | ------ | ---- | ---- | ------- |
-| POST | `/register` | — | Create an account; returns tokens (201) |
+| POST | `/register` | — | Create an account; returns tokens (201). Requires `privacy_consent_version` equal to `PRIVACY_NOTICE_VERSION` (422 otherwise) |
 | POST | `/login` | — | Email + password; returns tokens |
 | POST | `/refresh-token` | — | New token pair from a refresh token |
 | POST | `/logout` | Bearer | Revoke the user's refresh tokens |
-| GET | `/me` | Bearer | Signed-in user's identity |
+| GET | `/me` | Bearer | Signed-in user's identity, with `privacy_consent_version` and `privacy_consent_current` |
 | POST | `/forgot-password` | — | Request a reset link; always 202 |
 | POST | `/reset-password` | — | Set a new password with a reset token |
 | PUT | `/change-password` | Bearer | Change password (current password required) |
@@ -134,6 +134,14 @@ OpenAPI schema; nginx doesn't forward it).
 | PATCH | `/me/source-preferences` | Bearer | Update several sources |
 | PATCH | `/me/source-preferences/{source_id}` | Bearer | Update one source |
 | POST | `/me/onboarding/complete` | Bearer | Finish onboarding with initial sources |
+| POST | `/me/privacy-consent` | Bearer | Accept the current privacy notice. Body `{"version"}` (must be current, 422 otherwise); returns `privacy_consent_version`, `privacy_consent_current` |
+
+**Privacy notice (D10, S7).** Sign-up stores the accepted notice version and
+time. When `PRIVACY_NOTICE_VERSION` changes, `privacy_consent_current` turns
+false until the user accepts again. Without current consent, AI answers
+(`answer_mode: "ai"`) and `POST /memory-items/{id}/enrich` return `403
+PRIVACY_CONSENT_REQUIRED`, and background enrichment is skipped. Instant answers
+and search never need it.
 
 ### Memory items (`/api/v1/memory-items`)
 
@@ -143,6 +151,7 @@ OpenAPI schema; nginx doesn't forward it).
 | GET | `` (collection) | Bearer | List the user's memories |
 | GET | `/{item_id}` | Bearer | One memory; opening it queues its enrichment |
 | POST | `/{item_id}/enrich` | Bearer | Queue enrichment of one save (Summarise button, Save now) (202) |
+| PATCH | `/{item_id}` | Bearer | Rename a save. Body `{"title"}` (1–300 characters, spaces collapsed) |
 | DELETE | `/{item_id}` | Bearer | Soft delete (also removes its questions) |
 
 List query parameters: `page` (≥ 1), `per_page` (1–100, default 20),
@@ -223,7 +232,7 @@ UUIDs). Returns `{id, rating, created_at}`.
 
 | Method | Path | Auth | Purpose |
 | ------ | ---- | ---- | ------- |
-| GET | `/statistics` | Bearer | Memory counts and aggregates for the user |
+| GET | `/statistics` | Bearer | Memory counts and aggregates for the user; the web app makes one request per dashboard load and reuses it for 10 s |
 
 ---
 
@@ -241,6 +250,7 @@ UUIDs). Returns `{id, rating, created_at}`.
 | `AUTH_TOKEN_REVOKED` | 401 | Refresh token already revoked |
 | `AUTH_RESET_TOKEN_INVALID` | 400 | Password reset token invalid or expired |
 | `AUTH_FORBIDDEN` | 403 | Authenticated but not allowed |
+| `PRIVACY_CONSENT_REQUIRED` | 403 | An AI feature (AI answer, Summarise) without consent to the current privacy notice |
 | `AUTH_ACCOUNT_DISABLED` | 403 | Account disabled |
 | `AUTH_EMAIL_ALREADY_EXISTS` | 409 | Registering an email that exists |
 | `AUTH_LOGIN_THROTTLED` | 429 | Too many failed logins for the account |

@@ -5,7 +5,7 @@ PostgreSQL 16 with the `pgvector` extension (image
 SQLAlchemy models in `backend/app/models/` and changed only through Alembic
 migrations in `backend/alembic/versions/`.
 
-This file describes the schema at migration head **`009_enrichment`**
+This file describes the schema at migration head **`010_privacy_consent`**
 (checked against a live database on 2026-11-20). It replaces
 `06_Database_Schema_Design_v1.2.pdf` (archived), which designed many tables
 that were never built. Planned changes are in `REBUILD_PLAN.md` section 7.
@@ -66,6 +66,8 @@ All timestamps are `timestamptz` (UTC). All primary keys are UUIDs.
 | `last_login_at` | timestamptz | yes | |
 | `created_at`, `updated_at` | timestamptz | no | `now()` |
 | `deleted_at` | timestamptz | yes | soft delete |
+| `privacy_consent_version` | text | yes | privacy notice version the user accepted (D10); null for accounts from before S7 |
+| `privacy_consented_at` | timestamptz | yes | when it was accepted |
 
 Indexes: unique `email`; `deleted_at`.
 
@@ -262,7 +264,8 @@ Applied in this order (`down_revision` chain):
 | `006_rag_v2_chunks` | `006_rag_v2_chunks.py` | `start_sec`, `end_sec`, `embedding_model`, generated tsvectors + GIN indexes |
 | `007_usage_and_feedback` | `007_usage_and_feedback.py` | `llm_usage`, `answer_feedback` |
 | `008_local_embeddings` | `008_local_embeddings.py` | `memory_chunks.embedding_local vector(768)` + HNSW cosine index |
-| `009_enrichment` | `009_enrichment.py` | `memory_items` enrichment columns, `memory_chunks.context`, `memory_questions` (**head**) |
+| `009_enrichment` | `009_enrichment.py` | `memory_items` enrichment columns, `memory_chunks.context`, `memory_questions` |
+| `010_privacy_consent` | `010_privacy_consent.py` | `users.privacy_consent_version`, `users.privacy_consented_at` (**head**) |
 
 Commands (from the repo root):
 
