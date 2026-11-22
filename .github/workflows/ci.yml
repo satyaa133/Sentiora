@@ -25,6 +25,17 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # Sign-up verification codes (OTP), queues and the answer cache.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -96,6 +107,7 @@ jobs:
       - name: End-to-end API flow
         env:
           DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
+          REDIS_URL: redis://localhost:6379/0
         run: npm run test:e2e
 
       - name: Build

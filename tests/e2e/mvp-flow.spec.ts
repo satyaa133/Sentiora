@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { readOtp } from "./otp";
+
 // Set by playwright.config.ts to the isolated e2e API (never the dev server).
 const API = process.env.E2E_API_BASE_URL ?? "http://localhost:8100";
 
@@ -15,6 +17,12 @@ test("register, capture, search, ask, and delete memory", async ({ request }) =>
     data: { email, password, full_name: "E2E User", privacy_consent_version: "2026-11-20" },
   });
   expect(register.status()).toBe(201);
+
+  // Accounts are verified with the emailed code (OTP) before signing in.
+  const verify = await request.post(`${API}/api/v1/auth/verify-email`, {
+    data: { email, otp: readOtp(email) },
+  });
+  expect(verify.status()).toBe(200);
 
   const login = await request.post(`${API}/api/v1/auth/login`, {
     data: { email, password },

@@ -11,7 +11,12 @@ TEST_EMAIL = "test_otp_user@example.com"
 TEST_PASSWORD = "Password123!"
 TEST_NAME = "OTP Tester"
 
-REGISTER_PAYLOAD = {"email": TEST_EMAIL, "password": TEST_PASSWORD, "full_name": TEST_NAME}
+REGISTER_PAYLOAD = {
+    "email": TEST_EMAIL,
+    "password": TEST_PASSWORD,
+    "full_name": TEST_NAME,
+    "privacy_consent_version": "2026-11-20",
+}
 
 
 @pytest.fixture
