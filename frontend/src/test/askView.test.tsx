@@ -128,6 +128,15 @@ describe("Ask Sentiora answers", () => {
     expect(answer).toHaveTextContent("From your memory");
   });
 
+  it("labels an instant answer as quoted from the user's saves", async () => {
+    streams(final({ mode: "instant", aiAvailable: true }));
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
+    expect(answer).toHaveTextContent("Quoted from your saves");
+  });
+
   it("drops markers for sources that were not supplied", async () => {
     streams(final({ answer: "Only one source [S1] here [S7].", usedSources: ["S1"] }));
     render(<AskSentioraView items={[]} />);

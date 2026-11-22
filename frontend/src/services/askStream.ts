@@ -2,8 +2,11 @@ import { API_BASE_URL, refreshAccessToken } from "./apiClient";
 import { clearAuthStorage, getAccessToken } from "./authStorage";
 import { AskApiError, type AskCitation, type AskRequest } from "./askService";
 
-/** How the answer used the user's memory (POST /chat/stream `final.mode`). */
-export type StreamMode = "memory" | "general" | "mixed";
+/**
+ * How the answer used the user's memory (POST /chat/stream `final.mode`).
+ * "instant": quoted from the user's saves without an AI call (the default since S6).
+ */
+export type StreamMode = "memory" | "general" | "mixed" | "instant";
 
 /** A numbered source the answer may cite as [S1], [S2], ... */
 export interface StreamSource extends AskCitation {
@@ -18,6 +21,8 @@ export interface StreamFinal {
   followUps: string[];
   insufficient_context: boolean;
   used_fallback: boolean;
+  /** "Explain with AI" can add to this answer (S6; the button arrives in S7). */
+  aiAvailable?: boolean;
 }
 
 export interface AskStreamHandlers {
