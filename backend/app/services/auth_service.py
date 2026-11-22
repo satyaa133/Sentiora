@@ -23,9 +23,25 @@ from app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
     RegisterResponseData,
+    VerifyEmailRequest,
+)
+from app.services.email_service import send_otp_email
+from app.services.otp_service import (
+    can_resend,
+    generate_and_store_otp,
+    get_resend_ttl,
+    verify_otp,
 )
 
 settings = get_settings()
+
+
+def _otp_error_message(code: str) -> str:
+    return {
+        "OTP_EXPIRED": "The verification code has expired. Please request a new one.",
+        "OTP_INVALID": "Incorrect verification code. Please try again.",
+        "OTP_MAX_ATTEMPTS": "Too many incorrect attempts. Please request a new code.",
+    }.get(code, "Verification failed.")
 
 
 class AuthService:
@@ -33,6 +49,7 @@ class AuthService:
         self.db = db
         self.user_repo = UserRepository(db)
         self.auth_repo = AuthRepository(db)
+        self.settings = get_settings()
 
     def register(self, req: RegisterRequest) -> RegisterResponseData:
         existing_user = self.user_repo.get_by_email(req.email)
@@ -52,6 +69,15 @@ class AuthService:
             full_name=req.full_name,
             privacy_consent_version=req.privacy_consent_version,
         )
+
+        try:
+            otp = generate_and_store_otp(user.email)
+            send_otp_email(user.email, otp)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).exception(
+                "OTP generation/send failed for %s — user created, verify manually", user.email
+            )
 
         return RegisterResponseData(
             user_id=user.id,
@@ -88,6 +114,15 @@ class AuthService:
                 detail={
                     "code": "AUTH_ACCOUNT_DISABLED",
                     "message": "This account has been disabled.",
+                },
+            )
+
+        if self.settings.require_email_verification and not user.is_email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "AUTH_EMAIL_NOT_VERIFIED",
+                    "message": "Please verify your email before signing in.",
                 },
             )
 
@@ -224,3 +259,76 @@ class AuthService:
         new_hash = hash_password(req.new_password)
         self.user_repo.update_password(user, new_hash)
         self.auth_repo.revoke_user_token_family(user_id)
+
+    def verify_email(self, req: VerifyEmailRequest) -> AuthTokenData:
+        """Validate OTP, mark user verified, and return auth tokens."""
+        user = self.user_repo.get_by_email(req.email)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "USER_NOT_FOUND", "message": "No account found for this email."},
+            )
+
+        if user.is_email_verified:
+            # Already verified — just issue tokens so they can proceed
+            pass
+        else:
+            ok, error_code = verify_otp(req.email, req.otp)
+            if not ok:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"code": error_code, "message": _otp_error_message(error_code)},
+                )
+            self.user_repo.mark_email_verified(user)
+
+        # Issue a session + tokens (same as login)
+        session_expires = datetime.now(UTC) + timedelta(
+            days=settings.refresh_token_expire_days
+        )
+        session = self.auth_repo.create_session(
+            user_id=user.id,
+            expires_at=session_expires,
+        )
+        access_token = create_access_token(user_id=str(user.id))
+        refresh_token = create_refresh_token(user_id=str(user.id))
+        token_hash = hash_refresh_token(refresh_token)
+        self.auth_repo.create_refresh_token(
+            user_id=user.id,
+            session_id=session.id,
+            token_hash=token_hash,
+            expires_at=session_expires,
+        )
+        self.user_repo.update_last_login(user)
+        full_name = user.profile.display_name if user.profile else None
+        return AuthTokenData(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            access_token_expires_in=settings.access_token_expire_minutes * 60,
+            user=AuthUserInfo(id=user.id, email=user.email, full_name=full_name),
+        )
+
+    def resend_otp(self, email: str) -> None:
+        """Re-send OTP if cooldown has passed."""
+        user = self.user_repo.get_by_email(email)
+        if not user:
+            # Don't reveal whether the email exists
+            return
+        if user.is_email_verified:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "OTP_ALREADY_VERIFIED",
+                    "message": "This email is already verified.",
+                },
+            )
+        if not can_resend(email):
+            ttl = get_resend_ttl(email)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "code": "OTP_RESEND_COOLDOWN",
+                    "message": f"Please wait {ttl} seconds before requesting a new code.",
+                },
+            )
+        otp = generate_and_store_otp(email)
+        send_otp_email(email, otp)

@@ -179,6 +179,62 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("auth:logout", handleLogout);
   }, [clearSession]);
 
+  useEffect(() => {
+    const handleAuthSync = async (sessionData: {
+      accessToken?: string;
+      refreshToken?: string;
+      user?: unknown;
+    }) => {
+      if (sessionData?.accessToken && sessionData?.refreshToken) {
+        setAuthTokens(
+          sessionData.accessToken,
+          sessionData.refreshToken,
+          sessionData.user as { id: string; email: string; is_email_verified?: boolean; onboarding_completed?: boolean } | undefined,
+        );
+        await fetchCurrentUser();
+      }
+    };
+
+    const handleCustomSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail) void handleAuthSync(detail);
+    };
+
+    const handleMessage = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      if (e.data?.type === "SENTIORA_AUTH_SYNC") {
+        void handleAuthSync(e.data);
+      } else if (e.data?.type === "SENTIORA_AUTH_LOGOUT") {
+        clearSession();
+      }
+    };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "sentiora_auth_session") {
+        if (!e.newValue) {
+          clearSession();
+        } else {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            void handleAuthSync(parsed);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    };
+
+    window.addEventListener("sentiora_auth_sync", handleCustomSync);
+    window.addEventListener("message", handleMessage);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener("sentiora_auth_sync", handleCustomSync);
+      window.removeEventListener("message", handleMessage);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, [fetchCurrentUser, clearSession]);
+
   const login = useCallback(async (email: string, password: string) => {
     const response = await apiClient.post<{
       success: boolean;

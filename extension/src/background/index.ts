@@ -150,7 +150,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       setCachedUser(user),
     ])
       .then(() => {
-        console.info("[Sentiora Background] Authentication tokens synchronized from Dashboard.");
+        console.info("[Sentiora Background] Authentication tokens synchronized.");
+        notifyDashboardTabsAuth(message.payload);
         sendResponse({ success: true });
       })
       .catch((err) => {
@@ -170,7 +171,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
   if (message.type === "CLEAR_AUTH_TOKENS") {
     clearAllAuthData()
       .then(() => {
-        console.info("[Sentiora Background] Auth tokens cleared via Dashboard logout.");
+        console.info("[Sentiora Background] Auth tokens cleared.");
+        notifyDashboardTabsLogout();
         sendResponse({ success: true });
       })
       .catch((err) => {
@@ -267,6 +269,42 @@ function notifyDashboardTabs(): void {
         ) {
           chrome.tabs.sendMessage(tab.id, { type: "REFRESH_MEMORY_FEED" }, () => {
             // Ignore tab send errors if script not listening
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          });
+        }
+      }
+    });
+  } catch {
+    // Ignore tab query errors
+  }
+}
+
+function notifyDashboardTabsAuth(payload: { accessToken: string; refreshToken: string; user?: unknown }): void {
+  try {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (tab.id && isTrustedAppUrl(tab.url)) {
+          chrome.tabs.sendMessage(tab.id, { type: "SYNC_AUTH_TOKENS", payload }, () => {
+            if (chrome.runtime.lastError) {
+              /* ignore */
+            }
+          });
+        }
+      }
+    });
+  } catch {
+    // Ignore tab query errors
+  }
+}
+
+function notifyDashboardTabsLogout(): void {
+  try {
+    chrome.tabs.query({}, (tabs) => {
+      for (const tab of tabs) {
+        if (tab.id && isTrustedAppUrl(tab.url)) {
+          chrome.tabs.sendMessage(tab.id, { type: "CLEAR_AUTH_TOKENS" }, () => {
             if (chrome.runtime.lastError) {
               /* ignore */
             }

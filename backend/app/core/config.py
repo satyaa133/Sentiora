@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://127.0.0.1:6379/0"
+    # Email Delivery (Resend API or SMTP)
+    resend_api_key: str | None = None
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from_email: str = "noreply@sentiora.app"
+    smtp_from_name: str = "Sentiora"
+    require_email_verification: bool = True
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     # Reverse proxies whose X-Forwarded-For header is trusted for client IPs
     # (rate limiting). Empty = ignore X-Forwarded-For entirely.

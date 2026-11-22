@@ -67,6 +67,7 @@ def main() -> int:
         "APP_ENVIRONMENT": "development",
         "CORS_ORIGINS": f'["{frontend_origin}"]',
         "EMBEDDING_PROVIDER": "none",
+        "REQUIRE_EMAIL_VERIFICATION": "false",
         "ALLOW_TEST_EMAIL_DOMAINS": "true",
         "OPENAI_API_KEY": "",
         "GEMINI_API_KEY": "",

@@ -1,4 +1,5 @@
 import apiClient, { type APIEnvelope } from "./apiClient";
+import { broadcastMemoryRefresh } from "./authStorage";
 import type {
   MemoryItem,
   MemoryItemListResponse,
@@ -46,6 +47,7 @@ export async function enrichMemoryItem(id: string): Promise<MemoryItem> {
 
 export async function deleteMemoryItem(id: string): Promise<void> {
   await apiClient.delete(`/memory-items/${id}`);
+  broadcastMemoryRefresh();
 }
 
 export interface CreateMemoryItemPayload {
@@ -67,5 +69,6 @@ export async function createMemoryItem(
     "/memory-items",
     payload
   );
+  broadcastMemoryRefresh();
   return resp.data.data;
 }

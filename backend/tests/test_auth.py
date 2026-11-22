@@ -148,6 +148,12 @@ def test_refresh_rejected_for_disabled_account(clean_db) -> None:
         "/api/v1/auth/register",
         json={"privacy_consent_version": "2026-11-20", "email": email, "password": "Password123!", "full_name": "Disabled"},
     )
+    db = _get_session_factory()()
+    try:
+        db.query(User).filter(User.email == email).update({"is_email_verified": True})
+        db.commit()
+    finally:
+        db.close()
     login = client.post("/api/v1/auth/login", json={"email": email, "password": "Password123!"})
     refresh_token = login.json()["data"]["refresh_token"]
 

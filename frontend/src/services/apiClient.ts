@@ -85,7 +85,14 @@ async function rotateTokens(tokenBeforeWaiting: string | null): Promise<string> 
 }
 
 // Auth endpoints answer 401 for bad credentials or tokens; retrying them is pointless.
-const NO_RETRY_PATHS = ["/auth/login", "/auth/register", "/auth/refresh-token", "/auth/logout"];
+const NO_RETRY_PATHS = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/refresh-token",
+  "/auth/logout",
+  "/auth/verify-email",
+  "/auth/resend-otp",
+];
 
 // On 401: attempt a single silent refresh, then force re-login
 apiClient.interceptors.response.use(

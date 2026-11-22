@@ -16,6 +16,8 @@ from app.schemas.auth import (
     RegisterRequest,
     RegisterResponseData,
     ResetPasswordRequest,
+    ResendOtpRequest,
+    VerifyEmailRequest,
 )
 from app.schemas.envelope import APIResponse, response_meta
 from app.services.auth_service import AuthService
@@ -179,5 +181,40 @@ def change_password(
     return {
         "success": True,
         "data": {"message": "Password changed successfully."},
+        "meta": response_meta(request).model_dump(),
+    }
+
+
+@router.post(
+    "/verify-email",
+    response_model=APIResponse[AuthTokenData],
+    status_code=status.HTTP_200_OK,
+    summary="Verify email address with OTP and receive auth tokens",
+)
+def verify_email(
+    req: VerifyEmailRequest,
+    request: Request,
+    db: Annotated[DBSession, Depends(get_db)],
+) -> APIResponse[AuthTokenData]:
+    service = AuthService(db)
+    data = service.verify_email(req)
+    return APIResponse(data=data, meta=response_meta(request))
+
+
+@router.post(
+    "/resend-otp",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Resend OTP verification email (60 s cooldown)",
+)
+def resend_otp(
+    req: ResendOtpRequest,
+    request: Request,
+    db: Annotated[DBSession, Depends(get_db)],
+) -> dict:
+    service = AuthService(db)
+    service.resend_otp(req.email)
+    return {
+        "success": True,
+        "data": {"message": "If the email is registered, a new code has been sent."},
         "meta": response_meta(request).model_dump(),
     }
