@@ -136,6 +136,7 @@ Locked unless this file is changed:
 | D11 | **Development providers (2026-11-21, owner).** Use every configured key: OpenRouter is the primary for answers and embeddings (Claude Haiku); **Groq** (`openai/gpt-oss-120b`, OpenAI-compatible) is the first chat backup, then Gemini. Groq has no embeddings API. Groq keeps no API inputs or outputs by default (abuse/error logs up to 30 days; Zero Data Retention can be turned on); whether it trains on API data is in its services agreement, not yet read. Before Groq serves real users: confirm its no-training terms, turn on ZDR, and add it to the D10 notice (new notice version). |
 | D12 | ~~OpenAI as the main provider~~ **Withdrawn 2026-11-21:** the owner won't add OpenAI credit; the key was removed. |
 | D13 | **No provider may store or train on user text (2026-11-21, owner), and as little as possible depends on paid APIs.** Development uses only: **Groq** (primary for answers; its services agreement forbids training on inputs/outputs and keeps none by default) and **OpenRouter** (backup answers and, until S3, embeddings), where every request sends `provider: {data_collection: "deny", zdr: true}` so only zero-data-retention endpoints that don't collect prompts are used (checked live). Gemini (free tier may use data) and OpenAI are removed. No credit will be added to any API, so S3 (local embeddings), S4 (local reranker) and S6 (instant answers without AI) are the priority, and the AI answer stays an optional extra. Owner action: turn on Groq's Zero Data Retention setting. |
+| D14 | **Question-bank leg has its own similarity bar (2026-11-22, owner).** `RAG_QUESTION_MIN_SIMILARITY` (0.60) instead of `RAG_MIN_SIMILARITY` (0.65): the local model scores a paraphrased question against a stored one at 0.60–0.67, so at 0.65 the leg added nothing. S6 eval (31 questions): 0.65 → hit@6 0.86, MRR 0.86, long-page 6/10; **0.60 → 0.93, 0.88, 8/10, reject 1.00**; 0.55 → reject 0.50 (narrow window, S8 eval-in-CI watches it). |
 | D10 | **Privacy notice at sign-up.** New users see the notice below and must accept it to create an account; the accepted version and time are stored. When the notice changes, signed-in users accept the new version before using AI features. The same text goes in the privacy policy (S10). |
 
 **Approved privacy notice (D10), version `2026-11-20`:**
@@ -456,7 +457,7 @@ retrieval through the question-bank leg, which S6 adds.
 **Goal:** instant answer by default, AI on a button, bounded (fixes P1, P12).
 
 - [ ] **Question-bank leg:** nearest `memory_questions` (mapped to their
-      chunks) as a third RRF list.
+      chunks) as a third RRF list, behind `RAG_QUESTION_MIN_SIMILARITY` (D14).
 - [ ] **Instant answer** (`app/services/answer/extractive.py`): split the
       reranked chunks into sentences (transcripts: time-aligned lines), score
       (question, sentence) pairs with the reranker, keep the top 3–5 above
@@ -655,6 +656,7 @@ that adds them.
 | `ENRICH_MODEL` | cheapest configured chat model | S5 |
 | `ASK_DEFAULT_MODE` | `instant` | S6 |
 | `RAG_EXTRACT_MIN_SCORE` | set by eval | S6 |
+| `RAG_QUESTION_MIN_SIMILARITY` | 0.60 (D14) | S6 |
 | `LLM_MAX_CONCURRENT` | 10 | S6 |
 | `ANSWER_CACHE_TTL_SECONDS` | 86400 | S6 |
 | `VITE_SENTRY_DSN` (root `.env`, build time) | unset (off) | S10 |
