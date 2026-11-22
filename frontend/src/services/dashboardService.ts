@@ -30,21 +30,39 @@ export function browserTimeZone(): string {
   }
 }
 
+/** A loaded result is reused for this long by views that mount later. */
+export const STATISTICS_REUSE_MS = 10_000;
+
 let inFlight: Promise<DashboardStatistics> | null = null;
+let latest: { stats: DashboardStatistics; at: number } | null = null;
 
 /**
- * Home, Timeline, Intelligence and the corner Echo all mount at once and each
- * ask for statistics; callers that overlap share one request. Nothing is
- * cached after it settles, so a later refresh always gets fresh numbers.
+ * Home, Timeline, Intelligence and the corner Echo each ask for statistics as
+ * they mount, a moment apart. Overlapping callers share one request, and a
+ * result stays reusable for STATISTICS_REUSE_MS, so one page load makes one
+ * request. `fresh` (or `invalidateStatistics`) asks the server again: use it
+ * when the user's saves changed.
  */
-export function fetchStatistics(): Promise<DashboardStatistics> {
+export function fetchStatistics(options: { fresh?: boolean } = {}): Promise<DashboardStatistics> {
+  if (options.fresh) latest = null;
+  if (latest && Date.now() - latest.at < STATISTICS_REUSE_MS) {
+    return Promise.resolve(latest.stats);
+  }
   inFlight ??= apiClient
     .get<APIEnvelope<DashboardStatistics>>("/dashboard/statistics", {
       params: { tz: browserTimeZone() },
     })
-    .then((resp) => resp.data.data)
+    .then((resp) => {
+      latest = { stats: resp.data.data, at: Date.now() };
+      return resp.data.data;
+    })
     .finally(() => {
       inFlight = null;
     });
   return inFlight;
+}
+
+/** Forget the reusable result: the next caller asks the server. */
+export function invalidateStatistics(): void {
+  latest = null;
 }
