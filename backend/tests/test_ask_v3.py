@@ -330,6 +330,7 @@ def test_question_bank_finds_a_chunk_the_other_legs_miss(
         "app.services.retrieval_service.get_embedding_adapter", lambda: _OneHot()
     )
     monkeypatch.setattr(get_settings(), "rag_min_similarity", 0.65)
+    monkeypatch.setattr(get_settings(), "rag_question_min_similarity", 0.60)
 
     query = "quietening a colony"  # no shared words, vector far from every chunk
     with SessionLocal() as db:
@@ -341,6 +342,42 @@ def test_question_bank_finds_a_chunk_the_other_legs_miss(
         # Another user's questions are never used.
         other = RetrievalService(db).retrieve_relevant_memories(user_id=uuid4(), query=query)
         assert other == []
+
+
+def test_question_bank_has_its_own_bar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D14: a stored question at 0.62 similarity passes 0.60 but not 0.65."""
+    headers, user_id = _register("v3_bank_bar@example.com")
+    memory_id = _save(headers, "bank-bar")
+    close = [0.0] * LOCAL_VECTOR_DIMENSIONS
+    close[0], close[1] = 0.62, (1 - 0.62**2) ** 0.5  # cosine 0.62 to the query
+    with SessionLocal() as db:
+        chunk = db.query(MemoryChunk).filter(MemoryChunk.memory_id == memory_id).first()
+        assert chunk is not None
+        db.add(
+            MemoryQuestion(
+                memory_id=memory_id,
+                user_id=user_id,
+                chunk_id=chunk.id,
+                question="Why do keepers puff smoke at hives?",
+                embedding_local=close,
+            )
+        )
+        db.commit()
+    monkeypatch.setattr(
+        "app.services.retrieval_service.get_embedding_adapter", lambda: _OneHot()
+    )
+    settings = get_settings()
+    monkeypatch.setattr(settings, "rag_min_similarity", 0.65)
+    with SessionLocal() as db:
+        monkeypatch.setattr(settings, "rag_question_min_similarity", 0.60)
+        found = RetrievalService(db).retrieve_relevant_memories(
+            user_id=user_id, query="quietening a colony"
+        )
+        assert [c.memory_id for c in found] == [memory_id]
+        monkeypatch.setattr(settings, "rag_question_min_similarity", 0.65)
+        assert RetrievalService(db).retrieve_relevant_memories(
+            user_id=user_id, query="quietening a colony"
+        ) == []
 
 
 # -- AI gate --------------------------------------------------------------------
@@ -489,3 +526,4 @@ def test_settings_document_the_s6_defaults() -> None:
     assert settings.ask_default_mode == "instant"
     assert settings.llm_max_concurrent == 10
     assert settings.answer_cache_ttl_seconds == 86400
+    assert settings.rag_question_min_similarity == 0.60

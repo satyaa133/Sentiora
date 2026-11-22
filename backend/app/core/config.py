@@ -161,6 +161,11 @@ class Settings(BaseSettings):
     # Cosine similarity a vector hit needs to count as relevant. When no hit
     # clears it and no full-text hit matches, the question is "not covered".
     rag_min_similarity: float = Field(default=0.25, ge=0.0, le=1.0)
+    # Cosine similarity a stored enrichment question needs for its chunk to join
+    # the question-bank leg (D14). Question-to-question scores run lower than
+    # question-to-passage ones with the local model; 0.55 let unrelated
+    # questions through in the S6 eval.
+    rag_question_min_similarity: float = Field(default=0.60, ge=0.0, le=1.0)
     # MMR trade-off between relevance (1.0) and diversity (0.0).
     rag_mmr_lambda: float = Field(default=0.7, ge=0.0, le=1.0)
     # At most this many chunks from one memory, unless the question is scoped

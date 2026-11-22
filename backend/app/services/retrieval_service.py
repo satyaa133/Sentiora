@@ -543,8 +543,8 @@ class RetrievalService:
 
         Stored questions are embedded with the local model only, so this leg
         runs only when the query was embedded with it. A question must clear
-        ``RAG_MIN_SIMILARITY`` like any vector hit; each chunk appears once,
-        with its closest question's distance.
+        ``RAG_QUESTION_MIN_SIMILARITY`` (D14); each chunk appears once, with
+        its closest question's distance.
         """
         if (
             not self.use_question_bank
@@ -573,7 +573,7 @@ class RetrievalService:
             logger.exception("Question-bank retrieval failed; using the other legs")
             self.db.rollback()
             return []
-        max_distance = 1.0 - float(self._setting("rag_min_similarity", 0.25))
+        max_distance = 1.0 - float(self._setting("rag_question_min_similarity", 0.60))
         rows.sort(key=lambda row: float("inf") if row[2] is None else float(row[2]))
         seen: set[UUID] = set()
         results: list[RetrievedChunk] = []
