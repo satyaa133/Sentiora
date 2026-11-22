@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session as DBSession
 from app.api.deps import get_current_user, get_db
 from app.core.rate_limit import limit_login, limit_refresh, limit_register
 from app.models.user import User
+from app.services.privacy_service import consent_fields
 from app.schemas.auth import (
     AuthTokenData,
     ChangePasswordRequest,
@@ -114,6 +115,7 @@ def get_current_user_me(
             "email": current_user.email,
             "is_email_verified": current_user.is_email_verified,
             "is_active": current_user.is_active,
+            **consent_fields(current_user),
         },
         "meta": response_meta(request).model_dump(),
     }

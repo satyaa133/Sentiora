@@ -57,6 +57,7 @@ from app.services.llm_pool import (
     max_attempts,
     retry_after_seconds,
 )
+from app.services.privacy_service import user_has_current_consent
 from app.services.usage import UsageReport, record_usage, report_from_openai
 from app.workers.queue import enrich_queue
 
@@ -83,6 +84,8 @@ class RequestResult(enum.StrEnum):
     already_enriched = "already_enriched"
     over_daily_limit = "over_daily_limit"
     not_available = "not_available"
+    # The user hasn't accepted the current privacy notice (D10).
+    consent_required = "consent_required"
 
 
 def _utc_midnight(now: datetime) -> datetime:
@@ -118,6 +121,9 @@ class EnrichmentService:
         """
         if item.deleted_at is not None or item.status == ItemStatus.failed:
             return RequestResult.not_available
+        # Enrichment sends the save's text to an AI provider (D10).
+        if not user_has_current_consent(self.db, item.user_id):
+            return RequestResult.consent_required
         current = item.enrichment_status
         if current == EnrichmentStatus.queued:
             return RequestResult.already_queued
@@ -138,6 +144,8 @@ class EnrichmentService:
         if not memory_ids:
             return
         try:
+            if not user_has_current_consent(self.db, user_id):
+                return
             items = self.db.execute(
                 select(MemoryItem).where(
                     MemoryItem.user_id == user_id,

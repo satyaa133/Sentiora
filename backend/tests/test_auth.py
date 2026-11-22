@@ -28,6 +28,7 @@ def test_auth_flow(clean_db) -> None:
         "email": "test_auth_user@example.com",
         "password": "Password123!",
         "full_name": "Test User",
+        "privacy_consent_version": "2026-11-20",
     }
     resp = client.post("/api/v1/auth/register", json=reg_payload)
     assert resp.status_code == 201
@@ -48,6 +49,7 @@ def test_auth_flow(clean_db) -> None:
         "email": "test_invalid_pwd@example.com",
         "password": "password123!",
         "full_name": "Invalid Pwd User",
+        "privacy_consent_version": "2026-11-20",
     }
     resp = client.post("/api/v1/auth/register", json=invalid_reg_payload)
     assert resp.status_code == 422
@@ -59,6 +61,7 @@ def test_auth_flow(clean_db) -> None:
         "email": "test_untrusted@disposablemail12345.xyz",
         "password": "Password123!",
         "full_name": "Untrusted User",
+        "privacy_consent_version": "2026-11-20",
     }
     resp = client.post("/api/v1/auth/register", json=untrusted_reg_payload)
     assert resp.status_code == 422
@@ -143,7 +146,7 @@ def test_refresh_rejected_for_disabled_account(clean_db) -> None:
     email = "test_disabled_refresh@example.com"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "Password123!", "full_name": "Disabled"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": "Password123!", "full_name": "Disabled"},
     )
     login = client.post("/api/v1/auth/login", json={"email": email, "password": "Password123!"})
     refresh_token = login.json()["data"]["refresh_token"]
@@ -169,7 +172,12 @@ def test_example_domains_are_rejected_unless_allowed(
     from app.core.config import get_settings
     from app.schemas.auth import RegisterRequest
 
-    payload = {"email": email, "password": "MemoryPassword123!", "full_name": "Test User"}
+    payload = {
+        "email": email,
+        "password": "MemoryPassword123!",
+        "full_name": "Test User",
+        "privacy_consent_version": "2026-11-20",
+    }
     monkeypatch.setattr(get_settings(), "allow_test_email_domains", False)
     with pytest.raises(ValidationError, match="Please use a valid email address"):
         RegisterRequest(**payload)

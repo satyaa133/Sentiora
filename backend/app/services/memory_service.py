@@ -15,6 +15,7 @@ from app.schemas.memory_item import (
 )
 from app.core.sensitive_domains import is_sensitive_url
 from app.services.content_normalizer import extract_domain, canonicalize_url, compute_content_hash, normalize_content
+from app.services.privacy_service import CONSENT_REQUIRED_DETAIL
 from app.services.enrichment_service import (
     EnrichmentService,
     RequestResult,
@@ -177,6 +178,14 @@ class MemoryService:
         EnrichmentService(self.db).request_for_memories(user_id, [item.id])
         return MemoryItemResponse.model_validate(item)
 
+    def rename_item(self, item_id: UUID, user_id: UUID, title: str) -> MemoryItemResponse:
+        """New title for one of the user's saves (searchable at once: title_tsv)."""
+        item = self._owned(item_id, user_id)
+        item.title = title
+        self.db.commit()
+        self.db.refresh(item)
+        return MemoryItemResponse.model_validate(item)
+
     def enrich_item(self, item_id: UUID, user_id: UUID) -> MemoryItemResponse:
         """Queue enrichment the user asked for (Summarise button, Save now)."""
         item = self._owned(item_id, user_id)
@@ -196,6 +205,10 @@ class MemoryService:
                     "code": "RATE_LIMITED",
                     "message": "Daily summary limit reached. Try again tomorrow.",
                 },
+            )
+        if result == RequestResult.consent_required:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail=CONSENT_REQUIRED_DETAIL
             )
         if result == RequestResult.not_available:
             raise HTTPException(

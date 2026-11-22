@@ -14,6 +14,7 @@ from app.schemas.memory_item import (
     MemoryItemCreate,
     MemoryItemListResponse,
     MemoryItemResponse,
+    MemoryItemUpdate,
 )
 from app.services.memory_service import MemoryService
 
@@ -92,6 +93,25 @@ def get_memory_item(
 ) -> APIResponse[MemoryItemResponse]:
     service = MemoryService(db)
     data = service.get_item(item_id, current_user.id)
+    return APIResponse(data=data, meta=response_meta(request))
+
+
+@router.patch(
+    "/{item_id}",
+    response_model=APIResponse[MemoryItemResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Rename a memory item",
+    responses={404: {"description": "MEMORY_ITEM_NOT_FOUND"}},
+)
+def update_memory_item(
+    item_id: uuid.UUID,
+    req: MemoryItemUpdate,
+    request: Request,
+    db: Annotated[DBSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> APIResponse[MemoryItemResponse]:
+    service = MemoryService(db)
+    data = service.rename_item(item_id, current_user.id, req.title)
     return APIResponse(data=data, meta=response_meta(request))
 
 

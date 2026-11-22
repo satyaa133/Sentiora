@@ -147,6 +147,9 @@ class Settings(BaseSettings):
     # "ai": the written AI answer (v2 behaviour, for rollback). A request's
     # answer_mode overrides it.
     ask_default_mode: Literal["instant", "ai"] = "instant"
+    # Version of the privacy notice users accept at sign-up (D10). Changing it
+    # asks every signed-in user to accept the new text before AI features.
+    privacy_notice_version: str = "2026-11-20"
     # Reranker score a sentence needs to be quoted in an instant answer. Below
     # it for every sentence, the question counts as not covered by the saves.
     rag_extract_min_score: float = 0.0

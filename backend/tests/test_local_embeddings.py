@@ -172,7 +172,7 @@ def _register(email: str) -> tuple[dict[str, str], UUID]:
     password = "MemoryPassword123!"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "Local Tester"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "Local Tester"},
     )
     token = client.post(
         "/api/v1/auth/login", json={"email": email, "password": password}

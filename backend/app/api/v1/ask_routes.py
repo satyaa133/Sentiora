@@ -27,7 +27,9 @@ from app.models.user import User
 from app.schemas.ask import AskRequest, AskResponse, SearchHit
 from app.schemas.envelope import APIResponse, response_meta
 from app.core.rate_limit import limit_chat, limit_search
+from app.core.config import get_settings
 from app.services.ai_gate import AIBusyError
+from app.services.privacy_service import require_ai_consent
 from app.services.rag_service import LLMNotConfiguredError, LLMProviderError, RagService
 from app.services.retrieval_service import RetrievalService
 
@@ -101,6 +103,13 @@ def _ask_error(exc: Exception) -> HTTPException:
     return HTTPException(status.HTTP_502_BAD_GATEWAY, detail=_SYSTEM_FAILED)
 
 
+def _check_ai_consent(req: AskRequest, user: User) -> None:
+    """AI answers send excerpts to a provider: the current notice must be accepted (D10)."""
+    mode = req.answer_mode or get_settings().ask_default_mode
+    if mode == "ai":
+        require_ai_consent(user)
+
+
 @router.post(
     "/chat",
     response_model=APIResponse[AskResponse],
@@ -115,6 +124,7 @@ def ask_memories(
 ) -> APIResponse[AskResponse]:
     service = RagService(RetrievalService(db))
     limit_chat(request, str(current_user.id))
+    _check_ai_consent(req, current_user)
     try:
         data = service.ask(
             user_id=current_user.id,
@@ -155,6 +165,7 @@ def ask_memories_stream(
     """
     service = RagService(RetrievalService(db))
     limit_chat(request, str(current_user.id))
+    _check_ai_consent(req, current_user)
     try:
         prepared = service.prepare(
             user_id=current_user.id,

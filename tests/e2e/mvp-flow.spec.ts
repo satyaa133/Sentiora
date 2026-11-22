@@ -12,7 +12,7 @@ test("register, capture, search, ask, and delete memory", async ({ request }) =>
   const password = "MemoryPassword123!";
 
   const register = await request.post(`${API}/api/v1/auth/register`, {
-    data: { email, password, full_name: "E2E User" },
+    data: { email, password, full_name: "E2E User", privacy_consent_version: "2026-11-20" },
   });
   expect(register.status()).toBe(201);
 

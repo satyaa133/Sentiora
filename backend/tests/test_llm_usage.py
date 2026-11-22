@@ -29,7 +29,7 @@ client = TestClient(app)
 def _user(email: str) -> UUID:
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "MemoryPassword123!", "full_name": "Usage"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": "MemoryPassword123!", "full_name": "Usage"},
     )
     db = SessionLocal()
     try:

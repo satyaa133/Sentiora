@@ -25,7 +25,7 @@ def test_chat_rate_limit_returns_429(monkeypatch) -> None:  # type: ignore[no-un
     email = "chat_limit@example.com"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "Chat"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "Chat"},
     )
     token = client.post("/api/v1/auth/login", json={"email": email, "password": password}).json()[
         "data"
@@ -46,7 +46,7 @@ def test_failed_login_backoff_is_temporary(monkeypatch) -> None:  # type: ignore
     email = "backoff_user@example.com"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "Password123!", "full_name": "Backoff"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": "Password123!", "full_name": "Backoff"},
     )
     for _ in range(3):
         resp = client.post("/api/v1/auth/login", json={"email": email, "password": "WrongPassword1!"})
@@ -73,7 +73,7 @@ def test_search_rate_limit_returns_429(monkeypatch) -> None:  # type: ignore[no-
     password = "MemoryPassword123!"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "Search"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "Search"},
     )
     token = client.post("/api/v1/auth/login", json={"email": email, "password": password}).json()[
         "data"

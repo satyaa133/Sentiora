@@ -11,7 +11,7 @@ def _auth_headers(email: str) -> dict[str, str]:
     password = "MemoryPassword123!"
     client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": password, "full_name": "Safety Tester"},
+        json={"privacy_consent_version": "2026-11-20", "email": email, "password": password, "full_name": "Safety Tester"},
     )
     login_resp = client.post("/api/v1/auth/login", json={"email": email, "password": password})
     token = login_resp.json()["data"]["access_token"]

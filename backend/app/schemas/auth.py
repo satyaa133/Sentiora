@@ -2,7 +2,7 @@ import re
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.core.config import get_settings
 
@@ -72,6 +72,15 @@ class RegisterRequest(BaseModel):
     email: TrustedEmail
     password: StrongPassword
     full_name: str = Field(min_length=2, max_length=80)
+    # The privacy notice the user accepted (D10); must be the current version.
+    privacy_consent_version: str = Field(min_length=1, max_length=32)
+
+    @field_validator("privacy_consent_version")
+    @classmethod
+    def _current_notice(cls, value: str) -> str:
+        if value != get_settings().privacy_notice_version:
+            raise ValueError("must be the current privacy notice version")
+        return value
 
 
 class LoginRequest(BaseModel):

@@ -100,6 +100,20 @@ class MemoryItemCreate(BaseModel):
         return val
 
 
+class MemoryItemUpdate(BaseModel):
+    """Fields a user may change on a save (S7: the title)."""
+
+    title: str = Field(min_length=1, max_length=300)
+
+    @field_validator("title")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            raise ValueError("title must not be blank")
+        return cleaned
+
+
 class MemoryItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
