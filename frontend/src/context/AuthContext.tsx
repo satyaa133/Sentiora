@@ -53,6 +53,8 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<AuthUser>;
   register: (email: string, password: string, fullName: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Delete the account and everything in it (needs the password), then sign out. */
+  deleteAccount: (password: string) => Promise<void>;
   refreshUser: () => Promise<AuthUser | null>;
   completeOnboarding: (selectedSources: SourceId[]) => Promise<void>;
   updateSourcePreference: (sourceId: SourceId, status: SourceStatus) => Promise<void>;
@@ -206,6 +208,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const deleteAccount = useCallback(
+    async (password: string) => {
+      await apiClient.delete("/users/me", { data: { password } });
+      clearSession();
+    },
+    [clearSession],
+  );
+
   const logout = useCallback(async () => {
     try {
       await apiClient.post("/auth/logout");
@@ -269,6 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         login,
         register,
         logout,
+        deleteAccount,
         refreshUser: fetchCurrentUser,
         completeOnboarding,
         updateSourcePreference,

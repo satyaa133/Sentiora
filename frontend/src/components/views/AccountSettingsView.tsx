@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button, Card, Label, TextField, ThemeToggle, Toggle } from "@shared/ui";
 import { useAuth } from "../../context/AuthContext";
+import { DeleteAccountSection } from "./DeleteAccountSection";
 
 const SELECT_CLASSES =
   "h-11 w-full rounded-btn border border-line bg-surface px-3 text-[16px] text-fg focus:border-accent focus:outline-none";
@@ -126,6 +127,8 @@ export default function AccountSettingsView() {
           {saved ? "These preferences aren't saved to your account yet." : ""}
         </p>
       </div>
+
+      <DeleteAccountSection />
     </div>
   );
 }

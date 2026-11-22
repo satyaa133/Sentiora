@@ -6,7 +6,9 @@ from sqlalchemy.orm import Session as DBSession
 from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.schemas.envelope import response_meta
-from app.schemas.privacy import PrivacyConsentRequest
+from app.core.rate_limit import limit_login
+from app.schemas.privacy import DeleteAccountRequest, PrivacyConsentRequest
+from app.services.account_service import AccountService
 from app.schemas.source_preference import (
     BulkSourcePreferencesRequest,
     OnboardingCompleteRequest,
@@ -168,5 +170,27 @@ def accept_privacy_notice(
     return {
         "success": True,
         "data": consent_fields(user),
+        "meta": response_meta(request).model_dump(),
+    }
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    summary="Delete the account and everything saved in it (needs the password)",
+    responses={401: {"description": "AUTH_INVALID_CREDENTIALS: wrong password, nothing deleted"}},
+)
+def delete_account(
+    req: DeleteAccountRequest,
+    request: Request,
+    db: Annotated[DBSession, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    # Password guesses count against the same limit as sign-in attempts.
+    limit_login(request)
+    AccountService(db).delete_account(current_user, req.password)
+    return {
+        "success": True,
+        "data": {"message": "Your account and everything saved in it were deleted."},
         "meta": response_meta(request).model_dump(),
     }
