@@ -194,13 +194,13 @@ Optional tuning variables: `OPENAI_EMBEDDING_MODEL`, `OPENAI_CHAT_MODEL`, `GEMIN
 
 ### Start Everything (Recommended)
 
-Run both the backend API and frontend dev server simultaneously in one terminal:
+Run the backend API, the background worker that processes captures, and the frontend dev server together in one terminal:
 
 ```bash
 npm start
 ```
 
-In a separate terminal, start the background worker to process captures:
+Without the worker, saves stay "Waiting" in the Timeline. To run it on its own (for example after stopping it), use:
 
 ```bash
 npm run dev:worker
@@ -208,7 +208,7 @@ npm run dev:worker
 
 The worker reconnects on its own if Redis restarts, and re-queues captures left pending. When a capture's embedding call fails, the worker retries it 1, 5 and 30 minutes later; until then the save is searchable by keyword.
 
-To process captures in parallel (for example when testing many saves at once), run `npm run dev:worker` in a second terminal as well; workers share the queue and only one of them queues the scheduled retries. Production runs `WORKER_COUNT` workers (default 2, `docker-compose.prod.yml`).
+To process captures in parallel (for example when testing many saves at once), run `npm run dev:worker` in another terminal as well; workers share the queue and only one of them queues the scheduled retries. Production runs `WORKER_COUNT` workers (default 2, `docker-compose.prod.yml`).
 
 The worker listens to two queues: `sentiora.capture` (processing saves, always first) and `sentiora.enrich` (AI summaries, key points and the question bank). To dedicate a worker to one, pass it: `npm run dev:worker -- capture` or `npm run dev:worker -- enrich`. Enrichment only runs for saves that matter (Save now, opened in the app, a source of an Ask answer), at most `ENRICH_DAILY_LIMIT` (50) per user per day. It uses Groq only (no paid fallback) and retries after 1, 5, 30 minutes and 6 hours when Groq is down or rate-limited. To enrich existing saves (one AI call each, with a pause between calls):
 

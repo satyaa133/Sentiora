@@ -82,8 +82,8 @@ Don't start the `app` profile (`docker compose --profile app up`) at the same ti
 ## 5. Run
 
 ```bash
-npm start              # API on http://localhost:8000 + web app on http://localhost:5173
-npm run dev:worker     # second terminal: processes captures (reconnects if Redis restarts)
+npm start              # API on http://localhost:8000, the capture worker, and the web app on http://localhost:5173
+npm run dev:worker     # optional, another terminal: a second worker to process captures in parallel
 ```
 
 Check: `http://localhost:8000/health` returns `{"success":true,...}` and `http://localhost:5173` shows the landing page.
@@ -124,7 +124,7 @@ Two developers' local setups **never** share data. Use the shared remote environ
 |---|---|
 | Web app calls `localhost:8000` although you set a LAN URL | You edited `frontend/.env`. Put `VITE_API_BASE_URL` in the root `.env` and restart `npm start`. |
 | Browser console shows a CORS error | The page origin is missing from `CORS_ORIGINS` in `backend/.env`. Restart the API. |
-| Captures stay "pending" | `npm run dev:worker` isn't running, or Redis is down. The worker re-queues stale captures when it (re)connects. |
+| Captures stay "pending" ("Waiting" in the Timeline) | No worker is running (`npm start` starts one; `npm run dev:backend` alone does not), or Redis is down. A long video takes minutes: every chunk is embedded on your CPU. The worker re-queues stale captures when it (re)connects. |
 | Two things answer on port 8000 | Old `sentiora-backend` container: `docker compose --profile app stop backend worker`. |
 | `port is already allocated` on `docker compose up` | Another local Postgres/Redis. Change `POSTGRES_PORT`/`REDIS_PORT` (and `backend/.env`). |
 | Extension says it can't reach the server | It was built with a different `VITE_API_BASE_URL`. Rebuild after editing the root `.env` and reload it in `chrome://extensions`. |

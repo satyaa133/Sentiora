@@ -11,7 +11,7 @@
     "shared"
   ],
   "scripts": {
-    "start": "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"cyan,magenta\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "start": "concurrently --names \"BACKEND,WORKER,FRONTEND\" --prefix-colors \"cyan,yellow,magenta\" \"npm run dev:backend\" \"npm run dev:worker\" \"npm run dev:frontend\"",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:extension": "npm run dev --workspace extension",
     "dev:shared": "npm run dev --workspace shared",
