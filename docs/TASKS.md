@@ -159,7 +159,6 @@ Found by a full end-to-end test (web app in a real browser, the extension on rea
 | P2 | Edit a memory's title (no endpoint today) | Low | API spec update | Rename from the detail drawer |
 | P2 | Long-page retrieval: questions worded unlike the page can miss the best passage ("TCP three-way handshake" vs "How does TCP establish a connection?") | Medium | `npm run eval:rag` cases | Higher hit rate on long saves |
 | P2 | Second OpenRouter key and a low-credit warning | Low | Key | No silent fallback to Gemini |
-| P3 | `npm run dev:backend` dies on auto-reload on Windows ("Terminate batch job"); run uvicorn without `--reload` meanwhile | Low | — | Stable reload on Windows |
 | P3 | Dashboard still sends 3 sequential statistics requests per load | Low | — | One request per load |
 
 ### Later (redesign follow-ups, not in the current redesign)

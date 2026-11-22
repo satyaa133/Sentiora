@@ -135,4 +135,5 @@ Two developers' local setups **never** share data. Use the shared remote environ
 | "Too many requests" (HTTP 429) | A per-minute limit was hit (`RATE_LIMIT_*` in `backend/.env`). Wait a minute, or raise the limit for local testing. |
 | Local `file://` PDFs are not captured | Chrome blocks extensions from file URLs by default. In `chrome://extensions` → Sentiora → **Details**, turn on **Allow access to file URLs**. |
 | Uploading a `.txt`/`.md` file on Sources fails | Known gap: the upload is sent as a `file://` web page, which the API refuses. Use the extension or **Add memory** instead. |
+| `npm run dev:backend` stops with "Terminate batch job (Y/N)?" or keeps old code after an edit (Windows) | Fixed in S8: `dev:backend` runs `backend/scripts/dev_server.py`, which restarts only the API process on changes in `backend/app` instead of using `uvicorn --reload` (whose Windows restart sends Ctrl+C to the whole console). |
 | Extension changes don't show up | `npm run dev:extension` rebuilds `extension/dist`, but Chrome needs the reload icon in `chrome://extensions`, then a page refresh. |
