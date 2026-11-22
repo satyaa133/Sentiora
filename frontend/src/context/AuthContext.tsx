@@ -186,6 +186,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user?: unknown;
     }) => {
       if (sessionData?.accessToken && sessionData?.refreshToken) {
+        // setAuthTokens itself announces the new tokens, and this tab hears
+        // its own announcement: ignore tokens it already has, or the two call
+        // each other forever (a request flood that blanked the page).
+        if (
+          sessionData.accessToken === getAccessToken() &&
+          sessionData.refreshToken === getRefreshToken()
+        ) {
+          return;
+        }
         setAuthTokens(
           sessionData.accessToken,
           sessionData.refreshToken,
