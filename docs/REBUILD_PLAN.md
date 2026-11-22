@@ -137,6 +137,7 @@ Locked unless this file is changed:
 | D12 | ~~OpenAI as the main provider~~ **Withdrawn 2026-11-21:** the owner won't add OpenAI credit; the key was removed. |
 | D13 | **No provider may store or train on user text (2026-11-21, owner), and as little as possible depends on paid APIs.** Development uses only: **Groq** (primary for answers; its services agreement forbids training on inputs/outputs and keeps none by default) and **OpenRouter** (backup answers and, until S3, embeddings), where every request sends `provider: {data_collection: "deny", zdr: true}` so only zero-data-retention endpoints that don't collect prompts are used (checked live). Gemini (free tier may use data) and OpenAI are removed. No credit will be added to any API, so S3 (local embeddings), S4 (local reranker) and S6 (instant answers without AI) are the priority, and the AI answer stays an optional extra. Owner action: turn on Groq's Zero Data Retention setting. |
 | D14 | **Question-bank leg has its own similarity bar (2026-11-22, owner).** `RAG_QUESTION_MIN_SIMILARITY` (0.60) instead of `RAG_MIN_SIMILARITY` (0.65): the local model scores a paraphrased question against a stored one at 0.60–0.67, so at 0.65 the leg added nothing. S6 eval (31 questions): 0.65 → hit@6 0.86, MRR 0.86, long-page 6/10; **0.60 → 0.93, 0.88, 8/10, reject 1.00**; 0.55 → reject 0.50 (narrow window, S8 eval-in-CI watches it). |
+| D15 | **Account deletion and the CI eval (2026-11-22, owner).** `DELETE /api/v1/users/me` with the current password removes the account and everything tied to it; Account Settings gets a Delete account button with a confirm step. CI evaluates retrieval on an original fixture library in the repo (`scripts/eval-rag/fixture/`, no copied articles or transcripts), embedded with the local model, against the section 2 targets; the dev-library eval stays a local command. |
 | D10 | **Privacy notice at sign-up.** New users see the notice below and must accept it to create an account; the accepted version and time are stored. When the notice changes, signed-in users accept the new version before using AI features. The same text goes in the privacy policy (S10). |
 
 **Approved privacy notice (D10), version `2026-11-20`:**
@@ -518,7 +519,7 @@ reduced motion).
 ### S8 — Quality, security and privacy (3–4 days)
 
 - [ ] `npm run eval:rag` in CI with thresholds; a PR that lowers hit@6 or MRR
-      below target fails.
+      below target fails. Runs on the fixture library (D15).
 - [ ] Answer eval: `expected_answer` substrings in `questions.json`; metric
       "answer hit" for the instant answer.
 - [ ] Security tests: cross-user isolation on every new query (question bank,
@@ -626,6 +627,7 @@ responses keep the envelope.
 | S7 | `POST /api/v1/auth/register` | New required field `privacy_consent_version` (must equal `PRIVACY_NOTICE_VERSION`); 422 otherwise. |
 | S7 | `GET /api/v1/auth/me` | Adds `privacy_consent_version`, `privacy_consent_current` (bool). |
 | S7 | `POST /api/v1/users/me/privacy-consent` | New. Body: `version`. Records consent to the current notice. 200. |
+| S8 | `DELETE /api/v1/users/me` | New (D15). Body: `password`. Hard-deletes the user, their memories, chunks, questions, feedback, `llm_usage` rows, sessions and refresh tokens, and their answer-cache keys. 200; 401 `AUTH_INVALID_CREDENTIALS` for a wrong password. |
 | S7 | `POST /api/v1/chat`, `POST /api/v1/chat/stream` (`answer_mode: "ai"`), `POST /api/v1/memory-items/{id}/enrich` | New error code `PRIVACY_CONSENT_REQUIRED` (403) when the user hasn't accepted the current notice. |
 
 ---
