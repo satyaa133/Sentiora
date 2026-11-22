@@ -22,6 +22,28 @@ export async function fetchMemoryItems(
   return resp.data.data;
 }
 
+/** One save. Opening a save also queues its summary (S5), within the daily limit. */
+export async function fetchMemoryItem(id: string): Promise<MemoryItem> {
+  const resp = await apiClient.get<APIEnvelope<MemoryItem>>(`/memory-items/${id}`);
+  return resp.data.data;
+}
+
+/** Give a save a new title (1-300 characters). */
+export async function renameMemoryItem(id: string, title: string): Promise<MemoryItem> {
+  const resp = await apiClient.patch<APIEnvelope<MemoryItem>>(`/memory-items/${id}`, { title });
+  return resp.data.data;
+}
+
+/**
+ * Summarise a save now (summary, key points). 202 with the save; the API
+ * answers 409 ENRICHMENT_ALREADY_QUEUED, 429 RATE_LIMITED (daily limit) or
+ * 403 PRIVACY_CONSENT_REQUIRED.
+ */
+export async function enrichMemoryItem(id: string): Promise<MemoryItem> {
+  const resp = await apiClient.post<APIEnvelope<MemoryItem>>(`/memory-items/${id}/enrich`);
+  return resp.data.data;
+}
+
 export async function deleteMemoryItem(id: string): Promise<void> {
   await apiClient.delete(`/memory-items/${id}`);
 }

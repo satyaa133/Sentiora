@@ -154,3 +154,10 @@ export function getApiErrorMessage(err: unknown, fallback: string): string {
 }
 
 export default apiClient;
+
+/** The API's error code (for example "ENRICHMENT_ALREADY_QUEUED"), if any. */
+export function getApiErrorCode(err: unknown): string | undefined {
+  if (!axios.isAxiosError(err)) return undefined;
+  const data = err.response?.data as { error?: { code?: unknown } } | undefined;
+  return typeof data?.error?.code === "string" ? data.error.code : undefined;
+}

@@ -57,6 +57,8 @@ export interface ExtractionMetadata {
   quality_reasons: string[];
 }
 
+export type EnrichmentStatus = "none" | "queued" | "ready" | "failed";
+
 export interface MemoryItem {
   id: string;
   user_id: string;
@@ -65,6 +67,10 @@ export interface MemoryItem {
   title: string;
   content: string | null;
   summary: string | null;
+  /** Up to 8 key points written by enrichment (S5). */
+  key_points?: string[] | null;
+  /** Background summary: none, queued (being written), ready or failed. */
+  enrichment_status?: EnrichmentStatus;
   author: string | null;
   favicon_url: string | null;
   thumbnail_url: string | null;
