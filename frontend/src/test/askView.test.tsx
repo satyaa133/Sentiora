@@ -12,7 +12,14 @@ vi.mock("../services/memoryService", async (importOriginal) => {
   return { ...actual, createMemoryItem: vi.fn() };
 });
 vi.mock("../services/feedbackService", () => ({ sendAnswerFeedback: vi.fn() }));
+vi.mock("../services/privacyService", () => ({
+  fetchPrivacyConsent: vi.fn(),
+  acceptPrivacyNotice: vi.fn(),
+}));
+import { resetPrivacyConsentCache } from "../hooks/usePrivacyConsent";
+import { AskApiError } from "../services/askService";
 import { askStream } from "../services/askStream";
+import { acceptPrivacyNotice, fetchPrivacyConsent } from "../services/privacyService";
 import { sendAnswerFeedback } from "../services/feedbackService";
 import { createMemoryItem } from "../services/memoryService";
 import type * as MemoryService from "../services/memoryService";
@@ -95,9 +102,27 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  resetPrivacyConsentCache();
   localStorage.clear();
 });
+
+function consented(current = true) {
+  vi.mocked(fetchPrivacyConsent).mockResolvedValue({
+    privacy_consent_version: current ? "2026-11-20" : null,
+    privacy_consent_current: current,
+  });
+}
+
+function instant(overrides: Partial<StreamFinal> = {}): StreamFinal {
+  return final({
+    answer: "- (14:20) Multi-stage builds copy only the final artefacts. [S1]",
+    mode: "instant",
+    usedSources: ["S1"],
+    aiAvailable: true,
+    ...overrides,
+  });
+}
 
 describe("citation markers", () => {
   it("links [S#] markers but leaves code alone", () => {
@@ -259,19 +284,137 @@ describe("Ask Sentiora controls", () => {
     expect(screen.getByRole("button", { name: "Send question" })).toBeInTheDocument();
   });
 
-  it("regenerates the last answer with the same question", async () => {
-    streams(final({ answer: "First take [S1].", usedSources: ["S1"] }));
+  it("asks for a quoted answer first and offers Explain with AI only when it can help", async () => {
+    streams(instant());
     render(<AskSentioraView items={[]} />);
-    ask("Explain layers");
-    await screen.findByText(/First take/);
-    streams(final({ answer: "Second take [S1].", usedSources: ["S1"] }));
-    fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
-    await screen.findByText(/Second take/);
-    expect(screen.queryByText(/First take/)).not.toBeInTheDocument();
+    ask("How do I keep images small?");
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
     expect(vi.mocked(askStream).mock.lastCall?.[0]).toEqual(
-      expect.objectContaining({ question: "Explain layers" }),
+      expect.objectContaining({ question: "How do I keep images small?", answer_mode: "instant" }),
+    );
+    expect(answer).toHaveTextContent("Quoted from your saves");
+    expect(within(answer).getByRole("button", { name: "Explain with AI" })).toBeEnabled();
+    expect(within(answer).queryByRole("button", { name: "Regenerate" })).not.toBeInTheDocument();
+
+    streams(instant({ aiAvailable: false }));
+    ask("What did I save?");
+    await waitFor(() => expect(screen.getAllByRole("article", { name: "Echo's answer" })).toHaveLength(2));
+    const second = screen.getAllByRole("article", { name: "Echo's answer" })[1]!;
+    expect(within(second).queryByRole("button", { name: "Explain with AI" })).not.toBeInTheDocument();
+  });
+
+  it("streams the AI answer below the quoted one and keeps both in history", async () => {
+    consented();
+    streams(instant());
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
+
+    streams(
+      final({ answer: "Build in stages and copy only what runs [S1].", usedSources: ["S1"], followUps: ["Why use Alpine?"] }),
+      [VIDEO],
+      ["Build in stages ", "and copy only what runs [S1]."],
+    );
+    fireEvent.click(within(answer).getByRole("button", { name: "Explain with AI" }));
+    const ai = await within(answer).findByRole("region", { name: "AI answer" });
+    expect(await within(ai).findByText(/Build in stages/)).toBeInTheDocument();
+    expect(vi.mocked(askStream).mock.lastCall?.[0]).toEqual(
+      expect.objectContaining({ question: "How do I keep images small?", answer_mode: "ai" }),
     );
     expect(vi.mocked(askStream).mock.lastCall?.[0]).not.toHaveProperty("history");
+    // The quoted answer stays; the AI one adds to it.
+    expect(answer).toHaveTextContent("Multi-stage builds copy only the final artefacts.");
+    expect(within(ai).getByText("From your memory")).toBeInTheDocument();
+    expect(within(answer).queryByRole("button", { name: "Explain with AI" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Why use Alpine?" })).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(localStorage.getItem("sentiora.ask.history.u1")).toContain("Build in stages and copy only what runs"),
+    );
+    expect(localStorage.getItem("sentiora.ask.history.u1")).toContain("Multi-stage builds copy only");
+  });
+
+  it("rates the quoted and the AI answer separately", async () => {
+    consented();
+    vi.mocked(sendAnswerFeedback).mockResolvedValue(undefined);
+    streams(instant());
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
+    streams(final({ answer: "Written answer [S1].", usedSources: ["S1"] }), [VIDEO]);
+    fireEvent.click(within(answer).getByRole("button", { name: "Explain with AI" }));
+    const ai = await within(answer).findByRole("region", { name: "AI answer" });
+    await within(ai).findByText(/Written answer/);
+
+    const quotedGroup = within(answer).getByRole("group", { name: "Rate the quoted answer" });
+    fireEvent.click(within(quotedGroup).getByRole("button", { name: "Helpful" }));
+    const aiGroup = within(ai).getByRole("group", { name: "Rate the AI answer" });
+    fireEvent.click(within(aiGroup).getByRole("button", { name: "Not helpful" }));
+    await waitFor(() => expect(sendAnswerFeedback).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(sendAnswerFeedback).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ answerMode: "instant", rating: 1, sourceChunkIds: ["c1"] }),
+    );
+    expect(vi.mocked(sendAnswerFeedback).mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({ answerMode: "ai", rating: -1, sourceChunkIds: ["c1"] }),
+    );
+  });
+
+  it("says when the AI is busy and lets the user try again", async () => {
+    consented();
+    streams(instant());
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
+    vi.mocked(askStream).mockRejectedValueOnce(new AskApiError("busy", 429, "AI_BUSY", 7));
+    fireEvent.click(within(answer).getByRole("button", { name: "Explain with AI" }));
+    const alert = await within(answer).findByRole("alert");
+    expect(alert).toHaveTextContent("Try again in 7 seconds");
+    expect(answer).toHaveTextContent("Multi-stage builds copy only the final artefacts.");
+
+    streams(final({ answer: "Now it worked [S1].", usedSources: ["S1"] }), [VIDEO]);
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    expect(await within(answer).findByText(/Now it worked/)).toBeInTheDocument();
+  });
+
+  it("shows the privacy notice before the first AI answer", async () => {
+    consented(false);
+    vi.mocked(acceptPrivacyNotice).mockResolvedValue({
+      privacy_consent_version: "2026-11-20",
+      privacy_consent_current: true,
+    });
+    streams(instant());
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
+    fireEvent.click(within(answer).getByRole("button", { name: "Explain with AI" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Before Echo uses AI" });
+    expect(dialog).toHaveTextContent("do not use it to train their models");
+    expect(askStream).toHaveBeenCalledTimes(1); // nothing sent to the AI yet
+    streams(final({ answer: "After consent [S1].", usedSources: ["S1"] }), [VIDEO]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "I agree" }));
+    expect(await within(answer).findByText(/After consent/)).toBeInTheDocument();
+    expect(acceptPrivacyNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks for consent again when the API says it is missing", async () => {
+    consented(true);
+    vi.mocked(acceptPrivacyNotice).mockResolvedValue({
+      privacy_consent_version: "2026-11-20",
+      privacy_consent_current: true,
+    });
+    streams(instant());
+    render(<AskSentioraView items={[]} />);
+    ask("How do I keep images small?");
+    const answer = await screen.findByRole("article", { name: "Echo's answer" });
+    vi.mocked(askStream).mockRejectedValueOnce(
+      new AskApiError("consent", 403, "PRIVACY_CONSENT_REQUIRED"),
+    );
+    fireEvent.click(within(answer).getByRole("button", { name: "Explain with AI" }));
+    const dialog = await screen.findByRole("dialog", { name: "Before Echo uses AI" });
+    streams(final({ answer: "Retried [S1].", usedSources: ["S1"] }), [VIDEO]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "I agree" }));
+    expect(await within(answer).findByText(/Retried/)).toBeInTheDocument();
   });
 
   it("offers a retry after an error", async () => {

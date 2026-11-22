@@ -53,14 +53,23 @@ function parseEvent(block: string): StreamEvent | null {
 async function errorFrom(response: Response): Promise<AskApiError> {
   let code: string | undefined;
   let message = "Sentiora could not answer right now.";
+  let retryAfter: number | undefined;
   try {
-    const body = (await response.json()) as { error?: { code?: string; message?: string } };
+    const body = (await response.json()) as {
+      error?: { code?: string; message?: string; details?: { retry_after?: unknown } | null };
+    };
     code = body.error?.code;
     message = body.error?.message ?? message;
+    const fromBody = body.error?.details?.retry_after;
+    if (typeof fromBody === "number") retryAfter = fromBody;
   } catch {
     // Not JSON (e.g. a proxy error page): keep the generic message.
   }
-  return new AskApiError(message, response.status, code);
+  if (retryAfter === undefined) {
+    const header = Number(response.headers?.get?.("Retry-After"));
+    if (Number.isFinite(header) && header > 0) retryAfter = header;
+  }
+  return new AskApiError(message, response.status, code, retryAfter);
 }
 
 function post(payload: AskRequest, token: string | null, signal?: AbortSignal) {

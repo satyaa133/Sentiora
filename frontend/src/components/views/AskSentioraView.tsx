@@ -19,8 +19,7 @@ import {
   IconNote,
   IconPlus,
   IconRefresh,
-  IconThumbDown,
-  IconThumbUp,
+  IconSparkles,
   Kbd,
   Skeleton,
 } from "@shared/ui";
@@ -43,17 +42,22 @@ import { getStoredSession } from "../../services/authStorage";
 import { sendAnswerFeedback, type FeedbackRating } from "../../services/feedbackService";
 import { browserTimeZone } from "../../services/dashboardService";
 import { createMemoryItem } from "../../services/memoryService";
+import { usePrivacyConsent } from "../../hooks/usePrivacyConsent";
 import { emitEcho } from "../echo/echoEvents";
 import { AnswerMarkdown } from "./ask/AnswerMarkdown";
+import { ExplainSection } from "./ask/ExplainSection";
+import { RatingButtons, type RatingState } from "./ask/RatingButtons";
 import { HistorySidebar } from "./ask/HistorySidebar";
 import { ModeBadge } from "./ask/ModeBadge";
 import { ScopePicker } from "./ask/ScopePicker";
 import { SourcesPanel } from "./ask/SourcesPanel";
 import {
   plainAnswer,
+  suitsAiAnswer,
   usedSourceList,
   type AiMessage,
   type ChatMessage,
+  type Explanation,
 } from "./ask/types";
 
 interface AskSentioraViewProps {
@@ -96,18 +100,26 @@ export default function AskSentioraView({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   // Save as note (DESIGN.md §5.5): per answer, saving / saved / failed.
   const [noteState, setNoteState] = useState<Record<string, "saving" | "saved" | "failed">>({});
-  // 👍/👎 per answer (REBUILD_PLAN S2): the rating sent and its state.
-  const [feedback, setFeedback] = useState<
-    Record<string, { rating: FeedbackRating; state: "sending" | "sent" | "failed" }>
-  >({});
+  // 👍/👎 per answer (REBUILD_PLAN S2): keyed by message id, "<id>:ai" for
+  // the Explain with AI answer.
+  const [feedback, setFeedback] = useState<Record<string, RatingState>>({});
+  const { requireConsent, consentMissing, consentModal } = usePrivacyConsent();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
   // Effects can run twice (StrictMode); act on each launch only once.
   const handledLaunchId = useRef<number | null>(null);
 
   const isGenerating = messages.some(
-    (msg) => msg.sender === "ai" && (msg.status === "pending" || msg.status === "streaming"),
+    (msg) =>
+      msg.sender === "ai" &&
+      (msg.status === "pending" ||
+        msg.status === "streaming" ||
+        msg.explain?.status === "pending" ||
+        msg.explain?.status === "streaming"),
   );
+  // Latest messages for callbacks that outlive a render (retries after consent).
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   const readyItems = items.filter(
     (item) => item.status === "ready" && (item.word_count > 0 || Boolean(item.content?.trim())),
@@ -116,10 +128,10 @@ export default function AskSentioraView({
 
   const introText =
     readyItems.length > 0
-      ? `Echo answers from your ${readyItems.length} saved ${readyItems.length === 1 ? "memory" : "memories"} and links each fact to its source. When your saves don't cover a question, Echo says so and answers from general knowledge.`
+      ? `Echo quotes the passages of your ${readyItems.length} saved ${readyItems.length === 1 ? "memory" : "memories"} that answer your question, each linked to its source. Explain with AI writes a fuller answer from them.`
       : isIndexing
-        ? "Your latest saves are still being indexed. Until then Echo can answer general questions."
-        : "Nothing saved yet, so Echo answers general questions only. Save a page with the extension to ask about it here.";
+        ? "Your latest saves are still being indexed. Until then, Explain with AI can answer general questions."
+        : "Nothing saved yet. Save a page with the extension to ask about it here; Explain with AI can answer general questions.";
 
   const starters = [
     readyItems[0] ? `What does “${clip(readyItems[0].title)}” cover?` : null,
@@ -133,6 +145,13 @@ export default function AskSentioraView({
       prev.map((msg) => (msg.id === id && msg.sender === "ai" ? { ...msg, ...patch(msg) } : msg)),
     );
   }, []);
+
+  const updateExplain = useCallback(
+    (id: string, patch: (explain: Explanation) => Partial<Explanation>) => {
+      updateAi(id, (msg) => (msg.explain ? { explain: { ...msg.explain, ...patch(msg.explain) } } : {}));
+    },
+    [updateAi],
+  );
 
   // Persist finished conversations (this browser only).
   useEffect(() => {
@@ -184,15 +203,25 @@ export default function AskSentioraView({
       }));
   }
 
-  async function run(question: string, activeScope: AskScope | null, before: ChatMessage[], aiId: string) {
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    emitEcho({ type: "ask" });
-    const payload: AskRequest = { question, tz: browserTimeZone() };
+  function requestFor(
+    question: string,
+    activeScope: AskScope | null,
+    before: ChatMessage[],
+    mode: "instant" | "ai",
+  ): AskRequest {
+    const payload: AskRequest = { question, tz: browserTimeZone(), answer_mode: mode };
     const history = historyFor(before);
     if (history.length > 0) payload.history = history;
     if (activeScope?.memoryId) payload.memory_id = activeScope.memoryId;
     if (activeScope?.sourceType) payload.source_type = activeScope.sourceType;
+    return payload;
+  }
+
+  async function run(question: string, activeScope: AskScope | null, before: ChatMessage[], aiId: string) {
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    emitEcho({ type: "ask" });
+    const payload = requestFor(question, activeScope, before, "instant");
 
     try {
       const final = await askStream(
@@ -211,6 +240,7 @@ export default function AskSentioraView({
         followups: final.followUps ?? [],
         insufficient: Boolean(final.insufficient_context),
         usedFallback: Boolean(final.used_fallback),
+        aiAvailable: Boolean(final.aiAvailable),
       }));
       emitEcho({
         type: "answer",
@@ -227,6 +257,58 @@ export default function AskSentioraView({
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null;
     }
+  }
+
+  /** Explain with AI: one written answer from the same sources, below the quoted one. */
+  async function explain(messageId: string) {
+    const all = messagesRef.current;
+    const index = all.findIndex((msg) => msg.id === messageId);
+    const message = all[index];
+    if (!message || message.sender !== "ai") return;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    // History is everything before this answer's question.
+    const before = all.slice(0, Math.max(0, index - 1));
+    const payload = requestFor(message.question, message.scope ?? null, before, "ai");
+    updateAi(messageId, () => ({
+      explain: { status: "pending", text: "", sources: [], usedSources: [], followups: [] },
+    }));
+    try {
+      const final = await askStream(
+        payload,
+        {
+          onSources: (sources) => updateExplain(messageId, () => ({ sources })),
+          onDelta: (text) =>
+            updateExplain(messageId, (current) => ({ status: "streaming", text: current.text + text })),
+        },
+        controller.signal,
+      );
+      updateExplain(messageId, () => ({
+        status: "done",
+        text: final.answer,
+        mode: final.mode,
+        usedSources: final.usedSources ?? [],
+        followups: final.followUps ?? [],
+      }));
+    } catch (err) {
+      if (isAbort(err)) {
+        updateExplain(messageId, () => ({ status: "stopped" }));
+      } else if (err instanceof AskApiError && err.code === "PRIVACY_CONSENT_REQUIRED") {
+        updateAi(messageId, () => ({ explain: undefined }));
+        consentMissing(() => void explain(messageId));
+      } else if (err instanceof AskApiError && err.code === "AI_BUSY") {
+        updateExplain(messageId, () => ({ status: "busy", retryAfter: err.retryAfter }));
+      } else {
+        updateExplain(messageId, () => ({ status: "error", error: errorMessage(err) }));
+      }
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = null;
+    }
+  }
+
+  function handleExplain(message: AiMessage) {
+    if (isGenerating) return;
+    void requireConsent(() => void explain(message.id));
   }
 
   function aiPlaceholder(question: string, activeScope: AskScope | null): AiMessage {
@@ -325,28 +407,34 @@ export default function AskSentioraView({
     }
   }
 
-  async function handleFeedback(message: AiMessage, rating: FeedbackRating) {
-    const current = feedback[message.id];
+  /** Rate the quoted answer or, with `ai`, the Explain with AI answer. */
+  async function handleFeedback(message: AiMessage, rating: FeedbackRating, ai = false) {
+    const key = ai ? `${message.id}:ai` : message.id;
+    const current = feedback[key];
     if (current && current.state !== "failed") return;
-    setFeedback((prev) => ({ ...prev, [message.id]: { rating, state: "sending" } }));
+    const rated = ai && message.explain ? message.explain : message;
+    setFeedback((prev) => ({ ...prev, [key]: { rating, state: "sending" } }));
     try {
       await sendAnswerFeedback({
         question: message.question,
-        answerMode: message.mode ?? "memory",
+        // The quoted answer is "instant"; the AI answer reports how it used memory.
+        answerMode: ai ? "ai" : (message.mode ?? "memory"),
         rating,
-        sourceChunkIds: usedSourceList(message)
+        sourceChunkIds: usedSourceList(rated)
           .map((source) => source.chunk_id)
           .filter((id): id is string => Boolean(id)),
       });
-      setFeedback((prev) => ({ ...prev, [message.id]: { rating, state: "sent" } }));
+      setFeedback((prev) => ({ ...prev, [key]: { rating, state: "sent" } }));
     } catch {
-      setFeedback((prev) => ({ ...prev, [message.id]: { rating, state: "failed" } }));
+      setFeedback((prev) => ({ ...prev, [key]: { rating, state: "failed" } }));
     }
   }
 
-  function handleCopy(message: AiMessage) {
-    void navigator.clipboard?.writeText(plainAnswer(message));
-    setCopiedId(message.id);
+  function handleCopy(message: AiMessage, ai = false) {
+    const copied = ai && message.explain ? message.explain : message;
+    void navigator.clipboard?.writeText(plainAnswer(copied));
+    const key = ai ? `${message.id}:ai` : message.id;
+    setCopiedId(key);
     window.setTimeout(() => setCopiedId(null), 2000);
   }
 
@@ -397,6 +485,14 @@ export default function AskSentioraView({
     const used = usedSourceList(msg);
     const busy = msg.status === "pending" || msg.status === "streaming";
     const notFound = msg.status === "done" && msg.insufficient;
+    const quoted = msg.mode === "instant" && !notFound;
+    const canExplain =
+      msg.status === "done" && Boolean(msg.aiAvailable) && !msg.explain && Boolean(msg.question);
+    const latest = msg.id === lastAiId;
+    const followups =
+      msg.explain?.status === "done" && msg.explain.followups.length
+        ? msg.explain.followups
+        : msg.followups;
     return (
       <article
         key={msg.id}
@@ -456,6 +552,16 @@ export default function AskSentioraView({
                 Save pages, PDFs or videos with the extension, then ask again.
               </p>
             </div>
+          ) : msg.text && quoted ? (
+            // Instant answers are the saves' own sentences: show them as quotes.
+            <div className="border-l-2 border-accent pl-4 [&_li]:my-1.5">
+              <AnswerMarkdown
+                text={msg.text}
+                sources={msg.sources}
+                onOpenMemory={onOpenMemory}
+                streaming={msg.status === "streaming"}
+              />
+            </div>
           ) : msg.text ? (
             <AnswerMarkdown
               text={msg.text}
@@ -485,7 +591,20 @@ export default function AskSentioraView({
                   {copiedId === msg.id ? "Copied" : "Copy answer"}
                 </Button>
               ) : null}
-              {msg.id === lastAiId ? (
+              {canExplain ? (
+                <Button
+                  // Compare questions read better written out: lead with the AI answer.
+                  variant={suitsAiAnswer(msg.question) || notFound ? "primary" : "secondary"}
+                  size="sm"
+                  leadingIcon={<IconSparkles size={16} />}
+                  disabled={isGenerating}
+                  onClick={() => handleExplain(msg)}
+                >
+                  Explain with AI
+                </Button>
+              ) : null}
+              {msg.status === "stopped" ? (
+                // A quoted answer is the same every time; only a stopped one needs a retry.
                 <Button
                   variant="secondary"
                   size="sm"
@@ -493,7 +612,7 @@ export default function AskSentioraView({
                   disabled={isGenerating}
                   onClick={() => void regenerate(msg)}
                 >
-                  Regenerate
+                  Try again
                 </Button>
               ) : null}
               {msg.status === "done" ? (
@@ -511,56 +630,36 @@ export default function AskSentioraView({
                 </Button>
               ) : null}
               {msg.status === "done" && msg.question ? (
-                <div role="group" aria-label="Rate this answer" className="flex gap-2">
-                  {([1, -1] as const).map((rating) => {
-                    const rated = feedback[msg.id];
-                    const chosen = rated?.rating === rating && rated.state !== "failed";
-                    return (
-                      <Button
-                        key={rating}
-                        variant="secondary"
-                        size="sm"
-                        aria-pressed={chosen}
-                        leadingIcon={
-                          chosen && rated?.state === "sent" ? (
-                            <IconCheck size={16} />
-                          ) : rating === 1 ? (
-                            <IconThumbUp size={16} />
-                          ) : (
-                            <IconThumbDown size={16} />
-                          )
-                        }
-                        loading={chosen && rated?.state === "sending"}
-                        disabled={rated !== undefined && rated.state !== "failed"}
-                        onClick={() => void handleFeedback(msg, rating)}
-                      >
-                        {rating === 1 ? "Helpful" : "Not helpful"}
-                      </Button>
-                    );
-                  })}
-                </div>
+                <RatingButtons
+                  label={msg.explain ? "Rate the quoted answer" : "Rate this answer"}
+                  value={feedback[msg.id]}
+                  onRate={(rating) => void handleFeedback(msg, rating)}
+                />
               ) : null}
               {noteState[msg.id] === "failed" ? (
                 <p role="alert" className="w-full text-[15px] text-link">
                   Could not save this note. Try again.
                 </p>
               ) : null}
-              {feedback[msg.id]?.state === "sent" ? (
-                <p role="status" className="w-full text-[15px] text-muted">
-                  Thanks, that helps improve answers.
-                </p>
-              ) : null}
-              {feedback[msg.id]?.state === "failed" ? (
-                <p role="alert" className="w-full text-[15px] text-link">
-                  Could not send your rating. Try again.
-                </p>
-              ) : null}
             </div>
           ) : null}
 
-          {msg.id === lastAiId && msg.status === "done" && msg.followups.length ? (
+          {msg.explain ? (
+            <ExplainSection
+              explain={msg.explain}
+              onOpenMemory={onOpenMemory}
+              onRetry={() => handleExplain(msg)}
+              retryDisabled={isGenerating}
+              onCopy={() => handleCopy(msg, true)}
+              copied={copiedId === `${msg.id}:ai`}
+              rating={feedback[`${msg.id}:ai`]}
+              onRate={(rating) => void handleFeedback(msg, rating, true)}
+            />
+          ) : null}
+
+          {latest && msg.status === "done" && followups.length ? (
             <div role="group" aria-label="Follow-up questions" className="flex flex-wrap gap-2">
-              {msg.followups.map((followup) => (
+              {followups.map((followup) => (
                 <Chip
                   key={followup}
                   className="h-auto min-h-9 whitespace-normal py-1.5 text-left"
@@ -705,10 +804,11 @@ export default function AskSentioraView({
           </div>
           <p id="ask-hint" className="mt-2 hidden text-center text-[14px] text-muted sm:block">
             <Kbd>Enter</Kbd> to send · <Kbd>Shift</Kbd>+<Kbd>Enter</Kbd> new line · <Kbd>Ctrl</Kbd>
-            <Kbd>K</Kbd> to focus · Answers cite your saves and say when they use general knowledge.
+            <Kbd>K</Kbd> to focus · Answers quote your saves; Explain with AI writes a fuller answer.
           </p>
         </form>
       </section>
+      {consentModal}
     </div>
   );
 }
@@ -719,6 +819,12 @@ function errorMessage(err: unknown): string {
   }
   if (err.code === "ASK_STREAM_INTERRUPTED") {
     return "The answer was cut off before it finished. Try again.";
+  }
+  if (err.code === "AI_BUSY") {
+    return "Echo's AI is busy answering other questions. Try again in a few seconds.";
+  }
+  if (err.code === "PRIVACY_CONSENT_REQUIRED") {
+    return "AI answers need your OK to the privacy notice first.";
   }
   if (err.status === 401 || err.status === 403) {
     return "Your session expired or you are not signed in. Please sign in again to ask questions.";
