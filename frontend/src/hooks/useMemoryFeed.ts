@@ -63,6 +63,22 @@ export function useMemoryFeed() {
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleFocus);
 
+    const handleRefreshEvent = () => {
+      void loadMemoryFeed(true);
+    };
+
+    window.addEventListener("sentiora_memory_refresh", handleRefreshEvent);
+
+    const handleMessage = (e: MessageEvent) => {
+      if (
+        e.origin === window.location.origin &&
+        (e.data?.type === "SENTIORA_MEMORY_REFRESH" || e.data?.type === "REFRESH_MEMORY_FEED")
+      ) {
+        handleRefreshEvent();
+      }
+    };
+    window.addEventListener("message", handleMessage);
+
     const winChrome = (
       window as unknown as {
         chrome?: {
@@ -86,6 +102,8 @@ export function useMemoryFeed() {
       window.clearInterval(interval);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("sentiora_memory_refresh", handleRefreshEvent);
+      window.removeEventListener("message", handleMessage);
       winChrome?.runtime?.onMessage?.removeListener(listener);
     };
   }, [loadMemoryFeed]);

@@ -78,6 +78,56 @@ function initContentScript(): void {
   let extractInFlight = false;
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "REFRESH_MEMORY_FEED") {
+      try {
+        window.postMessage({ type: "SENTIORA_MEMORY_REFRESH" }, window.location.origin);
+        window.dispatchEvent(new CustomEvent("sentiora_memory_refresh"));
+      } catch {
+        /* ignore */
+      }
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (message?.type === "SYNC_AUTH_TOKENS") {
+      const payload = message.payload;
+      if (payload) {
+        try {
+          localStorage.setItem("sentiora_auth_session", JSON.stringify(payload));
+          if (payload.accessToken) sessionStorage.setItem("access_token", payload.accessToken);
+          if (payload.refreshToken) localStorage.setItem("refresh_token", payload.refreshToken);
+        } catch {
+          /* ignore */
+        }
+        try {
+          window.postMessage({ type: "SENTIORA_AUTH_SYNC", ...payload }, window.location.origin);
+          window.dispatchEvent(new CustomEvent("sentiora_auth_sync", { detail: payload }));
+        } catch {
+          /* ignore */
+        }
+      }
+      sendResponse({ success: true });
+      return true;
+    }
+
+    if (message?.type === "CLEAR_AUTH_TOKENS") {
+      try {
+        localStorage.removeItem("sentiora_auth_session");
+        localStorage.removeItem("refresh_token");
+        sessionStorage.removeItem("access_token");
+      } catch {
+        /* ignore */
+      }
+      try {
+        window.postMessage({ type: "SENTIORA_AUTH_LOGOUT" }, window.location.origin);
+        window.dispatchEvent(new Event("auth:logout"));
+      } catch {
+        /* ignore */
+      }
+      sendResponse({ success: true });
+      return true;
+    }
+
     if (message?.type === "FORCE_CAPTURE") {
       if (extractInFlight) {
         sendResponse({ success: false, error: "Extraction already in progress." });

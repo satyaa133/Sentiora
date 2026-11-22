@@ -70,3 +70,9 @@ export function broadcastAuthLogout(): void {
   const origin = window.location.origin;
   window.postMessage({ type: "SENTIORA_AUTH_LOGOUT" }, origin);
 }
+
+export function broadcastMemoryRefresh(): void {
+  const origin = window.location.origin;
+  window.postMessage({ type: "SENTIORA_MEMORY_REFRESH" }, origin);
+  window.dispatchEvent(new CustomEvent("sentiora_memory_refresh"));
+}
