@@ -26,6 +26,18 @@ question and reports, per ``RAG_EXTRACT_MIN_SCORE`` (``--extract-sweep``):
 
 Follow-ups are rewritten with the same heuristic Ask uses (no model call).
 
+``--answers`` runs every question through the real instant-answer path and
+reports "answer hit": questions with ``expected_answer`` whose instant answer
+quotes one of those strings (case and spacing ignored).
+
+``--fixture`` evaluates the original library in scripts/eval-rag/fixture/
+(REBUILD_PLAN D15) instead of a user's saves: it is loaded into a throwaway
+user, embedded with the active embedding model, and deleted afterwards. CI
+runs it with ``--fail-under``, which exits 1 when a metric is below its floor:
+
+    npm run eval:rag:ci
+    node scripts/run-python.mjs -m scripts.eval_rag --fixture --answers --fail-under hit=0.95,mrr=0.90
+
 Usage (from the repo root):
 
     node scripts/run-python.mjs -m scripts.eval_rag --user you@example.com
@@ -41,6 +53,7 @@ embedding call per question.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import sys
@@ -74,6 +87,7 @@ class Case:
     expected: list[str]
     history: list[AskTurn] = field(default_factory=list)
     passage: str | None = None
+    expected_answer: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -141,6 +155,7 @@ def load_cases(path: Path) -> list[Case]:
                 list(raw.get("expected", [])),
                 history,
                 raw.get("passage"),
+                list(raw.get("expected_answer", [])),
             )
         )
     return cases
@@ -316,14 +331,95 @@ def evaluate_instant(
         )
 
 
+def evaluate_answers(db: Any, user_id: UUID, cases: Sequence[Case]) -> dict[str, float | int]:
+    """Answer hit, rejects and timing of the real instant answer (no cache, no enrichment)."""
+    import time
+
+    from app.services import enrichment_service
+    from app.services.rag_service import RagService
+
+    settings = get_settings()
+    original_ttl = settings.answer_cache_ttl_seconds
+    original_request = enrichment_service.EnrichmentService.request_for_memories
+    settings.answer_cache_ttl_seconds = 0
+    enrichment_service.EnrichmentService.request_for_memories = lambda self, *a, **k: None  # type: ignore[method-assign]
+    hits = graded = rejected = uncovered = 0
+    timings: list[float] = []
+    misses: list[str] = []
+    try:
+        for case in cases:
+            service = RagService(RetrievalService(db))
+            started = time.perf_counter()
+            prepared = service.prepare(
+                user_id, case.question, history=case.history, answer_mode="instant"
+            )
+            timings.append(time.perf_counter() - started)
+            answer = _normalize(prepared.fixed_answer or "")
+            if not case.expected:
+                uncovered += 1
+                rejected += bool(prepared.insufficient)
+                continue
+            if not case.expected_answer:
+                continue
+            graded += 1
+            if not prepared.insufficient and any(
+                _normalize(text) in answer for text in case.expected_answer
+            ):
+                hits += 1
+            else:
+                misses.append(case.id)
+    finally:
+        settings.answer_cache_ttl_seconds = original_ttl
+        enrichment_service.EnrichmentService.request_for_memories = original_request  # type: ignore[method-assign]
+    ordered = sorted(timings) or [0.0]
+    result: dict[str, float | int] = {
+        "answer_hit": hits / graded if graded else 0.0,
+        "answer_reject": rejected / uncovered if uncovered else 1.0,
+        "graded": graded,
+        "p50_ms": round(ordered[len(ordered) // 2] * 1000),
+        "p95_ms": round(ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))] * 1000),
+    }
+    print(
+        f"instant answers        answer hit={result['answer_hit']:.2f} (n={graded})  "
+        f"reject={result['answer_reject']:.2f}  p50 {result['p50_ms']} ms  p95 {result['p95_ms']} ms"
+    )
+    if misses:
+        print(f"  answer misses: {', '.join(misses)}")
+    return result
+
+
+def parse_floors(text: str | None) -> dict[str, float]:
+    """``hit=0.95,mrr=0.90,answer=0.8`` -> floors per metric."""
+    names = {"hit": "hit_at_k", "mrr": "mrr", "reject": "reject", "answer": "answer_hit"}
+    floors: dict[str, float] = {}
+    for part in (text or "").split(","):
+        if not part.strip():
+            continue
+        key, _, value = part.partition("=")
+        if key.strip() not in names:
+            raise SystemExit(f"--fail-under: unknown metric {key!r} (use {', '.join(names)})")
+        floors[names[key.strip()]] = float(value)
+    return floors
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
+    parser.add_argument("--user", help="user email or id whose memories are searched")
     parser.add_argument(
-        "--user", required=True, help="user email or id whose memories are searched"
+        "--fixture",
+        action="store_true",
+        help="evaluate the original fixture library (CI) instead of a user's saves",
     )
-    parser.add_argument("--questions", default=str(DEFAULT_QUESTIONS))
+    parser.add_argument("--questions", help="questions file (default: dev or fixture set)")
+    parser.add_argument(
+        "--answers", action="store_true", help="also grade the real instant answer"
+    )
+    parser.add_argument(
+        "--fail-under",
+        help="exit 1 below these floors, e.g. hit=0.95,mrr=0.90,answer=0.8",
+    )
     parser.add_argument(
         "--k", type=int, default=None, help="chunks per question (default RAG_FINAL_K)"
     )
@@ -353,7 +449,15 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
     settings = get_settings()
     k = args.k or settings.rag_final_k
-    cases = load_cases(Path(args.questions))
+    if not args.fixture and not args.user:
+        parser.error("--user is required unless --fixture is given")
+    from scripts import eval_fixture
+
+    questions_path = args.questions or str(
+        eval_fixture.QUESTIONS if args.fixture else DEFAULT_QUESTIONS
+    )
+    cases = load_cases(Path(questions_path))
+    floors = parse_floors(args.fail_under)
 
     adapter = retrieval_service.get_embedding_adapter()
     if adapter is None:
@@ -365,8 +469,11 @@ def main(argv: list[str] | None = None) -> int:
         cached = CachingAdapter(adapter)
         retrieval_service.get_embedding_adapter = lambda: cached  # type: ignore[assignment,return-value]
 
-    with SessionLocal() as db:
-        user_id = resolve_user(db, args.user)
+    with contextlib.ExitStack() as stack:
+        if args.fixture:
+            fixture_user_id = stack.enter_context(eval_fixture.fixture_user())
+        db = stack.enter_context(SessionLocal())
+        user_id = fixture_user_id if args.fixture else resolve_user(db, args.user)
         queries = {
             case.id: rewrite_query(case.question, case.history, None) for case in cases
         }
@@ -376,7 +483,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.quiet:
             print_outcomes(outcomes)
         print(f"\nRetrieval eval over {len(cases)} questions, k={k}")
-        print_summary(f"min_similarity={baseline:.2f}", summarize(outcomes))
+        summary: dict[str, float | int] = dict(summarize(outcomes))
+        print_summary(f"min_similarity={baseline:.2f}", summary)
+        if args.answers:
+            summary.update(evaluate_answers(db, user_id, cases))
 
         if args.compare_question_bank:
             RetrievalService.use_question_bank = False
@@ -408,6 +518,11 @@ def main(argv: list[str] | None = None) -> int:
             finally:
                 settings.rag_min_similarity = baseline
 
+    failed = [
+        f"{metric} {float(summary.get(metric, 0.0)):.2f} < {floor:.2f}"
+        for metric, floor in floors.items()
+        if float(summary.get(metric, 0.0)) < floor
+    ]
     if args.json:
         Path(args.json).write_text(
             json.dumps(
@@ -442,6 +557,11 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
         print(f"Wrote {args.json}")
+    if failed:
+        print("EVAL FAILED: " + "; ".join(failed), file=sys.stderr)
+        return 1
+    if floors:
+        print("Eval floors met: " + ", ".join(f"{m} >= {f:.2f}" for m, f in floors.items()))
     return 0
 
 

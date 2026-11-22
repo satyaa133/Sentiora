@@ -52,6 +52,7 @@
     "compose:down": "docker compose down",
     "check:secrets": "node scripts/check-client-secrets.mjs",
     "eval:rag": "node scripts/run-python.mjs -m scripts.eval_rag",
+    "eval:rag:ci": "node scripts/run-python.mjs -m scripts.eval_rag --fixture --answers --quiet --fail-under hit=0.95,mrr=0.90,answer=0.60",
     "docs:api": "node scripts/run-python.mjs -m scripts.export_openapi"
   },
   "devDependencies": {

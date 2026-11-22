@@ -1,0 +1,144 @@
+{
+  "description": "Original eval library for CI (REBUILD_PLAN D15). Every text here was written for Sentiora's eval; nothing is copied from articles, books or videos. Each save has the questions enrichment would store for it (the question-bank leg); 'passage' picks the chunk that answers each one.",
+  "saves": [
+    {
+      "slug": "sourdough-starter",
+      "source_type": "webpage",
+      "title": "Keeping a sourdough starter alive",
+      "content": "A sourdough starter is a paste of flour and water that wild yeast and lactic acid bacteria have colonised. It needs regular meals of fresh flour and water to stay lively.\n\nFeeding schedule\n\nAt room temperature, discard most of the starter and feed it once a day with equal weights of flour and water. A starter kept in the fridge only needs feeding about once a week, because the cold slows the microbes down.\n\nSigns of a healthy starter\n\nA healthy starter roughly doubles in size within six to eight hours of a feed and smells pleasantly sour, a little like yoghurt. Small bubbles should run all the way through it.\n\nHooch and other warnings\n\nA grey liquid on top, often called hooch, means the starter is hungry. Pour it off or stir it back in, then feed it. Pink or orange streaks are a sign of spoilage, and the starter should be thrown away.",
+      "questions": [
+        {"question": "How often should I feed a sourdough starter kept at room temperature?", "passage": "feed it once a day with equal weights"},
+        {"question": "What does the grey liquid on top of a starter mean?", "passage": "often called hooch"},
+        {"question": "How can I tell a sourdough starter is healthy?", "passage": "roughly doubles in size"}
+      ]
+    },
+    {
+      "slug": "tides",
+      "source_type": "webpage",
+      "title": "Why the sea has tides",
+      "content": "Tides are the regular rise and fall of the sea. They are caused mostly by the Moon's gravity pulling on the oceans, with a smaller pull from the Sun.\n\nThe Moon pulls hardest on the side of the Earth that faces it, so the water there bulges outwards. A second bulge forms on the far side, where the Earth is pulled away from the water. Most coasts pass through both bulges each day, which is why they see two high tides roughly every twenty-four hours and fifty minutes.\n\nWhen the Sun, Moon and Earth line up at new and full moon, their pulls add together and produce spring tides, with the highest highs and lowest lows. When the Sun and Moon pull at right angles during the quarter moons, the result is a neap tide, with the smallest range between high and low water.",
+      "questions": [
+        {"question": "What causes ocean tides?", "passage": "caused mostly by the Moon's gravity"},
+        {"question": "What is the difference between spring tides and neap tides?", "passage": "produce spring tides"}
+      ]
+    },
+    {
+      "slug": "raft-consensus",
+      "source_type": "webpage",
+      "title": "Raft consensus explained",
+      "content": "Raft is a consensus algorithm for keeping a replicated log identical across a cluster of servers. It was designed to be easier to understand than Paxos while giving the same guarantees.\n\nServer roles\n\nAt any moment each server is a leader, a follower or a candidate. Followers are passive: they answer requests from the leader and from candidates. Clients only ever talk to the leader, and a follower that receives a client request redirects it there.\n\nTerms\n\nTime is divided into numbered terms. Each term starts with an election, and at most one leader can win a given term. Servers attach their current term to every message; a server that sees a higher term immediately steps down to follower and adopts the newer term.\n\nLeader election\n\nA follower that hears nothing from a leader for an election timeout becomes a candidate, increases its term, votes for itself and asks every other server for a vote. Each server grants at most one vote per term, so a candidate needs votes from a majority of the cluster to win. Election timeouts are randomised, typically between 150 and 300 milliseconds, so that split votes are rare and resolve quickly.\n\nLog replication\n\nThe leader appends each client command to its own log and sends it to the followers in AppendEntries messages. An entry is committed once a majority of servers have stored it, and only then does the leader apply it to its state machine and reply to the client. AppendEntries messages with no entries double as heartbeats that keep followers from starting elections.\n\nSafety\n\nA candidate cannot win an election unless its log is at least as up to date as the logs of a majority of voters. Because any two majorities overlap, the winner is guaranteed to hold every committed entry, so a committed entry is never lost when leadership changes.\n\nMembership changes\n\nAdding or removing servers is done through a joint consensus phase, in which decisions need majorities from both the old and the new configuration. This prevents two leaders from being elected for the same term while the cluster changes shape.\n\nLog compaction\n\nLogs cannot grow forever, so each server periodically writes a snapshot of its state machine and discards the log entries the snapshot covers. A leader sends an InstallSnapshot message to a follower that has fallen too far behind to catch up from the log alone.",
+      "questions": [
+        {"question": "How does a Raft candidate become leader?", "passage": "needs votes from a majority of the cluster"},
+        {"question": "When is a Raft log entry committed?", "passage": "An entry is committed once a majority"},
+        {"question": "Why are Raft election timeouts randomised?", "passage": "Election timeouts are randomised"},
+        {"question": "How does Raft add or remove servers safely?", "passage": "joint consensus phase"},
+        {"question": "How does Raft stop the log from growing forever?", "passage": "writes a snapshot of its state machine"}
+      ]
+    },
+    {
+      "slug": "photosynthesis",
+      "source_type": "webpage",
+      "title": "Photosynthesis in two stages",
+      "content": "Photosynthesis is how plants, algae and some bacteria turn light into chemical energy. It happens in chloroplasts and runs in two linked stages.\n\nThe light-dependent reactions take place in the thylakoid membranes. Chlorophyll absorbs light, and that energy splits water molecules, releasing oxygen as a by-product. The captured energy is stored in two carrier molecules, ATP and NADPH.\n\nThe Calvin cycle takes place in the stroma, the fluid around the thylakoids. It uses the ATP and NADPH from the first stage to fix carbon dioxide from the air into sugar. The enzyme RuBisCO performs the first carbon-fixing step, and it is often said to be the most abundant protein on Earth.",
+      "questions": [
+        {"question": "Where does the oxygen released by plants come from?", "passage": "splits water molecules"},
+        {"question": "What happens in the Calvin cycle?", "passage": "fix carbon dioxide from the air into sugar"}
+      ]
+    },
+    {
+      "slug": "postgres-indexes",
+      "source_type": "webpage",
+      "title": "Choosing PostgreSQL indexes",
+      "content": "An index lets PostgreSQL find rows without reading the whole table, at the cost of extra disk space and slower writes. Picking the right kind matters more than adding many.\n\nB-tree indexes\n\nB-tree is the default index type. It handles equality and range comparisons such as =, <, > and BETWEEN, and it can return rows already sorted, which lets the planner skip a sort step for ORDER BY queries.\n\nGIN indexes\n\nA GIN index stores an entry for every element inside a value, which makes it the right choice for full-text search vectors, arrays and jsonb documents. GIN lookups are fast, but building and updating the index is slower than for a B-tree.\n\nPartial indexes\n\nA partial index covers only the rows that match a WHERE clause, for example only orders whose status is pending. It stays small and cheap to maintain, and the planner uses it whenever a query's condition implies the index condition.\n\nMulticolumn indexes\n\nIn a multicolumn B-tree the order of the columns matters: the index is most useful when queries filter on the leading column. An index on (customer_id, created_at) helps a query for one customer's recent orders but does little for a query that filters on created_at alone.\n\nWhen indexes are ignored\n\nThe planner skips an index when it expects a query to return a large share of the table, because a sequential scan is cheaper than jumping between index and table pages. Wrapping an indexed column in a function, such as lower(email), also prevents a plain index from being used unless an expression index on that function exists.\n\nKeeping statistics fresh\n\nThe planner's choices depend on table statistics gathered by ANALYZE. Autovacuum normally refreshes them, but after a large bulk load it is worth running ANALYZE by hand so the planner does not keep using outdated row estimates.",
+      "questions": [
+        {"question": "Which PostgreSQL index type should I use for jsonb or full-text search?", "passage": "right choice for full-text search vectors"},
+        {"question": "What is a partial index in PostgreSQL?", "passage": "A partial index covers only the rows"},
+        {"question": "Why would PostgreSQL ignore an index?", "passage": "planner skips an index"},
+        {"question": "Does column order matter in a multicolumn index?", "passage": "order of the columns matters"}
+      ]
+    },
+    {
+      "slug": "fiddle-leaf-fig",
+      "source_type": "webpage",
+      "title": "Fiddle-leaf fig care notes",
+      "content": "Fiddle-leaf figs are tropical trees that sulk when their conditions change, so it pays to find them a good spot and leave them there.\n\nThey want bright, indirect light for most of the day, ideally a few feet from an east- or south-facing window. Too little light makes them drop their lower leaves.\n\nWater only when the top two inches of soil are dry, then water until it drains from the bottom of the pot. Brown spots in the middle of the leaves usually mean the roots stayed wet for too long, while crispy brown edges point to air that is too dry.\n\nRotate the pot a quarter turn every couple of weeks so the trunk grows straight instead of leaning towards the light.",
+      "questions": [
+        {"question": "How often should I water a fiddle-leaf fig?", "passage": "top two inches of soil are dry"},
+        {"question": "Why does my fiddle-leaf fig have brown spots?", "passage": "roots stayed wet for too long"}
+      ]
+    },
+    {
+      "slug": "printing-press",
+      "source_type": "webpage",
+      "title": "How the printing press changed Europe",
+      "content": "Around 1450 in Mainz, Johannes Gutenberg combined several existing ideas into a working printing system. Its key parts were metal type cast in reusable moulds, an oil-based ink that stuck to metal, and a screw press adapted from the ones used to make wine and olive oil.\n\nBefore this, books were copied by hand, and a single copy could take a scribe months. Within fifty years printing shops had spread to more than two hundred European towns, and millions of books were in circulation.\n\nCheaper books helped spread literacy, made it easier for scholars to share and check each other's work, and allowed pamphlets to carry new religious and political ideas faster than authorities could suppress them.",
+      "questions": [
+        {"question": "What were the main parts of Gutenberg's printing system?", "passage": "metal type cast in reusable moulds"},
+        {"question": "How fast did printing spread across Europe?", "passage": "more than two hundred European towns"}
+      ]
+    },
+    {
+      "slug": "rust-ownership",
+      "source_type": "webpage",
+      "title": "Rust ownership and borrowing basics",
+      "content": "Rust manages memory without a garbage collector by tracking ownership at compile time.\n\nEvery value has exactly one owner, a variable. When the owner goes out of scope, the value is dropped and its memory is freed. Assigning a heap value such as a String to another variable moves ownership, and the original variable can no longer be used.\n\nInstead of moving a value, code can borrow it with a reference. At any one time you may have either any number of shared references (&T) or exactly one mutable reference (&mut T), but never both. The borrow checker enforces this rule, which rules out data races at compile time.\n\nLifetimes are the compiler's way of making sure a reference never outlives the value it points to, so dangling pointers cannot happen in safe Rust.",
+      "questions": [
+        {"question": "What happens when a Rust variable goes out of scope?", "passage": "the value is dropped"},
+        {"question": "Can I have a mutable and a shared reference at the same time in Rust?", "passage": "exactly one mutable reference"}
+      ]
+    },
+    {
+      "slug": "interval-running",
+      "source_type": "youtube",
+      "title": "Interval training for new runners (talk)",
+      "content": "",
+      "transcript": [
+        [0, "hi everyone today we're talking about interval training for people who are fairly new to running"],
+        [9, "an interval session simply means you alternate short hard efforts with easy recovery jogs or walks"],
+        [18, "a good first session is six rounds of one minute fast and two minutes easy after a ten minute warm up"],
+        [30, "fast here means a pace where you can say a few words but not hold a conversation"],
+        [41, "the recovery part matters as much as the fast part so don't skip it and don't rush it"],
+        [52, "do intervals once a week at most when you're starting out and keep your other runs gentle"],
+        [64, "over a month or two you can stretch the fast part to ninety seconds or add a round or two"],
+        [77, "if your legs still feel heavy two days later you did too much so cut a round next time"],
+        [88, "and always finish with five to ten minutes of slow jogging to cool down thanks for watching"]
+      ],
+      "questions": [
+        {"question": "What is a good first interval session for a beginner?", "passage": "six rounds of one minute fast"},
+        {"question": "How often should beginners do interval runs?", "passage": "once a week at most"}
+      ]
+    },
+    {
+      "slug": "http-caching",
+      "source_type": "webpage",
+      "title": "HTTP caching headers in practice",
+      "content": "Caching lets browsers and proxies reuse earlier responses instead of downloading them again. The rules are set by response headers.\n\nCache-Control\n\nCache-Control is the main header. max-age=3600 lets a response be reused for an hour without asking the server. no-cache does not mean do not cache: it means the cache must check with the server before every reuse. no-store is the directive that forbids storing the response at all, and it is the right choice for pages with personal data.\n\nPrivate and public\n\nThe private directive allows only the user's own browser to keep the response, which suits pages that differ per user. public allows shared caches such as CDNs to store it as well, even if the request carried an Authorization header.\n\nValidators\n\nAn ETag is an opaque version tag the server sends with a response. When the cached copy expires, the browser sends the tag back in an If-None-Match header, and if nothing changed the server replies 304 Not Modified with no body, saving the download. Last-Modified and If-Modified-Since work the same way using timestamps.\n\nVersioned static files\n\nFor scripts and stylesheets whose file names include a content hash, such as app.3f9a1c.js, the usual advice is Cache-Control: max-age=31536000, immutable. A new release gets a new file name, so the old cached file is simply never requested again.\n\nThe Vary header\n\nVary tells caches which request headers change the response. Vary: Accept-Encoding keeps separate copies for compressed and uncompressed versions; sending Vary on a header with many values, such as User-Agent, splits the cache into so many entries that it rarely gets a hit.",
+      "questions": [
+        {"question": "What does no-cache mean in Cache-Control?", "passage": "no-cache does not mean do not cache"},
+        {"question": "How does an ETag save bandwidth?", "passage": "replies 304 Not Modified"},
+        {"question": "How should I cache JavaScript files that have a hash in their name?", "passage": "max-age=31536000, immutable"},
+        {"question": "Why is Vary: User-Agent a bad idea?", "passage": "splits the cache into so many entries"}
+      ]
+    },
+    {
+      "slug": "chess-openings",
+      "source_type": "webpage",
+      "title": "Chess opening principles for club players",
+      "content": "Memorising long opening lines matters less than following a few principles in the first ten moves.\n\nFight for the centre. Pawns and pieces on the central squares control more of the board and make it easier to move pieces from one side to the other.\n\nDevelop your knights and bishops before moving the same piece twice or bringing the queen out early. An early queen is easily chased around by the opponent's minor pieces, losing time.\n\nCastle early, usually within the first ten moves, to tuck the king away from the centre and connect the rooks.",
+      "questions": [
+        {"question": "Why shouldn't I bring my queen out early in chess?", "passage": "An early queen is easily chased"},
+        {"question": "When should I castle in a chess game?", "passage": "Castle early"}
+      ]
+    },
+    {
+      "slug": "home-composting",
+      "source_type": "pdf",
+      "title": "Home composting guide",
+      "content": "Composting turns kitchen and garden scraps into a dark, crumbly soil improver. A working heap needs a balance of two kinds of material.\n\nGreens are wet, nitrogen-rich scraps such as vegetable peelings, coffee grounds and fresh grass clippings. Browns are dry, carbon-rich materials such as cardboard, dry leaves and straw. Aim for roughly three parts browns to one part greens by volume.\n\nA heap that smells of ammonia or rotten eggs has too many greens or too little air: mix in more browns and turn it with a fork. A heap that stays cold and dry needs more greens and a splash of water.\n\nKeep meat, dairy and cooked food out of an open heap, because they attract rats and smell as they rot. With regular turning, compost is usually ready in three to six months.",
+      "questions": [
+        {"question": "What is the right mix of greens and browns for compost?", "passage": "three parts browns to one part greens"},
+        {"question": "Why does my compost smell bad?", "passage": "smells of ammonia or rotten eggs"}
+      ]
+    }
+  ]
+}

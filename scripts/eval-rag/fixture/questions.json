@@ -1,0 +1,41 @@
+{
+  "description": "CI eval questions for the fixture library (library.json). Same format as ../questions.json: 'expected' are title substrings, [] means not covered; 'passage' (long-page cases) is text the answering chunk must contain; 'expected_answer' lists substrings, one of which the instant answer must quote (answer hit). Questions are worded unlike the saves on purpose.",
+  "questions": [
+    { "id": "fx-starter-feed", "question": "How frequently does my bread starter need flour if it lives on the counter?", "expected": ["sourdough starter"], "expected_answer": ["once a day"] },
+    { "id": "fx-starter-liquid", "question": "There's a dark watery layer sitting on my starter, is something wrong?", "expected": ["sourdough starter"], "expected_answer": ["hungry", "hooch"] },
+    { "id": "fx-starter-spoiled", "question": "When should I throw my starter away?", "expected": ["sourdough starter"], "expected_answer": ["pink or orange"] },
+    { "id": "fx-tides-cause", "question": "What makes the ocean rise and fall during the day?", "expected": ["tides"], "expected_answer": ["moon's gravity"] },
+    { "id": "fx-tides-spring", "question": "Why are some high tides much bigger than others?", "expected": ["tides"], "expected_answer": ["spring tides"] },
+    { "id": "fx-photo-oxygen", "question": "Which molecule do plants break apart to give off oxygen?", "expected": ["Photosynthesis"], "expected_answer": ["splits water"] },
+    { "id": "fx-photo-sugar", "question": "Where in the chloroplast is carbon dioxide turned into sugar?", "expected": ["Photosynthesis"], "expected_answer": ["stroma"] },
+    { "id": "fx-fig-water", "question": "My indoor fig tree: how do I know it needs a drink?", "expected": ["Fiddle-leaf"], "expected_answer": ["top two inches"] },
+    { "id": "fx-fig-lean", "question": "My fig is growing crooked towards the window, how do I fix that?", "expected": ["Fiddle-leaf"], "expected_answer": ["quarter turn"] },
+    { "id": "fx-press-parts", "question": "What technologies did Gutenberg put together?", "expected": ["printing press"], "expected_answer": ["metal type", "screw press"] },
+    { "id": "fx-press-effects", "question": "What did cheap books do for ordinary people and scholars?", "expected": ["printing press"], "expected_answer": ["literacy"] },
+    { "id": "fx-rust-scope", "question": "How does Rust free memory without a garbage collector?", "expected": ["Rust ownership"], "expected_answer": ["dropped", "ownership"] },
+    { "id": "fx-rust-borrow", "question": "What rule does the borrow checker enforce about references?", "expected": ["Rust ownership"], "expected_answer": ["exactly one mutable reference"] },
+    { "id": "fx-run-first", "question": "I just started jogging, what should my first speed workout look like?", "expected": ["Interval training"], "expected_answer": ["six rounds"] },
+    { "id": "fx-run-sore", "question": "My legs are still tired two days after intervals, what should I change?", "expected": ["Interval training"], "expected_answer": ["cut a round"] },
+    { "id": "fx-chess-queen", "question": "Is it a good idea to attack with my queen in the first few moves?", "expected": ["Chess opening"], "expected_answer": ["easily chased"] },
+    { "id": "fx-chess-centre", "question": "Why do strong players care so much about the middle squares?", "expected": ["Chess opening"], "expected_answer": ["control more of the board"] },
+    { "id": "fx-compost-mix", "question": "How much cardboard versus food scraps should go into my compost bin?", "expected": ["composting"], "expected_answer": ["three parts browns"] },
+    { "id": "fx-compost-meat", "question": "Can leftover chicken go on the compost heap?", "expected": ["composting"], "expected_answer": ["attract rats"] },
+
+    { "id": "fx-long-raft-vote", "question": "How many votes does a server need to take over as the cluster's coordinator in Raft?", "expected": ["Raft"], "passage": "needs votes from a majority of the cluster", "expected_answer": ["majority of the cluster"] },
+    { "id": "fx-long-raft-timeout", "question": "Why don't all Raft nodes start an election at the same moment?", "expected": ["Raft"], "passage": "Election timeouts are randomised", "expected_answer": ["randomised"] },
+    { "id": "fx-long-raft-commit", "question": "At what point is a client command considered safe in Raft?", "expected": ["Raft"], "passage": "An entry is committed once a majority", "expected_answer": ["committed once a majority"] },
+    { "id": "fx-long-raft-snapshot", "question": "What does a Raft follower get if it is far behind the leader?", "expected": ["Raft"], "passage": "InstallSnapshot", "expected_answer": ["InstallSnapshot"] },
+    { "id": "fx-long-pg-jsonb", "question": "Which index should back a search over tags stored in an array column?", "expected": ["PostgreSQL indexes"], "passage": "right choice for full-text search vectors", "expected_answer": ["arrays and jsonb"] },
+    { "id": "fx-long-pg-ignored", "question": "My query on lower(email) is slow even though email has an index, why?", "expected": ["PostgreSQL indexes"], "passage": "Wrapping an indexed column in a function", "expected_answer": ["expression index"] },
+    { "id": "fx-long-pg-analyze", "question": "What should I run after importing millions of rows so queries plan well?", "expected": ["PostgreSQL indexes"], "passage": "running ANALYZE by hand", "expected_answer": ["ANALYZE"] },
+    { "id": "fx-long-http-nostore", "question": "Which caching directive keeps a page with bank details out of every cache?", "expected": ["HTTP caching"], "passage": "no-store is the directive", "expected_answer": ["no-store"] },
+    { "id": "fx-long-http-304", "question": "How can the browser avoid downloading a file again when it hasn't changed?", "expected": ["HTTP caching"], "passage": "replies 304 Not Modified", "expected_answer": ["304 Not Modified"] },
+    { "id": "fx-long-http-hashed", "question": "What cache lifetime suits bundles like app.3f9a1c.js?", "expected": ["HTTP caching"], "passage": "max-age=31536000, immutable", "expected_answer": ["31536000"] },
+
+    { "id": "fx-followup-raft", "question": "and what happens when servers join or leave?", "history": [{"role": "user", "content": "How does leader election work in Raft?"}, {"role": "assistant", "content": "A follower that times out becomes a candidate and needs a majority of votes."}], "expected": ["Raft"], "expected_answer": ["joint consensus"] },
+
+    { "id": "fx-none-mercury", "question": "What is the boiling temperature of liquid mercury?", "expected": [] },
+    { "id": "fx-none-tyre", "question": "How do I change a flat car tyre on the motorway?", "expected": [] },
+    { "id": "fx-none-worldcup", "question": "Who won the 1998 football world cup final?", "expected": [] }
+  ]
+}
