@@ -35,7 +35,7 @@ def test_auth_flow(clean_db) -> None:
     reg_data = resp.json()
     assert reg_data["success"] is True
     assert reg_data["data"]["email"] == "test_auth_user@example.com"
-    assert reg_data["data"]["email_verified"] is False
+    assert reg_data["data"]["email_verified"] is True
     assert "user_id" in reg_data["data"]
 
     # 2. Prevent duplicate registrations

@@ -75,9 +75,13 @@ export default function SignUp() {
     setErrors({});
 
     try {
-      await register(email, password, fullName.trim());
-      sessionStorage.setItem("pending_verify_email", email);
-      navigate("/verify-email", { state: { email } });
+      const emailVerified = await register(email, password, fullName.trim());
+      if (emailVerified) {
+        navigate("/onboarding");
+      } else {
+        sessionStorage.setItem("pending_verify_email", email);
+        navigate("/verify-email", { state: { email } });
+      }
     } catch (err) {
       const message = getApiErrorMessage(
         err,

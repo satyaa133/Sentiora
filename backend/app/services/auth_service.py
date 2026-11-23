@@ -70,14 +70,19 @@ class AuthService:
             privacy_consent_version=req.privacy_consent_version,
         )
 
-        try:
-            otp = generate_and_store_otp(user.email)
-            send_otp_email(user.email, otp)
-        except Exception:
-            import logging as _logging
-            _logging.getLogger(__name__).exception(
-                "OTP generation/send failed for %s — user created, verify manually", user.email
-            )
+        if self.settings.require_email_verification:
+            try:
+                otp = generate_and_store_otp(user.email)
+                send_otp_email(user.email, otp)
+            except Exception:
+                import logging as _logging
+
+                _logging.getLogger(__name__).exception(
+                    "OTP generation/send failed for %s — user created, verify manually",
+                    user.email,
+                )
+        else:
+            self.user_repo.mark_email_verified(user)
 
         return RegisterResponseData(
             user_id=user.id,

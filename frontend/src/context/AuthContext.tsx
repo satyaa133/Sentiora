@@ -11,7 +11,6 @@ import {
 import apiClient, { refreshAccessToken } from "../services/apiClient";
 import {
   broadcastAuthLogout,
-  broadcastAuthSync,
   clearAuthStorage,
   getAccessToken,
   getRefreshToken,
@@ -51,7 +50,7 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (email: string, password: string) => Promise<AuthUser>;
-  register: (email: string, password: string, fullName: string) => Promise<void>;
+  register: (email: string, password: string, fullName: string) => Promise<boolean>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<AuthUser | null>;
   completeOnboarding: (selectedSources: SourceId[]) => Promise<void>;
@@ -123,18 +122,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const accessToken = getAccessToken();
       const refreshToken = getRefreshToken();
       if (accessToken && refreshToken) {
-        const sessionData = {
-          accessToken,
-          refreshToken,
-          user: {
-            id: currentUser.id,
-            email: currentUser.email,
-            is_email_verified: currentUser.is_email_verified,
-            onboarding_completed: currentUser.onboarding_completed,
-          },
-        };
-        setAuthTokens(accessToken, refreshToken, sessionData.user);
-        broadcastAuthSync(sessionData);
+        setAuthTokens(accessToken, refreshToken, {
+          id: currentUser.id,
+          email: currentUser.email,
+          is_email_verified: currentUser.is_email_verified,
+          onboarding_completed: currentUser.onboarding_completed,
+        });
       }
 
       return hydrateSourcePreferences(currentUser);
@@ -251,15 +244,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(
     async (email: string, password: string, fullName: string) => {
-      await apiClient.post("/auth/register", {
+      const response = await apiClient.post<{
+        data: { email_verified: boolean };
+      }>("/auth/register", {
         email,
         password,
         full_name: fullName,
         // The notice shown on the sign-up page (D10); the API stores it.
         privacy_consent_version: PRIVACY_NOTICE_VERSION,
       });
+      const emailVerified = response.data.data.email_verified;
+      if (emailVerified) await login(email, password);
+      return emailVerified;
     },
-    [],
+    [login],
   );
 
   const logout = useCallback(async () => {
