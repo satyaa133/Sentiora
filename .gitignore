@@ -12,10 +12,13 @@ Desktop.ini
 .project
 .settings/
 
-# Secrets & Environment files
+# Environment files
+.env.local
 .env
 .env.*
-*.env
+!.env.example
+!.env.*.example
+.env.*.local
 *.pem
 *.key
 *.p12
@@ -24,11 +27,6 @@ Desktop.ini
 *.secret
 *.token
 *.credentials
-!.env.example
-!.env.production.example
-!backend/.env.example
-!frontend/.env.example
-!extension/.env.example
 
 # Node / Frontend build artifacts
 node_modules/

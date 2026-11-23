@@ -30,9 +30,14 @@ class UnsafeTestDatabaseError(RuntimeError):
 
 
 def _dotenv_value(key: str) -> str | None:
-    """Read a key from repo-root .env then backend/.env (backend wins), like Settings."""
+    """Read root/backend shared env, then local overrides, like Settings."""
     value: str | None = None
-    for env_file in (BACKEND_DIR.parent / ".env", BACKEND_DIR / ".env"):
+    for env_file in (
+        BACKEND_DIR.parent / ".env",
+        BACKEND_DIR / ".env",
+        BACKEND_DIR.parent / ".env.local",
+        BACKEND_DIR / ".env.local",
+    ):
         if not env_file.is_file():
             continue
         for raw in env_file.read_text(encoding="utf-8").splitlines():

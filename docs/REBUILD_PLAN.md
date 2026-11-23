@@ -632,7 +632,7 @@ responses keep the envelope.
 
 ## 9. Configuration changes
 
-Documented in `backend/.env.example` and `app/core/config.py` in the stage
+Documented in the root `.env.example` and `app/core/config.py` in the stage
 that adds them.
 
 | Setting | Default | Stage |
@@ -699,7 +699,7 @@ numbers where it has targets), and the owner has seen it.
 - Never commit to `main` directly. PRs need green CI and one review.
 - Don't run the containerised backend/worker next to `npm start` (port 8000 and
   queue conflicts).
-- Keep `backend/.env` private; never paste keys in chats, issues or docs.
+- Keep `.env` and `.env.local` private; never paste keys in chats, issues or docs.
 
 **For AI agents (in addition to `AGENTS.md`)**
 
