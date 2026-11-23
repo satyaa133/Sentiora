@@ -76,6 +76,8 @@ def main() -> int:
         "GROQ_API_KEY": "",
         "RATE_LIMIT_REGISTER_PER_MINUTE": "1000",
         "RATE_LIMIT_LOGIN_PER_MINUTE": "1000",
+        # E2E deliberately opens fresh tabs and exercises refresh-token rotation.
+        "RATE_LIMIT_REFRESH_PER_MINUTE": "1000",
         "RATE_LIMIT_CHAT_PER_MINUTE": "1000",
         "RATE_LIMIT_CHAT_PER_USER_PER_MINUTE": "1000",
     }

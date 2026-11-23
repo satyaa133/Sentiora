@@ -14,6 +14,7 @@ import {
   clearAuthStorage,
   getAccessToken,
   getRefreshToken,
+  getStoredSession,
   setAuthTokens,
 } from "../services/authStorage";
 import {
@@ -122,12 +123,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const accessToken = getAccessToken();
       const refreshToken = getRefreshToken();
       if (accessToken && refreshToken) {
-        setAuthTokens(accessToken, refreshToken, {
+        const userSession = {
           id: currentUser.id,
           email: currentUser.email,
           is_email_verified: currentUser.is_email_verified,
           onboarding_completed: currentUser.onboarding_completed,
-        });
+        };
+        const storedSession = getStoredSession();
+        if (
+          storedSession?.accessToken !== accessToken ||
+          storedSession.refreshToken !== refreshToken ||
+          storedSession.user?.id !== userSession.id ||
+          storedSession.user?.email !== userSession.email ||
+          storedSession.user?.is_email_verified !== userSession.is_email_verified ||
+          storedSession.user?.onboarding_completed !== userSession.onboarding_completed
+        ) {
+          setAuthTokens(accessToken, refreshToken, userSession);
+        }
       }
 
       return hydrateSourcePreferences(currentUser);
@@ -177,10 +189,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user?: unknown;
     }) => {
       if (sessionData?.accessToken && sessionData?.refreshToken) {
+        const user = sessionData.user as {
+          id?: string;
+          email?: string;
+          is_email_verified?: boolean;
+          onboarding_completed?: boolean;
+        } | undefined;
+        const storedSession = getStoredSession();
+        if (
+          getAccessToken() === sessionData.accessToken &&
+          getRefreshToken() === sessionData.refreshToken &&
+          storedSession?.user?.id === user?.id &&
+          storedSession?.user?.email === user?.email &&
+          storedSession?.user?.is_email_verified === user?.is_email_verified &&
+          storedSession?.user?.onboarding_completed === user?.onboarding_completed
+        ) {
+          return;
+        }
         setAuthTokens(
           sessionData.accessToken,
           sessionData.refreshToken,
-          sessionData.user as { id: string; email: string; is_email_verified?: boolean; onboarding_completed?: boolean } | undefined,
+          user as { id: string; email: string; is_email_verified?: boolean; onboarding_completed?: boolean } | undefined,
         );
         await fetchCurrentUser();
       }
