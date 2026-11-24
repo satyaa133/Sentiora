@@ -1,0 +1,88 @@
+# S9 load-test stack (REBUILD_PLAN D17). An override on docker-compose.prod.yml:
+# the same images, nginx, API and workers as production, with these changes:
+#   - its own Compose project (sentiora-load), so its database, Redis and
+#     volumes are separate from development and production
+#   - APP_ENVIRONMENT=loadtest and LLM_PROVIDER=fake (no AI provider is called)
+#   - per-IP rate limits raised: every k6 user comes from one container address;
+#     per-user limits stay as in production
+#   - a seed job and k6 (grafana/k6 in Docker), both behind the "load" profile
+# How to run it: scripts/load/README.md.
+
+name: sentiora-load
+
+x-load-env: &load-env
+  APP_ENVIRONMENT: loadtest
+  LLM_PROVIDER: fake
+  # The load stack must never reach a real provider, whatever the env file says.
+  OPENAI_API_KEY: ""
+  GEMINI_API_KEY: ""
+  GROQ_API_KEY: ""
+  OPENROUTER_API_KEY: ""
+  OPENROUTER_API_KEY_1: ""
+  OPENROUTER_API_KEY_2: ""
+  OPENROUTER_API_KEY_3: ""
+  OPENROUTER_API_KEY_4: ""
+  OPENROUTER_API_KEY_5: ""
+  SENTRY_DSN: ""
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+  LLM_MAX_CONCURRENT: ${LLM_MAX_CONCURRENT:-10}
+  RATE_LIMIT_LOGIN_PER_MINUTE: "100000"
+  RATE_LIMIT_REGISTER_PER_MINUTE: "100000"
+  RATE_LIMIT_CHAT_PER_MINUTE: "100000"
+  RATE_LIMIT_REFRESH_PER_MINUTE: "100000"
+  FAILED_LOGIN_MAX_ATTEMPTS: "100000"
+
+services:
+  migrate:
+    environment: *load-env
+
+  backend:
+    environment: *load-env
+
+  worker:
+    environment: *load-env
+
+  web:
+    # Reachable from this machine only, for a manual look during a run.
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-8090}:8080"
+
+  seed:
+    profiles: ["load"]
+    image: sentiora-backend:prod
+    command: ["python", "-m", "scripts.load_seed", "--users", "${LOAD_USERS:-500}"]
+    environment:
+      <<: *load-env
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentiora}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sentiora}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      EMBEDDING_PROVIDER: local
+      LOAD_USER_PASSWORD: ${LOAD_USER_PASSWORD:?LOAD_USER_PASSWORD is required}
+    volumes:
+      - ./backend/scripts:/app/backend/scripts:ro
+      - ./scripts/eval-rag:/app/scripts/eval-rag:ro
+    networks: [internal]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  k6:
+    profiles: ["load"]
+    image: grafana/k6:0.54.0
+    environment:
+      BASE_URL: http://web:8080
+      LOAD_USERS: ${LOAD_USERS:-500}
+      LOAD_USER_PASSWORD: ${LOAD_USER_PASSWORD}
+      RAMP: ${RAMP:-2m}
+      HOLD: ${HOLD:-10m}
+    command: ["run", "--summary-export", "/results/summary.json", "/scripts/sentiora.js"]
+    volumes:
+      - ./scripts/load:/scripts:ro
+      - ./scripts/eval-rag:/eval-rag:ro
+      - ./scripts/load/results:/results
+    networks: [internal]
+    depends_on:
+      web:
+        condition: service_healthy

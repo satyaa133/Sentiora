@@ -94,3 +94,6 @@ brain/
 
 # RAG reprocess script progress
 backend/.reprocess-checkpoint.json
+
+# Load-test output (S9); results are recorded in docs/TASKS.md
+scripts/load/results/
