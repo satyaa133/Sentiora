@@ -37,6 +37,7 @@ from scripts.eval_fixture import load_library
 EMAIL_PATTERN = "load-{index:04d}@example.com"
 EMAIL_LIKE = "load-%@example.com"
 TEMPLATE_EMAIL = "load-template@example.com"
+COPY_BATCH = 50
 
 # Columns copied from the template rows; ids, owners and generated columns are
 # set by the copy itself.
@@ -134,6 +135,10 @@ def _copy_library(template_id: uuid.UUID, user_ids: list[uuid.UUID]) -> None:
             )
         )
         db.commit()
+
+
+def _analyze() -> None:
+    with SessionLocal() as db:
         db.execute(text("ANALYZE memory_items; ANALYZE memory_chunks; ANALYZE memory_questions"))
         db.commit()
 
@@ -167,7 +172,12 @@ def main(argv: list[str] | None = None) -> int:
     user_ids = _create_users(args.users, password)
     print(f"Created {len(user_ids)} users ({time.monotonic() - started:.0f} s).")
 
-    _copy_library(template_id, user_ids)
+    # Batches keep each transaction (and Postgres's memory) small: one copy of
+    # 500 users' chunks with their vectors ran a 7 GB laptop out of memory.
+    for start in range(0, len(user_ids), COPY_BATCH):
+        _copy_library(template_id, user_ids[start : start + COPY_BATCH])
+        print(f"  copied {min(start + COPY_BATCH, len(user_ids))}/{len(user_ids)} users")
+    _analyze()
     with SessionLocal() as db:
         items = db.execute(
             select(MemoryItem.id).where(MemoryItem.user_id.in_(user_ids))
