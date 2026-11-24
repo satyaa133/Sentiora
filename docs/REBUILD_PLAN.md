@@ -139,6 +139,7 @@ Locked unless this file is changed:
 | D14 | **Question-bank leg has its own similarity bar (2026-11-22, owner).** `RAG_QUESTION_MIN_SIMILARITY` (0.60) instead of `RAG_MIN_SIMILARITY` (0.65): the local model scores a paraphrased question against a stored one at 0.60–0.67, so at 0.65 the leg added nothing. S6 eval (31 questions): 0.65 → hit@6 0.86, MRR 0.86, long-page 6/10; **0.60 → 0.93, 0.88, 8/10, reject 1.00**; 0.55 → reject 0.50 (narrow window, S8 eval-in-CI watches it). |
 | D15 | **Account deletion and the CI eval (2026-11-22, owner).** `DELETE /api/v1/users/me` with the current password removes the account and everything tied to it; Account Settings gets a Delete account button with a confirm step. CI evaluates retrieval on an original fixture library in the repo (`scripts/eval-rag/fixture/`, no copied articles or transcripts), embedded with the local model, against the section 2 targets; the dev-library eval stays a local command. |
 | D16 | **Reranker veto (2026-11-22, owner).** After reranking, a keyword-only candidate (no vector or question-bank match) that the local cross-encoder scores below `RAG_RERANK_MIN_SCORE` (-0.6) is dropped; when nothing is left the question is not covered. Vetoing every candidate also dropped right answers (dev library hit@6 0.96 → 0.88), so matches by meaning are left alone. Found in the S8 eval: questions about topics no longer saved matched pages on two common words ("single pass" in PR notes, "load balancers" in the API spec, "temperature" and "liquid" in a sourdough page). The floor is picked by the eval so answerable questions stay at or above the section 2 targets. |
+| D17 | **Load-test support (2026-11-24, owner).** S9 needs three things the code didn't have: (1) `DB_POOL_SIZE` and `DB_MAX_OVERFLOW`, so the connection pool per API process can be tuned (defaults 5 and 10, SQLAlchemy's own); (2) `LLM_PROVIDER=fake`, a built-in stand-in that streams a fixed cited answer after a short delay and never leaves the process, so Explain with AI can be load-tested at no cost. It is refused when `APP_ENVIRONMENT=production`; the load stack runs as `loadtest`, otherwise identical to production; (3) `scripts/load/`: a Compose override on `docker-compose.prod.yml` with its own project name (own database and volumes), per-IP rate limits raised because every k6 user comes from one address (per-user limits unchanged), and k6 run from the official `grafana/k6` Docker image. Laptop first (12 cores, 7.3 GB RAM); results there are indicative and the run is repeated on a server in S10. |
 | D10 | **Privacy notice at sign-up.** New users see the notice below and must accept it to create an account; the accepted version and time are stored. When the notice changes, signed-in users accept the new version before using AI features. The same text goes in the privacy policy (S10). |
 
 **Approved privacy notice (D10), version `2026-11-20`:**
@@ -538,6 +539,9 @@ security tests pass.
 - [ ] `scripts/load/` (k6): 500 signed-in virtual users browsing, 10% asking
       at once, 5% clicking Explain with AI (provider stubbed), on the
       production compose.
+- [ ] Load stack (D17): `DB_POOL_SIZE`/`DB_MAX_OVERFLOW`, `LLM_PROVIDER=fake`,
+      a Compose override with its own project and raised per-IP limits, a
+      seed script for 500 users with saves, k6 in Docker.
 - [ ] Pass: instant answer p95 < 1 s, zero 5xx, DB pool never exhausted,
       queue drains, memory stable.
 - [ ] Results and the server size used recorded in TASKS.md; tune
@@ -661,6 +665,9 @@ that adds them.
 | `RAG_EXTRACT_MIN_SCORE` | set by eval | S6 |
 | `RAG_QUESTION_MIN_SIMILARITY` | 0.60 (D14) | S6 |
 | `RAG_RERANK_MIN_SCORE` | -0.6 (S8 eval, D16); unset turns the veto off | S8 |
+| `DB_POOL_SIZE` | 5 per API or worker process (D17) | S9 |
+| `DB_MAX_OVERFLOW` | 10 (D17) | S9 |
+| `LLM_PROVIDER` | gains `fake`, refused in production (D17) | S9 |
 | `LLM_MAX_CONCURRENT` | 10 | S6 |
 | `ANSWER_CACHE_TTL_SECONDS` | 86400 | S6 |
 | `VITE_SENTRY_DSN` (root `.env`, build time) | unset (off) | S10 |
