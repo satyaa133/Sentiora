@@ -33,10 +33,13 @@ Clean-machine setup walkthrough and fixes for common problems.
 9. [RELEASE.md](RELEASE.md) - Release Guide
 Production Docker Compose deployment, Chrome Web Store packaging, and YouTube capture limits.
 
-10. [Capture_Module_v2_Technical_Design.pdf](Capture_Module_v2_Technical_Design.pdf) - Capture Module v2 Technical Design
+10. [GITHUB_SETUP.md](GITHUB_SETUP.md) - GitHub workflow and repository settings
+How issues, branches, pull requests and reviews work, the labels and milestones, and the settings a repository admin applies.
+
+11. [Capture_Module_v2_Technical_Design.pdf](Capture_Module_v2_Technical_Design.pdf) - Capture Module v2 Technical Design
 Extension capture and the capture API.
 
-11. [01_PRD_v2.1_FINAL.pdf](01_PRD_v2.1_FINAL.pdf) - Product Requirements Document
+12. [01_PRD_v2.1_FINAL.pdf](01_PRD_v2.1_FINAL.pdf) - Product Requirements Document
 Product vision and personas. Its scope is superseded: the Footprint and Shield modules were not built; the product is Memory + Ask (REBUILD_PLAN).
 
 ## Archive
