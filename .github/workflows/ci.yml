@@ -80,7 +80,7 @@ jobs:
       # Retrieval and instant-answer eval on the original fixture library
       # (REBUILD_PLAN S8, D15). Local CPU models only: no AI provider is called.
       - name: Cache local models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: backend/.models
           key: models-nomic-embed-text-v1.5-Q-jina-reranker-v1-tiny-en
