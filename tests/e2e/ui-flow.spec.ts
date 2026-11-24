@@ -1,7 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { readOtp } from "./otp";
-
 // Browser-driven flow through the real dashboard UI, against the isolated e2e
 // stack (test database, separate Redis DB, providers disabled → deterministic
 // grounded fallback answers). Complements the API-level mvp-flow spec.
@@ -20,16 +18,11 @@ function uniqueEmail(prefix: string): string {
 async function signUpAndOnboard(page: Page): Promise<void> {
   await page.goto("/signup");
   await page.getByLabel("Full name").fill("E2E UI User");
-  const email = uniqueEmail("e2e_ui");
-  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Email").fill(uniqueEmail("e2e_ui"));
   await page.getByLabel("Password", { exact: true }).fill("MemoryPassword123!");
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Create account" }).click();
 
-  // Sign-up now asks for the emailed code (OTP); the e2e stack stores it in Redis.
-  await expect(page).toHaveURL(/\/verify-email/);
-  await page.getByLabel("Verification code").fill(readOtp(email));
-  await page.getByRole("button", { name: "Verify email" }).click();
   // Walk the onboarding steps until Home opens.
   await expect(page).toHaveURL(/\/onboarding/);
   for (let step = 0; step < 6 && !/\/dashboard/.test(page.url()); step += 1) {

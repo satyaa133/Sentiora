@@ -25,7 +25,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
-      # Sign-up verification codes (OTP), queues and the answer cache.
+      # Queues, rate limits, the AI gate and the answer cache.
       redis:
         image: redis:7-alpine
         ports:

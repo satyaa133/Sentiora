@@ -28,7 +28,6 @@ os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # Never call live embedding providers from tests (index or query time), even if
 # real keys exist in the local .env files.
 os.environ["EMBEDDING_PROVIDER"] = "none"
-os.environ["REQUIRE_EMAIL_VERIFICATION"] = "false"
 # No real cross-encoder in tests; reranker tests install a fake one.
 os.environ["RERANKER_MODEL"] = "none"
 # Retrieval tests assume the default threshold, whatever a developer's .env says.
@@ -109,4 +108,3 @@ def reset_security_limiters(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "rate_limit_refresh_per_minute", 1000)
     monkeypatch.setattr(settings, "rate_limit_search_per_user_per_minute", 1000)
     monkeypatch.setattr(settings, "failed_login_max_attempts", 1000)
-    monkeypatch.setattr(settings, "require_email_verification", False)

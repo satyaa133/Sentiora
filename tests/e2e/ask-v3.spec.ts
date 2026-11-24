@@ -1,7 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-import { readOtp } from "./otp";
-
 // S7: the instant answer, Explain with AI, busy and feedback states, the memory
 // drawer, and the R7 accessibility list, in a real browser against the e2e
 // stack. That stack has no AI keys, so instant answers, ratings, renames and
@@ -26,15 +24,10 @@ async function signUp(page: Page): Promise<void> {
     "do not use it to train their models",
   );
   await page.getByLabel("Full name").fill("E2E Ask User");
-  const email = uniqueEmail("e2e_ask");
-  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Email").fill(uniqueEmail("e2e_ask"));
   await page.getByLabel("Password", { exact: true }).fill("MemoryPassword123!");
   await page.getByRole("checkbox", { name: /agree to the privacy notice/ }).check();
   await page.getByRole("button", { name: "Create account" }).click();
-  // Sign-up now asks for the emailed code (OTP); the e2e stack stores it in Redis.
-  await expect(page).toHaveURL(/\/verify-email/);
-  await page.getByLabel("Verification code").fill(readOtp(email));
-  await page.getByRole("button", { name: "Verify email" }).click();
   await expect(page).toHaveURL(/\/onboarding/);
   for (let step = 0; step < 6 && !/\/dashboard/.test(page.url()); step += 1) {
     await page.getByRole("button", { name: /^(Continue|Go to Home)/ }).first().click();
