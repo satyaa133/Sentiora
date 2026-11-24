@@ -99,3 +99,40 @@ def test_pool_settings_reach_the_engine(monkeypatch: pytest.MonkeyPatch) -> None
 def test_pool_settings_have_sqlalchemy_defaults() -> None:
     settings = _settings()
     assert (settings.db_pool_size, settings.db_max_overflow) == (5, 10)
+
+
+def test_warm_up_runs_each_local_model_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.services import warmup
+
+    calls: list[str] = []
+
+    class Adapter:
+        model_id = "local:nomic-ai/nomic-embed-text-v1.5-Q"
+
+        def embed_query(self, text: str) -> list[float]:
+            calls.append("embed")
+            return [0.0]
+
+    class Reranker:
+        def score_sentences(self, query: str, sentences: list[str]) -> list[float]:
+            calls.append("rerank")
+            return [0.0]
+
+    monkeypatch.setattr(warmup, "get_embedding_adapter", lambda: Adapter())
+    monkeypatch.setattr(warmup, "reranker_enabled", lambda: True)
+    monkeypatch.setattr(warmup, "get_reranker", lambda: Reranker())
+    assert warmup.warm_local_models() == ["embedding", "reranker"]
+    assert calls == ["embed", "rerank"]
+
+
+def test_warm_up_skips_models_that_are_off_and_never_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import warmup
+
+    def broken() -> None:
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(warmup, "get_embedding_adapter", broken)
+    monkeypatch.setattr(warmup, "reranker_enabled", lambda: False)
+    assert warmup.warm_local_models() == []

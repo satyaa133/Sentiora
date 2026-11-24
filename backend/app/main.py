@@ -1,8 +1,11 @@
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,13 +24,24 @@ from app.core.logging import configure_logging, request_id_var
 from app.core.metrics import HTTP_REQUEST_SECONDS, render_metrics
 from app.models import MemoryChunk, MemoryItem  # noqa: F401
 from app.schemas.envelope import response_meta
+from app.services.warmup import warm_local_models
 
 configure_logging()
 init_error_tracking("api")
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # Load the local models before the first request (S9): otherwise the first
+    # question after each start waits 3-5 s for them.
+    await run_in_threadpool(warm_local_models)
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.app_name,
     version=settings.app_version,
     docs_url="/docs" if settings.app_environment == "development" else None,

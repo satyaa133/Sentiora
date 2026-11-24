@@ -23,8 +23,8 @@ k6 runs from the official `grafana/k6` image; nothing is installed on the machin
 | Group | Share | What each user does |
 |---|---|---|
 | browse | 85% | Opens the dashboard (5 requests), polls the feed every 5 s like the web app, opens a save now and then, reloads about once a minute |
-| ask | 10% | Asks an instant question, reads for 3–8 s, asks another |
-| explain | 5% | Asks, then clicks Explain with AI (fake provider), waits 5–10 s |
+| ask | 10% | Asks an instant question, reads for 8–15 s, asks another (under the 10/min per-user limit) |
+| explain | 5% | Asks, then clicks Explain with AI (fake provider), waits 8–15 s |
 
 Ramp `RAMP` (2m) to all users, hold `HOLD` (10m), ramp down. Thresholds:
 `instant_answer_ms` p95 < 1000, `server_errors` = 0, feed p95 < 500 ms.

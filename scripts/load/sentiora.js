@@ -26,6 +26,7 @@ const QUESTIONS = new SharedArray("questions", () =>
 
 const serverErrors = new Counter("server_errors");
 const aiBusy = new Counter("ai_busy");
+const rateLimited = new Counter("rate_limited");
 const instantAnswer = new Trend("instant_answer_ms", true);
 const aiAnswer = new Trend("ai_answer_ms", true);
 
@@ -56,6 +57,7 @@ export const options = {
   thresholds: {
     instant_answer_ms: ["p(95)<1000"],
     server_errors: ["count==0"],
+    rate_limited: ["count==0"],
     "http_req_duration{name:feed}": ["p(95)<500"],
     "http_req_failed{scenario:browse}": ["rate<0.01"],
   },
@@ -154,8 +156,10 @@ function ask(mode) {
     mode === "ai" ? "ask_ai" : "ask_instant",
     { Accept: "text/event-stream" },
   );
-  if (res.status === 429 && mode === "ai") {
-    aiBusy.add(1);
+  if (res.status === 429) {
+    // AI_BUSY is the AI gate working as designed; any other 429 means a user
+    // went past the per-user Ask limit, which the think times should prevent.
+    (res.body && res.body.includes("AI_BUSY") ? aiBusy : rateLimited).add(1);
     return res;
   }
   const ok = check(res, {
@@ -183,13 +187,14 @@ export function browse() {
 export function askFlow() {
   if (!ensureSignedIn()) return sleep(5);
   ask("instant");
-  sleep(3 + Math.random() * 5); // reading the answer
+  // Reading the answer. Keeps each user under the per-user Ask limit (10/min).
+  sleep(8 + Math.random() * 7);
 }
 
 export function explainFlow() {
   if (!ensureSignedIn()) return sleep(5);
   ask("instant");
-  sleep(2 + Math.random() * 3);
+  sleep(3 + Math.random() * 4);
   ask("ai");
-  sleep(5 + Math.random() * 5);
+  sleep(8 + Math.random() * 7);
 }
