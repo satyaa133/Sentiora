@@ -519,16 +519,16 @@ reduced motion).
 
 ### S8 — Quality, security and privacy (3–4 days)
 
-- [ ] `npm run eval:rag` in CI with thresholds; a PR that lowers hit@6 or MRR
+- [x] `npm run eval:rag` in CI with thresholds; a PR that lowers hit@6 or MRR
       below target fails. Runs on the fixture library (D15).
-- [ ] Answer eval: `expected_answer` substrings in `questions.json`; metric
+- [x] Answer eval: `expected_answer` substrings in `questions.json`; metric
       "answer hit" for the instant answer.
-- [ ] Security tests: cross-user isolation on every new query (question bank,
+- [x] Security tests: cross-user isolation on every new query (question bank,
       cache keys), prompt-injection text inside saves, rate limits.
-- [ ] **Account deletion** removes memories, chunks, questions, feedback, usage
+- [x] **Account deletion** removes memories, chunks, questions, feedback, usage
       rows and cache keys (DPDP Act).
-- [ ] Verify YouTube capture in a real signed-in Chrome profile.
-- [ ] Windows: `npm run dev:backend` reload crash fixed or documented.
+- [x] Verify YouTube capture in a real signed-in Chrome profile.
+- [x] Windows: `npm run dev:backend` reload crash fixed or documented.
 
 **Done when:** CI runs lint, typecheck, unit, eval and E2E on every PR, and the
 security tests pass.
