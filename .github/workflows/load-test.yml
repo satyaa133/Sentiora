@@ -50,6 +50,8 @@ jobs:
             grep -E '^[A-Z_]+=' scripts/load/ci.env
           } > scripts/load/.env.load
           mkdir -p scripts/load/results
+          # k6 runs as a non-root user in its container and writes the summary here.
+          chmod 777 scripts/load/results
           {
             echo "### Settings"
             grep -E '^[A-Z_]+=' scripts/load/ci.env | sed 's/^/- /'

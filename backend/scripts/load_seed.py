@@ -167,6 +167,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         template_id = template.id
     saves = load_library(template_id)
+    # An active user's saves are already enriched (the fixture brings its own
+    # question bank). Left at "none", every Ask would queue enrichment for its
+    # sources, and with no Groq key in the load stack those jobs fail and
+    # retry: 18,000 jobs and 1.2 cores in S9 run 2, a cost production pays
+    # once per save, not on every question.
+    with SessionLocal() as db:
+        db.execute(
+            text(
+                "UPDATE memory_items SET enrichment_status = 'ready', enriched_at = now(), "
+                "enrichment_model = 'load-seed' WHERE user_id = :tpl"
+            ),
+            {"tpl": template_id},
+        )
+        db.commit()
     print(f"Template library: {saves} saves embedded ({time.monotonic() - started:.0f} s).")
 
     user_ids = _create_users(args.users, password)
