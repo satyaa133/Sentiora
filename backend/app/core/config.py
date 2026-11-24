@@ -10,7 +10,8 @@ from dotenv import dotenv_values
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-LLM_PROVIDERS = ("openai", "gemini", "openrouter", "groq")
+# "fake" streams a fixed answer without leaving the process: load tests only (D17).
+LLM_PROVIDERS = ("openai", "gemini", "openrouter", "groq", "fake")
 EMBEDDING_PROVIDER_CHOICES = ("auto", "openrouter", "openai", "gemini", "local", "none")
 # memory_chunks.embedding is vector(1536) in the migrations.
 VECTOR_DIMENSIONS = 1536
@@ -60,6 +61,10 @@ class Settings(BaseSettings):
     allow_test_email_domains: bool = False
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
+    # Connections each API or worker process keeps open, and how many more it may
+    # open under load (SQLAlchemy's defaults). Tuned by the S9 load test (D17).
+    db_pool_size: int = Field(default=5, ge=1, le=200)
+    db_max_overflow: int = Field(default=10, ge=0, le=200)
     redis_url: str = "redis://127.0.0.1:6379/0"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     # Reverse proxies whose X-Forwarded-For header is trusted for client IPs
@@ -254,6 +259,14 @@ class Settings(BaseSettings):
                     f"OpenRouter model {model!r} must look like 'vendor/model' "
                     "(OPENROUTER_CHAT_MODEL, OPENROUTER_FALLBACK_MODELS)"
                 )
+        if (
+            self.llm_provider.strip().lower() == "fake"
+            and self.app_environment.strip().lower() == "production"
+        ):
+            problems.append(
+                "LLM_PROVIDER=fake is for load tests only and is refused when "
+                "APP_ENVIRONMENT=production (D17)"
+            )
         if self.llm_cooldown_max_seconds < self.llm_key_cooldown_seconds:
             problems.append(
                 "LLM_COOLDOWN_MAX_SECONDS must be >= LLM_KEY_COOLDOWN_SECONDS"

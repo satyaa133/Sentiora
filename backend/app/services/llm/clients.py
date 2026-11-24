@@ -8,11 +8,12 @@ test suite replaces to block live calls) is the one used.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from openai import OpenAI
 
 from app.core.config import Settings, openrouter_fallback_list
+from app.services.llm.fake import FakeChatClient
 from app.services.llm_pool import OPENROUTER_PRIVACY, LLMBackend
 
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
@@ -40,6 +41,9 @@ def openai_compatible_client(
     client_cls: type[OpenAI] = OpenAI,
 ) -> tuple[OpenAI, Extra]:
     """Client and extra request arguments for an OpenAI-compatible backend."""
+    if backend.provider == "fake":
+        # Load tests only (D17): never leaves the process.
+        return cast(OpenAI, FakeChatClient()), Extra()
     if backend.provider == "groq":
         # gpt-oss models reason before answering; keep it short so the answer
         # fits max_tokens and starts quickly.
