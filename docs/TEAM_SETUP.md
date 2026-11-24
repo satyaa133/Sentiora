@@ -62,8 +62,8 @@ Don't start the `app` profile (`docker compose --profile app up`) at the same ti
 ## 5. Run
 
 ```bash
-npm start              # API on http://localhost:8000 + web app on http://localhost:5173
-npm run dev:worker     # second terminal: processes captures (reconnects if Redis restarts)
+npm start              # API on http://localhost:8000, the capture worker, and the web app on http://localhost:5173
+npm run dev:worker     # optional, another terminal: a second worker to process captures in parallel
 ```
 
 Check: `http://localhost:8000/health` returns `{"success":true,...}` and `http://localhost:5173` shows the landing page.
@@ -104,7 +104,7 @@ Two developers' local setups **never** share data. Use the shared remote environ
 |---|---|
 | Web app calls `localhost:8000` although you set a LAN URL | You edited `frontend/.env`. Put `VITE_API_BASE_URL` in the root `.env` and restart `npm start`. |
 | Browser console shows a CORS error | The page origin is missing from `CORS_ORIGINS` in `.env` or `.env.local`. Restart the API. |
-| Captures stay "pending" | `npm run dev:worker` isn't running, or Redis is down. The worker re-queues stale captures when it (re)connects. |
+| Captures stay "pending" ("Waiting" in the Timeline) | No worker is running (`npm start` starts one; `npm run dev:backend` alone does not), or Redis is down. A long video takes minutes: every chunk is embedded on your CPU. The worker re-queues stale captures when it (re)connects. |
 | Two things answer on port 8000 | Old `sentiora-backend` container: `docker compose --profile app stop backend worker`. |
 | `port is already allocated` on `docker compose up` | Another local Postgres/Redis. Change the relevant local port setting in `.env.local`. |
 | Extension says it can't reach the server | It was built with a different `VITE_API_BASE_URL`. Rebuild after editing the root `.env` and reload it in `chrome://extensions`. |
@@ -115,4 +115,6 @@ Two developers' local setups **never** share data. Use the shared remote environ
 | "Too many requests" (HTTP 429) | A per-minute limit was hit (`RATE_LIMIT_*` in `.env` or `.env.local`). Wait a minute, or raise the limit for local testing. |
 | Local `file://` PDFs are not captured | Chrome blocks extensions from file URLs by default. In `chrome://extensions` → Sentiora → **Details**, turn on **Allow access to file URLs**. |
 | Uploading a `.txt`/`.md` file on Sources fails | Known gap: the upload is sent as a `file://` web page, which the API refuses. Use the extension or **Add memory** instead. |
+| Checking YouTube capture by hand (S8) | Run `npm start` and `npm run dev:extension`, load `extension/dist` unpacked in your everyday signed-in Chrome profile, sign in to the extension, open a YouTube video with captions, click Save now, and check that the popup reaches "Ready" and that Ask can quote a line with its time. Repeat for a Short and a video whose captions are auto-generated. |
+| `npm run dev:backend` stops with "Terminate batch job (Y/N)?" or keeps old code after an edit (Windows) | Fixed in S8: `dev:backend` runs `backend/scripts/dev_server.py`, which restarts only the API process on changes in `backend/app` instead of using `uvicorn --reload` (whose Windows restart sends Ctrl+C to the whole console). |
 | Extension changes don't show up | `npm run dev:extension` rebuilds `extension/dist`, but Chrome needs the reload icon in `chrome://extensions`, then a page refresh. |

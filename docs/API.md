@@ -134,6 +134,7 @@ OpenAPI schema; nginx doesn't forward it).
 | PATCH | `/me/source-preferences` | Bearer | Update several sources |
 | PATCH | `/me/source-preferences/{source_id}` | Bearer | Update one source |
 | POST | `/me/onboarding/complete` | Bearer | Finish onboarding with initial sources |
+| DELETE | `/me` | Bearer | Delete the account and everything in it (D15). Body `{"password"}`; 401 `AUTH_INVALID_CREDENTIALS` when wrong (nothing deleted); rate-limited like sign-in. Removes memories, chunks, questions, feedback, AI usage rows, sessions, refresh tokens and the user's cached answers |
 | POST | `/me/privacy-consent` | Bearer | Accept the current privacy notice. Body `{"version"}` (must be current, 422 otherwise); returns `privacy_consent_version`, `privacy_consent_current` |
 
 **Privacy notice (D10, S7).** Sign-up stores the accepted notice version and

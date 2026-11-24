@@ -6,8 +6,10 @@ every sentence is quoted from a retrieved source and cited ``[S#]``.
 1. The reranked chunks are split into sentences (video transcripts, which have
    little punctuation, into lines of about ``_TRANSCRIPT_LINE_WORDS`` words with
    an estimated time).
-2. The cross-encoder scores each (question, sentence) pair; at most
-   ``MAX_SENTENCES`` sentences are scored, from the best chunks first.
+2. The cross-encoder scores each (question, title + sentence) pair; at most
+   ``MAX_SENTENCES`` sentences are scored, from the best chunks first. The
+   score gets a bonus for the question's keywords in the sentence and for
+   sentences from better-ranked chunks (``KEYWORD_WEIGHT``, ``RANK_WEIGHT``).
 3. The best ``MAX_QUOTES`` sentences scoring at least ``RAG_EXTRACT_MIN_SCORE``
    are kept, at most ``MAX_PER_SOURCE`` from one source; a short sentence brings
    its neighbour along so it reads on its own.
@@ -52,6 +54,14 @@ _TRANSCRIPT_LINE_WORDS = 28
 _KEYWORD_MIN_COVERAGE = 0.5
 # Two quotes sharing this share of words are one quote (overlapping windows).
 _DUPLICATE_OVERLAP = 0.8
+# How a sentence is judged (S8, measured with eval:rag --answers): the
+# cross-encoder reads the save's title before the sentence, and the score gets
+# a bonus for the question's keywords in the sentence and for sentences from
+# better-ranked chunks. Only the sentence itself is quoted. Fixture answer hit
+# 0.63 -> 0.77 with rejects unchanged; the previous sentence as extra context
+# and a rank weight of 1 both did worse.
+KEYWORD_WEIGHT = 2.0
+RANK_WEIGHT = 0.5
 
 # "What is X about?", "What does X cover?": asks for an overview of a save.
 _ABOUT_RE = re.compile(
@@ -175,6 +185,21 @@ def _duplicate(a: str, b: str) -> bool:
     return len(wa & wb) / min(len(wa), len(wb)) >= _DUPLICATE_OVERLAP
 
 
+def _scoring_text(sentence: Sentence, chunks: Sequence[RetrievedChunk]) -> str:
+    """What the cross-encoder reads for one sentence: the save's title, then the sentence."""
+    title = chunks[sentence.source - 1].title.strip()
+    return f"{title}\n{sentence.text}" if title else sentence.text
+
+
+def _blend(question: str, sentence: Sentence, score: float) -> float:
+    """Reranker score plus the question's keywords and the chunk's retrieval rank."""
+    return (
+        score
+        + KEYWORD_WEIGHT * keyword_coverage(question, sentence.text)
+        + RANK_WEIGHT / sentence.source
+    )
+
+
 def _default_scorer() -> tuple[Scorer, float | None]:
     """The cross-encoder, or keyword coverage when it is off (with its own bar)."""
     reranker = get_reranker()
@@ -198,19 +223,31 @@ def extract_answer(
     if not sentences:
         return ExtractedAnswer(None, [], None)
     threshold = min_score
+    # Context and blending only apply to the cross-encoder: a given scorer
+    # (tests, the threshold sweep) and the keyword fallback score bare text.
+    reranking = False
     if scorer is None:
         scorer, keyword_bar = _default_scorer()
+        reranking = keyword_bar is None
         if keyword_bar is not None:
             threshold = keyword_bar
+    texts = (
+        [_scoring_text(s, chunks) for s in sentences]
+        if reranking
+        else [s.text for s in sentences]
+    )
     try:
         with observe_stage("extract"):
-            scores = scorer(question, [s.text for s in sentences])
+            scores = scorer(question, texts)
     except Exception:
         logger.warning("Sentence scoring failed; using keyword overlap", exc_info=True)
         scores = [keyword_coverage(question, s.text) for s in sentences]
         threshold = _KEYWORD_MIN_COVERAGE
+        reranking = False
     if len(scores) != len(sentences):
         raise RuntimeError("The scorer returned the wrong number of scores.")
+    if reranking:
+        scores = [_blend(question, s, score) for s, score in zip(sentences, scores, strict=True)]
 
     ranked = sorted(zip(sentences, scores, strict=True), key=lambda pair: -pair[1])
     best = ranked[0][1]

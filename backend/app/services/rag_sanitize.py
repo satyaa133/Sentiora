@@ -14,6 +14,9 @@ _ROLE_SPOOF_RE = re.compile(
     r"(?im)^\s*(system|assistant|developer|instruction)\s*:\s*"
 )
 _DELIMITER_RE = re.compile(r"```+|<<<+|>>>+")
+# Our own prompt markers: a save that contains them could fake the end of its
+# data block (found in the S8 security tests).
+_MARKER_SPOOF_RE = re.compile(r"(?i)\b(BEGIN|END)[\s_-]*UNTRUSTED[\s_-]*MEMORY[\s_-]*DATA\b")
 
 
 def sanitize_untrusted_text(text: str) -> str:
@@ -21,6 +24,7 @@ def sanitize_untrusted_text(text: str) -> str:
     cleaned = (text or "").replace("\x00", "")
     cleaned = _ZERO_WIDTH_RE.sub("", cleaned)
     cleaned = _DELIMITER_RE.sub(" ", cleaned)
+    cleaned = _MARKER_SPOOF_RE.sub("[marker removed]", cleaned)
     cleaned = _ROLE_SPOOF_RE.sub(r"[\1] ", cleaned)
     return cleaned.strip()
 

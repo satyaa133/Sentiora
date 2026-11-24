@@ -4,7 +4,7 @@ import { Button, IconAlert, TextField } from "@shared/ui";
 import AuthLayout from "../components/AuthLayout";
 import PasswordField from "../components/PasswordField";
 import { useAuth } from "../context/AuthContext";
-import apiClient, { getApiErrorMessage } from "../services/apiClient";
+import { getApiErrorMessage } from "../services/apiClient";
 
 export default function Login() {
   const { login } = useAuth();
@@ -43,18 +43,7 @@ export default function Login() {
     try {
       const currentUser = await login(email, password);
       navigate(currentUser.onboarding_completed ? "/dashboard" : "/onboarding");
-    } catch (err: unknown) {
-      const code = (err as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code;
-      if (code === "AUTH_EMAIL_NOT_VERIFIED") {
-        sessionStorage.setItem("pending_verify_email", email);
-        try {
-          await apiClient.post("/auth/resend-otp", { email });
-        } catch {
-          // Ignore cooldown errors — an OTP from register may still be valid
-        }
-        navigate("/verify-email", { state: { email } });
-        return;
-      }
+    } catch (err) {
       setErrors({
         general: getApiErrorMessage(err, "Something went wrong. Please try again."),
       });

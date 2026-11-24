@@ -11,11 +11,11 @@
     "shared"
   ],
   "scripts": {
-    "start": "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"cyan,magenta\" \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "start": "concurrently --names \"BACKEND,WORKER,FRONTEND\" --prefix-colors \"cyan,yellow,magenta\" \"npm run dev:backend\" \"npm run dev:worker\" \"npm run dev:frontend\"",
     "dev:frontend": "npm run dev --workspace frontend",
     "dev:extension": "npm run dev --workspace extension",
     "dev:shared": "npm run dev --workspace shared",
-    "dev:backend": "node scripts/run-python.mjs -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
+    "dev:backend": "node scripts/run-python.mjs -m scripts.dev_server --host 127.0.0.1 --port 8000",
     "dev:worker": "node scripts/run-python.mjs -m app.workers.worker",
     "build": "npm run build:frontend && npm run build:extension && npm run build:shared",
     "build:frontend": "npm run build --workspace frontend",
@@ -52,6 +52,7 @@
     "compose:down": "docker compose down",
     "check:secrets": "node scripts/check-client-secrets.mjs",
     "eval:rag": "node scripts/run-python.mjs -m scripts.eval_rag",
+    "eval:rag:ci": "node scripts/run-python.mjs -m scripts.eval_rag --fixture --answers --quiet --fail-under hit=0.95,mrr=0.90,answer=0.75,reject=1.0",
     "docs:api": "node scripts/run-python.mjs -m scripts.export_openapi"
   },
   "devDependencies": {

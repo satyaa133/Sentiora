@@ -25,6 +25,17 @@ jobs:
           --health-timeout 5s
           --health-retries 5
 
+      # Queues, rate limits, the AI gate and the answer cache.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -66,12 +77,37 @@ jobs:
           DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
         run: npm run test
 
+      # Retrieval and instant-answer eval on the original fixture library
+      # (REBUILD_PLAN S8, D15). Local CPU models only: no AI provider is called.
+      - name: Cache local models
+        uses: actions/cache@v4
+        with:
+          path: backend/.models
+          key: models-nomic-embed-text-v1.5-Q-jina-reranker-v1-tiny-en
+
+      - name: Retrieval and answer eval (fixture library)
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
+          EMBEDDING_PROVIDER: local
+          LOCAL_EMBEDDING_MODEL: nomic-ai/nomic-embed-text-v1.5-Q
+          RERANKER_MODEL: jinaai/jina-reranker-v1-tiny-en
+          RAG_MIN_SIMILARITY: "0.65"
+          RAG_QUESTION_MIN_SIMILARITY: "0.60"
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: |
+          cd backend
+          python -c "from app.services.embedding_service import download_local_model; download_local_model()"
+          python -c "from app.services.retrieval.reranker import download_reranker; download_reranker()"
+          cd ..
+          npm run eval:rag:ci
+
       - name: Install Playwright
         run: npx playwright install --with-deps chromium
 
       - name: End-to-end API flow
         env:
           DATABASE_URL: postgresql+psycopg://postgres:CHANGE_ME_LOCAL_DEV@localhost:5432/Sentiora
+          REDIS_URL: redis://localhost:6379/0
         run: npm run test:e2e
 
       - name: Build

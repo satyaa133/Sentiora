@@ -179,3 +179,36 @@ def test_real_reranker_prefers_the_answering_passage(monkeypatch: pytest.MonkeyP
         ],
     )
     assert scores[0] > scores[1]
+
+
+# -- veto (D16) ---------------------------------------------------------------
+
+
+def _keyword_only(content: str) -> RetrievedChunk:
+    from dataclasses import replace
+
+    return replace(_chunk(uuid4(), content, 0.0), distance=None, lexical=True, rank=3.0)
+
+
+def test_veto_drops_keyword_only_hits_the_reranker_rejects(monkeypatch: pytest.MonkeyPatch) -> None:
+    # "single pass" in PR notes is not an answer to a YOLO question.
+    stray = _keyword_only("this must pass completely in a single run of the checks")
+    service = _service(monkeypatch, _KeywordReranker("yolo"), rag_rerank_min_score=-0.6)
+    assert service._select([], [stray], limit=6, per_memory=2, query="how does yolo detect objects in a single pass") == []
+
+
+def test_veto_keeps_meaning_matches_and_keyword_hits_it_likes(monkeypatch: pytest.MonkeyPatch) -> None:
+    by_meaning = _chunk(uuid4(), "object detectors look at the image once", 0.30)  # scores -5 but matched by vector
+    keyword_hit = _keyword_only("yolo divides the image into a grid")  # scores +5
+    stray = _keyword_only("this must pass completely")  # scores -5, keywords only
+    service = _service(monkeypatch, _KeywordReranker("yolo"), rag_rerank_min_score=-0.6)
+    picked = service._select(
+        [by_meaning], [keyword_hit, stray], limit=6, per_memory=2, query="yolo single pass"
+    )
+    assert {c.chunk_id for c in picked} == {by_meaning.chunk_id, keyword_hit.chunk_id}
+
+
+def test_veto_is_off_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    stray = _keyword_only("this must pass completely")
+    service = _service(monkeypatch, _KeywordReranker("yolo"), rag_rerank_min_score=None)
+    assert [c.chunk_id for c in service._select([], [stray], limit=6, per_memory=2, query="q")] == [stray.chunk_id]

@@ -61,15 +61,6 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     database_url: str = DEFAULT_DATABASE_URL
     redis_url: str = "redis://127.0.0.1:6379/0"
-    # Email Delivery (Resend API or SMTP)
-    resend_api_key: str | None = None
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_user: str = ""
-    smtp_password: str = ""
-    smtp_from_email: str = "noreply@sentiora.app"
-    smtp_from_name: str = "Sentiora"
-    require_email_verification: bool = True
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
     # Reverse proxies whose X-Forwarded-For header is trusted for client IPs
     # (rate limiting). Empty = ignore X-Forwarded-For entirely.
@@ -173,6 +164,10 @@ class Settings(BaseSettings):
     # Cosine similarity a vector hit needs to count as relevant. When no hit
     # clears it and no full-text hit matches, the question is "not covered".
     rag_min_similarity: float = Field(default=0.25, ge=0.0, le=1.0)
+    # Reranker veto (D16): a keyword-only candidate the cross-encoder scores
+    # below this is dropped. Chosen by the S8 eval with the jina reranker;
+    # unset (or a reranker that is off) turns the veto off.
+    rag_rerank_min_score: float | None = -0.6
     # Cosine similarity a stored enrichment question needs for its chunk to join
     # the question-bank leg (D14). Question-to-question scores run lower than
     # question-to-passage ones with the local model; 0.55 let unrelated

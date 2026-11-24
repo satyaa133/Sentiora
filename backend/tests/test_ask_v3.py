@@ -527,3 +527,41 @@ def test_settings_document_the_s6_defaults() -> None:
     assert settings.llm_max_concurrent == 10
     assert settings.answer_cache_ttl_seconds == 86400
     assert settings.rag_question_min_similarity == 0.60
+
+
+# -- sentence choice (S8: title context and blended score) -----------------------
+
+
+class _RecordingReranker:
+    """Fake cross-encoder: scores every text the same and records what it read."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    def score_sentences(self, question: str, texts: Sequence[str]) -> list[float]:
+        self.seen.extend(texts)
+        return [0.0 for _ in texts]
+
+
+def test_the_reranker_reads_the_title_but_only_the_sentence_is_quoted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _RecordingReranker()
+    monkeypatch.setattr(extractive, "get_reranker", lambda: fake)
+    chunk = _chunk(ARTICLE, title="Keeping bees")
+    answer = extract_answer("Why do beekeepers use cool smoke?", [chunk], 0.0)
+    assert all(text.startswith("Keeping bees\n") for text in fake.seen)
+    assert answer.text is not None and "Keeping bees" not in answer.text
+
+
+def test_keywords_break_a_tie_the_reranker_cannot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(extractive, "get_reranker", lambda: _RecordingReranker())
+    chunk = _chunk(
+        "Inspections are best done on warm, still afternoons when foragers are out. "
+        "Varroa mites are the main pest of honey bees and are counted with a sugar roll."
+    )
+    # Equal reranker scores: only the sentence with the question's keywords
+    # clears the bar once the keyword bonus is added.
+    answer = extract_answer("How are varroa mites counted?", [chunk], 1.5)
+    assert answer.text is not None
+    assert answer.text.startswith("Varroa mites") and "Inspections" not in answer.text

@@ -313,6 +313,21 @@ class RetrievalService:
         except Exception:
             logger.warning("Reranking failed; using fused order", exc_info=True)
             return None
+        floor = getattr(self.settings, "rag_rerank_min_score", None)
+        if floor is not None:
+            # Veto (D16): a keyword-only candidate (no vector or question-bank
+            # match) that the cross-encoder reads as unrelated is dropped: the
+            # S8 false matches were keyword hits on two common words. Vetoing
+            # every candidate also dropped right answers (S8 eval).
+            kept = [
+                (c, s)
+                for c, s in zip(candidates, raw, strict=True)
+                if s >= float(floor) or c.distance is not None
+            ]
+            if not kept:
+                return [], {}
+            candidates = [c for c, _ in kept]
+            raw = [s for _, s in kept]
         low, high = min(raw), max(raw)
         span = (high - low) or 1.0
         scaled = {c.chunk_id: (s - low) / span for c, s in zip(candidates, raw, strict=True)}
@@ -367,6 +382,8 @@ class RetrievalService:
         reranked = self._rerank(query, ranked, limit)
         if reranked is not None:
             ranked, scores = reranked
+            if not ranked:  # the reranker vetoed every candidate
+                return []
         leaders = {c.memory_id for c in ranked[:limit]}
         if len(leaders) == 1 and per_memory < limit:
             # One save holds every top candidate: it is the match. Use more of

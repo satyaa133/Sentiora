@@ -57,16 +57,7 @@ GROQ_CHAT_MODEL=llama-3.3-70b-versatile
 
 # ── Embeddings & Reranker (Self-contained Local CPU) ───────────────────────
 EMBEDDING_PROVIDER=local
-RERANKER_MODEL=ms-marco-MiniLM-L-6-v2
-
-# ── Email OTP Verification ─────────────────────────────────────────────────
-# Set to false for rapid dev velocity; set to true when testing live email OTP delivery
-REQUIRE_EMAIL_VERIFICATION=false
-RESEND_API_KEY=
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=465
-SMTP_USER=
-SMTP_PASSWORD=
+RERANKER_MODEL=jinaai/jina-reranker-v1-tiny-en
 
 # ── Frontend & Extension Build Config ──────────────────────────────────────
 VITE_API_BASE_URL=http://localhost:8000
@@ -101,7 +92,7 @@ cd backend && .venv/bin/alembic upgrade head && cd ..
 
 ### 3. Run Development Servers
 
-Run the backend API and frontend Vite server together:
+Run the backend API, the capture worker and the frontend Vite server together:
 
 ```bash
 npm start
@@ -110,7 +101,7 @@ npm start
 - Backend API Docs: `http://localhost:8000/docs`
 - Prometheus Metrics: `http://localhost:8000/metrics`
 
-In a separate terminal, run the capture and enrichment background worker:
+Without a worker, saves stay "Waiting" in the Timeline. To run a second worker in parallel (or the worker on its own), use:
 
 ```bash
 npm run dev:worker
@@ -167,7 +158,7 @@ Sentiora/
 ├── backend/              FastAPI backend service
 │   ├── alembic/          Schema migration scripts (head: 010_privacy_consent)
 │   ├── app/              API routes, core security, services, models, workers
-│   └── tests/            Pytest suite (auth, OTP, RAG retrieval, chunking)
+│   └── tests/            Pytest suite (auth, RAG retrieval, chunking, security)
 ├── frontend/             Vite + React 18 dashboard web application
 │   └── src/              Pages, components, auth context, hooks, API client
 ├── extension/            Chrome MV3 extension

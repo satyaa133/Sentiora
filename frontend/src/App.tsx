@@ -16,7 +16,6 @@ const Login = lazy(() => import("./pages/Login"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const SignUp = lazy(() => import("./pages/SignUp"));
-const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 
 // UI kit gallery, development builds only (tree-shaken from production).
 const ComponentsGallery = import.meta.env.DEV
@@ -33,7 +32,6 @@ export default function App() {
               <Route index element={<LandingPage />} />
               <Route path="login" element={<Login />} />
               <Route path="signup" element={<SignUp />} />
-              <Route path="verify-email" element={<VerifyEmail />} />
               <Route path="forgot-password" element={<ForgotPassword />} />
               <Route
                 path="onboarding"

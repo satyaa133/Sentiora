@@ -8,7 +8,7 @@ import { getApiErrorMessage } from "../services/apiClient";
 import { isTrustedEmail } from "../utils/trustedEmail";
 
 export default function SignUp() {
-  const { register } = useAuth();
+  const { register, login } = useAuth();
   const navigate = useNavigate();
 
   const [fullName, setFullName] = useState("");
@@ -76,8 +76,9 @@ export default function SignUp() {
 
     try {
       await register(email, password, fullName.trim());
-      sessionStorage.setItem("pending_verify_email", email);
-      navigate("/verify-email", { state: { email } });
+      // Auto-login after registration and navigate to onboarding first
+      await login(email, password);
+      navigate("/onboarding");
     } catch (err) {
       const message = getApiErrorMessage(
         err,

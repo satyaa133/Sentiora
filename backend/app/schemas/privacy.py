@@ -5,3 +5,9 @@ class PrivacyConsentRequest(BaseModel):
     """The privacy notice version the user accepted (D10)."""
 
     version: str = Field(min_length=1, max_length=32)
+
+
+class DeleteAccountRequest(BaseModel):
+    """The current password, so a left-open session can't delete the account (D15)."""
+
+    password: str = Field(min_length=1, max_length=256)
