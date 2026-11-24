@@ -37,8 +37,8 @@ DEFAULT_DATABASE_URL = (
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # Load repo-root .env first, then backend/.env so local backend settings win.
-        env_file=("../.env", ".env"),
+        # Load shared values first, then local overrides; process env always wins.
+        env_file=("../.env", ".env", "../.env.local", ".env.local"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

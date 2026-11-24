@@ -223,9 +223,9 @@ A missing AI key is not an error: Ask then answers from memory without a model.
 or AI provider URL appears in `frontend/`, `extension/` or `shared/` sources or
 builds, and the Vite configs only bundle `VITE_*` variables.
 `npm run check:secrets` (`scripts/check-client-secrets.mjs`) enforces this and
-runs in CI after the build. Keep AI keys in `backend/.env`; the repo-root `.env`
-is also read by Vite (only `VITE_*` names are exposed), so a mistaken `VITE_`
-prefix there would leak a key.
+runs in CI after the build. Keep AI keys in ignored `.env.local` files; the
+repo-root `.env` is also read by Vite (only `VITE_*` names are exposed), so a
+mistaken `VITE_` prefix there would leak a key.
 
 ## R7 — Ask Sentiora page
 

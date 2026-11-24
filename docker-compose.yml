@@ -52,7 +52,11 @@ services:
     profiles: ["app"]
     command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     env_file:
-      - ./backend/.env
+      - ./.env
+      - path: ./.env.local
+        required: false
+      - path: ./backend/.env.local
+        required: false
     environment:
       APP_NAME: ${APP_NAME:-Sentiora Backend}
       APP_VERSION: ${APP_VERSION:-0.1.0}
@@ -78,7 +82,11 @@ services:
     profiles: ["app"]
     command: ["python", "-m", "app.workers.worker"]
     env_file:
-      - ./backend/.env
+      - ./.env
+      - path: ./.env.local
+        required: false
+      - path: ./backend/.env.local
+        required: false
     environment:
       APP_NAME: ${APP_NAME:-Sentiora Backend}
       APP_VERSION: ${APP_VERSION:-0.1.0}
