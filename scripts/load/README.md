@@ -22,7 +22,7 @@ k6 runs from the official `grafana/k6` image; nothing is installed on the machin
 
 | Group | Share | What each user does |
 |---|---|---|
-| browse | 85% | Opens the dashboard (5 requests), polls the feed every 5 s like the web app, opens a save now and then, reloads about once a minute |
+| browse | 85% | Opens the dashboard (5 requests) about once a minute, reloads the feed when the tab is focused again, opens a save now and then. The web app polls the feed only while a save is processing; the seeded saves are all ready. |
 | ask | 10% | Asks an instant question, reads for 8–15 s, asks another (under the 10/min per-user limit) |
 | explain | 5% | Asks, then clicks Explain with AI (fake provider), waits 8–15 s |
 

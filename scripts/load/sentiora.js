@@ -2,8 +2,9 @@
 // stack; see scripts/load/README.md.
 //
 // LOAD_USERS signed-in users, each its own seeded account (load-0001@example.com…):
-//   browse  85%  open the dashboard, poll the feed every 5 s like the web app,
-//                open a save now and then, reload about once a minute
+//   browse  85%  open the dashboard about once a minute, reload the feed on
+//                tab focus, open a save now and then (the web app polls only
+//                while a save is processing)
 //   ask     10%  ask an instant question, read it, ask another
 //   explain  5%  ask, then click Explain with AI (fake provider)
 // Ramp RAMP, hold HOLD, ramp down. Pass/fail thresholds are the plan's targets.
@@ -174,11 +175,13 @@ function ask(mode) {
 export function browse() {
   if (!ensureSignedIn()) return sleep(5);
   loadDashboard();
-  // About a minute on the page: the feed polls every 5 s; sometimes a save is opened.
-  for (let tick = 0; tick < 12; tick++) {
-    sleep(5);
-    pollFeed();
-    if (session.items.length && Math.random() < 0.15) {
+  // About a minute on the page. The web app polls the feed only while a save
+  // is processing (S9); the seeded saves are all ready, so the feed reloads
+  // when the user comes back to the tab, and saves get opened now and then.
+  for (let tick = 0; tick < 4; tick++) {
+    sleep(15);
+    if (Math.random() < 0.3) pollFeed(); // tab focused again
+    if (session.items.length && Math.random() < 0.3) {
       api("GET", `/memory-items/${pick(session.items)}`, null, "memory_detail");
     }
   }

@@ -2,6 +2,17 @@ import { useCallback, useEffect, useState } from "react";
 import { deleteMemoryItem, fetchMemoryItems } from "../services/memoryService";
 import type { MemoryItem } from "../types/memory";
 
+export const FEED_POLL_MS = 5000;
+
+/** A save still being captured, or whose AI summary is queued. */
+export function isInProgress(item: MemoryItem): boolean {
+  return (
+    item.status === "pending" ||
+    item.status === "processing" ||
+    item.enrichment_status === "queued"
+  );
+}
+
 export function useMemoryFeed() {
   const [items, setItems] = useState<MemoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -50,12 +61,22 @@ export function useMemoryFeed() {
     }
   }, [showToast]);
 
+  // Poll only while something is still being worked on (S9): a save being
+  // captured or a summary being written. Polling every 5 s regardless was 78%
+  // of all API traffic at 500 users. New saves still show up: the extension
+  // announces them (refresh events below), and coming back to the tab reloads.
+  const hasWorkInProgress = items.some(isInProgress);
+
   useEffect(() => {
-    void loadMemoryFeed();
-    // Poll so new captures appear, but not while the tab is in the background.
+    if (!hasWorkInProgress) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void loadMemoryFeed(true);
-    }, 5000);
+    }, FEED_POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [hasWorkInProgress, loadMemoryFeed]);
+
+  useEffect(() => {
+    void loadMemoryFeed();
 
     const handleFocus = () => {
       if (document.visibilityState === "visible") void loadMemoryFeed(true);
@@ -99,7 +120,6 @@ export function useMemoryFeed() {
     winChrome?.runtime?.onMessage?.addListener(listener);
 
     return () => {
-      window.clearInterval(interval);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleFocus);
       window.removeEventListener("sentiora_memory_refresh", handleRefreshEvent);
