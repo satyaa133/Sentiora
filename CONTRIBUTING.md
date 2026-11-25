@@ -8,6 +8,11 @@ See `README.md` for local setup and running the app.
 - Commit style: `feat: add memory CRUD endpoints` (Conventional Commits)
 - Keep PRs focused — one feature or fix per PR
 - Run `npm run lint:*`, `npm run typecheck:*`, and `npm run test:*` before pushing
+- Never push to `main`: open a pull request, fill in its checklist, get green CI
+  and one code owner's approval, then squash-merge
+- Label issues and PRs with their stage (`stage:S9`) and add them to the stage milestone
+- The full workflow, labels and admin settings are in `docs/GITHUB_SETUP.md`;
+  security problems go through `SECURITY.md`, never a public issue
 
 ## Rules
 

@@ -1,0 +1,30 @@
+name: Task
+description: A piece of planned work from a rebuild stage.
+labels: ["type: task"]
+body:
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Stage
+      description: From docs/REBUILD_PLAN.md. Work outside the plan needs a plan change first.
+      options:
+        - S8
+        - S9
+        - S10
+        - Later (after launch)
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: What needs doing
+      description: Quote or link the plan item this comes from.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      placeholder: "- Tests pass\n- TASKS.md updated"
+    validations:
+      required: true

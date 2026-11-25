@@ -1,0 +1,10 @@
+# Reviewers GitHub requests automatically on every pull request.
+# With "Require review from Code Owners" on main, one of them must approve.
+*                     @Vansh2802 @satyaa133
+
+# Plan, schema and API contract changes need both owners to know about them.
+/docs/REBUILD_PLAN.md @Vansh2802 @satyaa133
+/docs/DATABASE.md     @Vansh2802 @satyaa133
+/docs/API.md          @Vansh2802 @satyaa133
+/backend/alembic/     @Vansh2802 @satyaa133
+/.github/             @Vansh2802 @satyaa133
