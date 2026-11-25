@@ -27,7 +27,7 @@ jobs:
       L: docker compose -f docker-compose.prod.yml -f scripts/load/docker-compose.load.yml --env-file scripts/load/.env.load
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Runner size
         run: |
