@@ -1,4 +1,4 @@
-FROM postgres:16-alpine
+FROM postgres:18-alpine
 
 RUN apk add --no-cache --virtual .build-deps git build-base clang llvm postgresql16-dev \
     && git clone --branch v0.8.1 https://github.com/pgvector/pgvector.git /tmp/pgvector \
